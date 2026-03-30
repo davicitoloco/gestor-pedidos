@@ -20,7 +20,7 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function statusBadge(s) {
-  const cls = { 'Pendiente':'warning','En preparación':'info','Entregado':'success','Cancelado':'default' };
+  const cls = { 'Pendiente':'warning','En preparación':'info','Entregado':'success','Cancelado':'default','Entrega parcial':'partial' };
   return `<span class="badge badge-${cls[s]||'default'}">${esc(s)}</span>`;
 }
 function isAdmin() { return state.user && state.user.role === 'admin'; }
@@ -265,6 +265,18 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   if (prefillCustomer) $('inp-customer').value = prefillCustomer;
   renderItems();
   calcTotals();
+
+  // Mostrar/ocultar sección de entregas
+  const delivCard = $('deliveries-card');
+  if (orderId) {
+    delivCard.classList.remove('hidden');
+    loadDeliveries(orderId);
+  } else {
+    delivCard.classList.add('hidden');
+    $('deliveries-body').innerHTML = '';
+    $('no-deliveries-msg').classList.remove('hidden');
+  }
+
   showOrdersSubview('form');
   $('inp-customer').focus();
 }
@@ -842,6 +854,274 @@ $('btn-settings-save').addEventListener('click', async () => {
     $('settings-modal').classList.add('hidden');
     toast('Configuración guardada', 'success');
   } catch (err) { toast(err.message, 'error'); }
+});
+
+/* ================================================================ ENTREGAS PARCIALES */
+
+async function loadDeliveries(orderId) {
+  try {
+    const deliveries = await api('GET', `/orders/${orderId}/deliveries`);
+    renderDeliveries(deliveries);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderDeliveries(deliveries) {
+  const body  = $('deliveries-body');
+  const noMsg = $('no-deliveries-msg');
+
+  if (!deliveries.length) {
+    body.innerHTML = '';
+    body.appendChild(noMsg);
+    noMsg.classList.remove('hidden');
+    return;
+  }
+  noMsg.classList.add('hidden');
+
+  body.innerHTML = deliveries.map((d, i) => `
+    <div class="delivery-entry">
+      <div class="delivery-entry-header">
+        <span class="delivery-num">Entrega #${i + 1}</span>
+        <span class="delivery-date">${fmtDateTime(d.created_at)}</span>
+      </div>
+      <div class="delivery-items-list">
+        ${d.items.map(it => `
+          <span class="delivery-item-chip">
+            ${esc(it.product_name)} &times; <strong>${it.quantity_delivered}</strong>
+          </span>
+        `).join('')}
+      </div>
+      ${d.notes ? `<div class="delivery-notes">${esc(d.notes)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+$('btn-register-delivery').addEventListener('click', openDeliveryModal);
+$('btn-delivery-cancel').addEventListener('click',  () => $('delivery-modal').classList.add('hidden'));
+$('delivery-modal').addEventListener('click', e => { if (e.target === $('delivery-modal')) $('delivery-modal').classList.add('hidden'); });
+
+async function openDeliveryModal() {
+  const orderId = state.editingOrderId;
+  if (!orderId) return;
+
+  try {
+    const [order, deliveries] = await Promise.all([
+      api('GET', `/orders/${orderId}`),
+      api('GET', `/orders/${orderId}/deliveries`)
+    ]);
+
+    // Calcular total entregado por ítem
+    const deliveredMap = {};
+    for (const d of deliveries) {
+      for (const di of d.items) {
+        deliveredMap[di.order_item_id] = (deliveredMap[di.order_item_id] || 0) + di.quantity_delivered;
+      }
+    }
+
+    const modalItems = order.items.map(item => ({
+      order_item_id:      item.id,
+      product_name:       item.product_name,
+      quantity_ordered:   item.quantity,
+      quantity_delivered: deliveredMap[item.id] || 0,
+      quantity_remaining: Math.max(0, item.quantity - (deliveredMap[item.id] || 0))
+    }));
+
+    $('delivery-modal-tbody').innerHTML = modalItems.map(it => `
+      <tr>
+        <td>${esc(it.product_name)}</td>
+        <td class="text-right">${it.quantity_ordered}</td>
+        <td class="text-right" style="color:${it.quantity_delivered > 0 ? 'var(--success-txt)' : 'var(--text-muted)'}">
+          ${it.quantity_delivered}
+        </td>
+        <td class="text-right">
+          <input type="number" class="input delivery-qty-inp" data-item-id="${it.order_item_id}"
+            min="0" max="${it.quantity_remaining}" step="any" value="0"
+            style="width:80px;text-align:right;padding:5px 8px"
+            ${it.quantity_remaining <= 0 ? 'disabled placeholder="Completo"' : ''}>
+        </td>
+      </tr>
+    `).join('');
+
+    $('inp-delivery-notes').value = '';
+    $('delivery-modal').classList.remove('hidden');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-delivery-confirm').addEventListener('click', async () => {
+  const orderId = state.editingOrderId;
+  if (!orderId) return;
+
+  const items = [];
+  document.querySelectorAll('.delivery-qty-inp').forEach(inp => {
+    const qty = parseFloat(inp.value) || 0;
+    if (qty > 0) items.push({ order_item_id: Number(inp.dataset.itemId), quantity_delivered: qty });
+  });
+
+  if (!items.length) { toast('Ingresá al menos una cantidad mayor a 0', 'error'); return; }
+
+  const btn = $('btn-delivery-confirm');
+  btn.disabled = true;
+  try {
+    await api('POST', `/orders/${orderId}/deliveries`, {
+      notes: $('inp-delivery-notes').value.trim(),
+      items
+    });
+    $('delivery-modal').classList.add('hidden');
+    toast('Entrega registrada', 'success');
+
+    // Refrescar estado del pedido en el form
+    const updated = await api('GET', `/orders/${orderId}`);
+    $('inp-status').value = updated.status;
+    $('form-status-badge').innerHTML = statusBadge(updated.status);
+    loadDeliveries(orderId);
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+/* ================================================================ IMPORTAR PRODUCTOS */
+
+function parseFileRows(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb   = XLSX.read(data, { type: 'array' });
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+        resolve(XLSX.utils.sheet_to_json(ws, { defval: '' }));
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function normalizeKey(obj, variants) {
+  const keys = Object.keys(obj);
+  for (const v of variants) {
+    const k = keys.find(k => k.toLowerCase().trim() === v);
+    if (k !== undefined) return String(obj[k] || '').trim();
+  }
+  return '';
+}
+
+// ── Productos ──
+
+let importProductsData = [];
+
+$('btn-import-products').addEventListener('click', () => {
+  importProductsData = [];
+  $('inp-import-products-file').value = '';
+  $('import-products-preview').classList.add('hidden');
+  $('btn-import-products-confirm').classList.add('hidden');
+  $('import-products-modal').classList.remove('hidden');
+});
+
+$('btn-import-products-cancel').addEventListener('click', () => $('import-products-modal').classList.add('hidden'));
+$('import-products-modal').addEventListener('click', e => {
+  if (e.target === $('import-products-modal')) $('import-products-modal').classList.add('hidden');
+});
+
+$('inp-import-products-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const rows = await parseFileRows(file);
+    importProductsData = rows.map(r => ({
+      nombre: normalizeKey(r, ['nombre','name','producto','product']),
+      precio: normalizeKey(r, ['precio','price','base_price','precio_base','valor','value'])
+    })).filter(r => r.nombre);
+
+    if (!importProductsData.length) { toast('No se encontraron filas con nombre de producto', 'error'); return; }
+
+    $('import-products-count').textContent = `${importProductsData.length} producto${importProductsData.length !== 1 ? 's' : ''} encontrado${importProductsData.length !== 1 ? 's' : ''}`;
+    $('import-products-tbody').innerHTML = importProductsData.map(p => `
+      <tr>
+        <td>${esc(p.nombre)}</td>
+        <td class="text-right">${p.precio ? fmtMoney(parseFloat(String(p.precio).replace(',','.')) || 0) : '—'}</td>
+      </tr>
+    `).join('');
+    $('import-products-preview').classList.remove('hidden');
+    $('btn-import-products-confirm').classList.remove('hidden');
+  } catch (err) { toast('Error al leer el archivo: ' + err.message, 'error'); }
+});
+
+$('btn-import-products-confirm').addEventListener('click', async () => {
+  if (!importProductsData.length) return;
+  const btn = $('btn-import-products-confirm');
+  btn.disabled = true;
+  try {
+    const result = await api('POST', '/products/import', {
+      products: importProductsData.map(p => ({
+        nombre: p.nombre,
+        precio: parseFloat(String(p.precio).replace(',', '.')) || 0
+      }))
+    });
+    $('import-products-modal').classList.add('hidden');
+    toast(`${result.imported} producto${result.imported !== 1 ? 's' : ''} importado${result.imported !== 1 ? 's' : ''} correctamente`, 'success');
+    if (result.errors && result.errors.length) console.warn('Errores de importación:', result.errors);
+    await loadProductCatalog();
+    loadCatalog();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+// ── Clientes ──
+
+let importClientsData = [];
+
+$('btn-import-clients').addEventListener('click', () => {
+  importClientsData = [];
+  $('inp-import-clients-file').value = '';
+  $('import-clients-preview').classList.add('hidden');
+  $('btn-import-clients-confirm').classList.add('hidden');
+  $('import-clients-modal').classList.remove('hidden');
+});
+
+$('btn-import-clients-cancel').addEventListener('click', () => $('import-clients-modal').classList.add('hidden'));
+$('import-clients-modal').addEventListener('click', e => {
+  if (e.target === $('import-clients-modal')) $('import-clients-modal').classList.add('hidden');
+});
+
+$('inp-import-clients-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const rows = await parseFileRows(file);
+    importClientsData = rows.map(r => ({
+      nombre:   normalizeKey(r, ['nombre','name','cliente','customer','razón social','razon social']),
+      telefono: normalizeKey(r, ['telefono','teléfono','phone','tel','celular']),
+      email:    normalizeKey(r, ['email','correo','mail','e-mail']),
+      direccion:normalizeKey(r, ['direccion','dirección','address','domicilio'])
+    })).filter(r => r.nombre);
+
+    if (!importClientsData.length) { toast('No se encontraron filas con nombre de cliente', 'error'); return; }
+
+    $('import-clients-count').textContent = `${importClientsData.length} cliente${importClientsData.length !== 1 ? 's' : ''} encontrado${importClientsData.length !== 1 ? 's' : ''}`;
+    $('import-clients-tbody').innerHTML = importClientsData.map(c => `
+      <tr>
+        <td>${esc(c.nombre)}</td>
+        <td style="color:var(--text-muted)">${esc(c.telefono || '—')}</td>
+        <td style="color:var(--text-muted)">${esc(c.email || '—')}</td>
+        <td style="color:var(--text-muted)">${esc(c.direccion || '—')}</td>
+      </tr>
+    `).join('');
+    $('import-clients-preview').classList.remove('hidden');
+    $('btn-import-clients-confirm').classList.remove('hidden');
+  } catch (err) { toast('Error al leer el archivo: ' + err.message, 'error'); }
+});
+
+$('btn-import-clients-confirm').addEventListener('click', async () => {
+  if (!importClientsData.length) return;
+  const btn = $('btn-import-clients-confirm');
+  btn.disabled = true;
+  try {
+    const result = await api('POST', '/customers/import', { customers: importClientsData });
+    $('import-clients-modal').classList.add('hidden');
+    toast(`${result.imported} cliente${result.imported !== 1 ? 's' : ''} importado${result.imported !== 1 ? 's' : ''} correctamente`, 'success');
+    if (result.errors && result.errors.length) console.warn('Errores de importación:', result.errors);
+    loadClients();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
 });
 
 /* ================================================================ INIT */

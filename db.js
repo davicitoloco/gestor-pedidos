@@ -59,6 +59,19 @@ db.exec(`
     created_by INTEGER REFERENCES users(id),
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
   );
+  CREATE TABLE IF NOT EXISTS deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    notes TEXT DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS delivery_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    delivery_id INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+    order_item_id INTEGER NOT NULL REFERENCES order_items(id),
+    quantity_delivered REAL NOT NULL DEFAULT 0
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)

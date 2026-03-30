@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { db, withTransaction } = require('../db');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -59,6 +59,33 @@ router.delete('/:id', requireAdmin, (req, res) => {
     if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) return res.status(404).json({ error: 'Producto no encontrado' });
     db.prepare('UPDATE products SET active = 0 WHERE id = ?').run(id);
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/products/import — solo admin
+router.post('/import', requireAdmin, (req, res) => {
+  try {
+    const { products } = req.body;
+    if (!Array.isArray(products) || !products.length)
+      return res.status(400).json({ error: 'No hay productos para importar' });
+
+    let imported = 0;
+    const errors = [];
+    const ins = db.prepare('INSERT INTO products (name, base_price) VALUES (?, ?)');
+
+    withTransaction(() => {
+      for (let i = 0; i < products.length; i++) {
+        const p = products[i];
+        const name = String(p.nombre || p.name || '').trim();
+        if (!name) { errors.push(`Fila ${i + 2}: nombre requerido`); continue; }
+        const rawPrice = String(p.precio || p.price || p.base_price || p.precio_base || 0);
+        const price = parseFloat(rawPrice.replace(',', '.')) || 0;
+        ins.run(name, price);
+        imported++;
+      }
+    });
+
+    res.json({ imported, errors });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

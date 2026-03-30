@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { db, withTransaction } = require('../db');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -69,6 +69,36 @@ router.delete('/:id', (req, res) => {
       return res.status(403).json({ error: 'No podés eliminar clientes de otros vendedores' });
     db.prepare('DELETE FROM customers WHERE id = ?').run(id);
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/customers/import
+router.post('/import', (req, res) => {
+  try {
+    const { customers } = req.body;
+    if (!Array.isArray(customers) || !customers.length)
+      return res.status(400).json({ error: 'No hay clientes para importar' });
+
+    let imported = 0;
+    const errors = [];
+    const ins = db.prepare(
+      'INSERT INTO customers (name, phone, email, address, created_by) VALUES (?, ?, ?, ?, ?)'
+    );
+
+    withTransaction(() => {
+      for (let i = 0; i < customers.length; i++) {
+        const c = customers[i];
+        const name = String(c.nombre || c.name || c.cliente || c.customer || '').trim();
+        if (!name) { errors.push(`Fila ${i + 2}: nombre requerido`); continue; }
+        const phone   = String(c.telefono || c.teléfono || c.phone || c.tel || c.celular || '').trim();
+        const email   = String(c.email || c.correo || c.mail || '').trim();
+        const address = String(c.direccion || c.dirección || c.address || c.domicilio || '').trim();
+        ins.run(name, phone, email, address, req.session.userId);
+        imported++;
+      }
+    });
+
+    res.json({ imported, errors });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

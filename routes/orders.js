@@ -268,6 +268,78 @@ router.put('/:id', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── GET /api/orders/:id/deliveries ───────────────────────────────────────────
+router.get('/:id/deliveries', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'Acceso denegado' });
+
+    const deliveries = db.prepare(
+      'SELECT * FROM deliveries WHERE order_id = ? ORDER BY created_at ASC'
+    ).all(id);
+    const result = deliveries.map(d => {
+      const items = db.prepare(`
+        SELECT di.order_item_id, di.quantity_delivered,
+               oi.product_name, oi.quantity AS quantity_ordered
+        FROM delivery_items di
+        JOIN order_items oi ON di.order_item_id = oi.id
+        WHERE di.delivery_id = ?
+      `).all(d.id);
+      return { ...d, items };
+    });
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /api/orders/:id/deliveries ──────────────────────────────────────────
+router.post('/:id/deliveries', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'Acceso denegado' });
+
+    const { notes, items } = req.body;
+    const validItems = (items || []).filter(i => parseFloat(i.quantity_delivered) > 0);
+    if (!validItems.length)
+      return res.status(400).json({ error: 'Ingresá al menos una cantidad mayor a 0' });
+
+    withTransaction(() => {
+      const dr = db.prepare(
+        'INSERT INTO deliveries (order_id, notes, created_by) VALUES (?, ?, ?)'
+      ).run(id, notes || '', req.session.userId);
+      const delivId = Number(dr.lastInsertRowid);
+
+      const ins = db.prepare(
+        'INSERT INTO delivery_items (delivery_id, order_item_id, quantity_delivered) VALUES (?, ?, ?)'
+      );
+      for (const item of validItems)
+        ins.run(delivId, item.order_item_id, parseFloat(item.quantity_delivered));
+
+      // Recalcular estado automáticamente
+      const summary = db.prepare(`
+        SELECT oi.quantity, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
+        FROM order_items oi
+        LEFT JOIN delivery_items di ON di.order_item_id = oi.id
+        WHERE oi.order_id = ?
+        GROUP BY oi.id
+      `).all(id);
+
+      const allDone  = summary.length > 0 && summary.every(r => r.total_delivered >= r.quantity);
+      const anyDone  = summary.some(r => r.total_delivered > 0);
+      const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
+      db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
+        .run(newStatus, id);
+    });
+
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── DELETE /api/orders/:id ────────────────────────────────────────────────────
 router.delete('/:id', (req, res) => {
   try {
