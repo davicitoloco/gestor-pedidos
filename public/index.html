@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestor de Pedidos</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ============================================================ LOGIN -->
+<div id="login-view" class="login-bg hidden">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+        <rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/>
+      </svg>
+    </div>
+    <h1 class="login-title">Gestor de Pedidos</h1>
+    <p class="login-subtitle">Ingresá con tu usuario y contraseña</p>
+    <form id="login-form" autocomplete="on">
+      <div class="field"><label class="label">Usuario</label>
+        <input type="text" id="inp-username" class="input" autocomplete="username" required></div>
+      <div class="field" style="margin-top:14px"><label class="label">Contraseña</label>
+        <input type="password" id="inp-password" class="input" autocomplete="current-password" required></div>
+      <div id="login-error" class="alert alert-error hidden" style="margin-top:12px"></div>
+      <button type="submit" class="btn btn-primary btn-full" id="login-btn" style="margin-top:22px;padding:11px">Ingresar</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================ APP -->
+<div id="app-view" class="app hidden">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+        <rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/>
+      </svg>
+      <span id="sidebar-company">Pedidos</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a class="nav-item active" data-section="pedidos" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
+        Pedidos
+      </a>
+      <a class="nav-item" data-section="clientes" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Clientes
+      </a>
+      <a class="nav-item" data-section="catalogo" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+        Catálogo
+      </a>
+      <a class="nav-item admin-only" data-section="usuarios" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Usuarios
+      </a>
+      <a class="nav-item admin-only" data-section="reportes" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Reportes
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-user">
+        <span id="sidebar-username"></span>
+        <span id="sidebar-role"></span>
+      </div>
+      <button id="btn-settings" class="sidebar-settings admin-only" title="Configuración">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Configuración
+      </button>
+      <button id="btn-logout" class="btn btn-ghost btn-sm sidebar-logout">Salir</button>
+    </div>
+  </aside>
+
+  <!-- Content -->
+  <main class="app-content">
+
+    <!-- ======================== SECCIÓN: PEDIDOS -->
+    <div id="section-pedidos" class="app-section">
+
+      <!-- Lista -->
+      <div id="list-view" class="view">
+        <div class="page-header">
+          <div><h2 class="page-title">Pedidos</h2><p class="page-subtitle" id="list-count"></p></div>
+          <button class="btn btn-primary" id="btn-new-order">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Nuevo Pedido
+          </button>
+        </div>
+        <div class="filter-bar">
+          <button class="filter-btn active" data-status="Todos">Todos</button>
+          <button class="filter-btn" data-status="Pendiente">Pendiente</button>
+          <button class="filter-btn" data-status="En preparación">En preparación</button>
+          <button class="filter-btn" data-status="Entregado">Entregado</button>
+          <button class="filter-btn" data-status="Cancelado">Cancelado</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:76px">Nº</th>
+                <th>Cliente</th>
+                <th style="width:155px">Estado</th>
+                <th class="admin-only-col" style="width:140px">Vendedor</th>
+                <th style="width:75px" class="text-center">Ítems</th>
+                <th style="width:130px" class="text-right">Total</th>
+                <th style="width:105px">Entrega</th>
+                <th style="width:126px">Creado</th>
+                <th style="width:88px" class="text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="orders-tbody"></tbody>
+          </table>
+          <div id="no-orders" class="empty-state hidden">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+            <p>No hay pedidos</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Formulario pedido -->
+      <div id="form-view" class="view hidden">
+        <div class="page-header">
+          <div class="page-header-left">
+            <button class="btn btn-ghost btn-sm" id="btn-back">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+              Volver
+            </button>
+            <h2 class="page-title" id="form-title">Nuevo Pedido</h2>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="form-status-badge"></span>
+            <button class="btn btn-secondary btn-sm hidden" id="btn-export-pdf" title="Abrir versión para imprimir/guardar como PDF">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Exportar PDF
+            </button>
+          </div>
+        </div>
+
+        <form id="order-form" novalidate>
+          <datalist id="products-datalist"></datalist>
+          <datalist id="customers-datalist"></datalist>
+
+          <div class="card">
+            <div class="card-header">Información del pedido</div>
+            <div class="card-body">
+              <div class="form-grid-3">
+                <div class="field">
+                  <label class="label">Nº de pedido</label>
+                  <input type="text" id="inp-order-number" class="input" disabled placeholder="Automático">
+                </div>
+                <div class="field">
+                  <label class="label">Estado</label>
+                  <select id="inp-status" class="input select">
+                    <option>Pendiente</option>
+                    <option>En preparación</option>
+                    <option>Entregado</option>
+                    <option>Cancelado</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="label">Fecha de entrega</label>
+                  <input type="date" id="inp-delivery-date" class="input">
+                </div>
+              </div>
+              <div class="form-grid-2" style="margin-top:16px">
+                <div class="field">
+                  <label class="label required">Cliente</label>
+                  <input type="text" id="inp-customer" class="input" list="customers-datalist" placeholder="Buscar o escribir cliente..." required>
+                </div>
+                <div class="field admin-only-field hidden">
+                  <label class="label">Vendedor</label>
+                  <input type="text" id="inp-vendor-display" class="input" disabled placeholder="—">
+                </div>
+              </div>
+              <div class="field" style="margin-top:16px">
+                <label class="label">Notas / Observaciones</label>
+                <textarea id="inp-notes" class="input textarea" rows="2" placeholder="Instrucciones, observaciones..."></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header card-header-flex">
+              <span>Productos / Ítems</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-add-item">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Agregar ítem
+              </button>
+            </div>
+            <div class="card-body">
+              <div id="no-items-msg" class="empty-items">No hay ítems. Hacé clic en "Agregar ítem" para comenzar.</div>
+              <div class="items-table-wrap hidden" id="items-table-wrap">
+                <table class="table items-table">
+                  <thead><tr>
+                    <th>Producto / Descripción</th>
+                    <th style="width:95px">Cantidad</th>
+                    <th style="width:125px">Precio unit.</th>
+                    <th style="width:105px">Desc. ítem %</th>
+                    <th style="width:125px" class="text-right">Subtotal</th>
+                    <th style="width:36px"></th>
+                  </tr></thead>
+                  <tbody id="items-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body totals-layout">
+              <div class="field discount-field">
+                <label class="label">Descuento sobre el total del pedido (%)</label>
+                <div class="input-with-suffix">
+                  <input type="number" id="inp-order-discount" class="input" min="0" max="100" step="0.01" value="0">
+                  <span class="suffix">%</span>
+                </div>
+              </div>
+              <div class="totals-box">
+                <div class="total-row"><span>Subtotal ítems:</span><span id="calc-subtotal" class="total-value">$ 0,00</span></div>
+                <div class="total-row"><span>Descuento pedido:</span><span id="calc-discount" class="total-value total-discount">− $ 0,00</span></div>
+                <div class="total-row total-final-row">
+                  <span class="total-label">TOTAL</span>
+                  <span id="calc-total" class="total-final">$ 0,00</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="btn-cancel-form">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-save">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Guardar pedido
+            </button>
+          </div>
+        </form>
+      </div>
+    </div><!-- /section-pedidos -->
+
+    <!-- ======================== SECCIÓN: CLIENTES -->
+    <div id="section-clientes" class="app-section hidden">
+
+      <div id="clients-list-view">
+        <div class="page-header">
+          <div><h2 class="page-title">Clientes</h2><p class="page-subtitle" id="clients-count"></p></div>
+          <button class="btn btn-primary" id="btn-new-client">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Nuevo cliente
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Nombre</th>
+              <th style="width:140px">Teléfono</th>
+              <th style="width:190px">Email</th>
+              <th class="admin-only-col" style="width:140px">Vendedor</th>
+              <th>Dirección</th>
+              <th style="width:116px" class="text-center">Acciones</th>
+            </tr></thead>
+            <tbody id="clients-tbody"></tbody>
+          </table>
+          <div id="no-clients" class="empty-state hidden">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <p>No hay clientes cargados todavía</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="clients-form-view" class="hidden">
+        <div class="page-header">
+          <div class="page-header-left">
+            <button class="btn btn-ghost btn-sm" id="btn-clients-back">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+              Volver
+            </button>
+            <h2 class="page-title" id="client-form-title">Nuevo Cliente</h2>
+          </div>
+        </div>
+        <form id="client-form" novalidate>
+          <div class="card">
+            <div class="card-header">Datos del cliente</div>
+            <div class="card-body">
+              <div class="form-grid-2">
+                <div class="field">
+                  <label class="label required">Nombre / Razón social</label>
+                  <input type="text" id="inp-client-name" class="input" placeholder="Ej: Juan García">
+                </div>
+                <div class="field">
+                  <label class="label">Teléfono</label>
+                  <input type="text" id="inp-client-phone" class="input" placeholder="Ej: 11 1234-5678">
+                </div>
+                <div class="field">
+                  <label class="label">Email</label>
+                  <input type="email" id="inp-client-email" class="input" placeholder="correo@ejemplo.com">
+                </div>
+                <div class="field">
+                  <label class="label">Dirección</label>
+                  <input type="text" id="inp-client-address" class="input" placeholder="Calle y número, ciudad">
+                </div>
+              </div>
+              <div class="field" style="margin-top:16px">
+                <label class="label">Notas</label>
+                <textarea id="inp-client-notes" class="input textarea" rows="2" placeholder="Observaciones sobre el cliente..."></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="btn-client-cancel">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-client-save">Guardar cliente</button>
+          </div>
+        </form>
+      </div>
+
+    </div><!-- /section-clientes -->
+
+    <!-- ======================== SECCIÓN: CATÁLOGO -->
+    <div id="section-catalogo" class="app-section hidden">
+      <div class="page-header">
+        <div><h2 class="page-title">Catálogo de Productos</h2><p class="page-subtitle" id="catalog-count"></p></div>
+        <button class="btn btn-primary admin-only" id="btn-new-product">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Nuevo producto
+        </button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th>Nombre</th>
+            <th style="width:160px" class="text-right">Precio base</th>
+            <th style="width:100px" class="text-center">Estado</th>
+            <th style="width:90px" class="text-center admin-only-col">Acciones</th>
+          </tr></thead>
+          <tbody id="catalog-tbody"></tbody>
+        </table>
+        <div id="no-catalog" class="empty-state hidden">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+          <p>No hay productos en el catálogo</p>
+        </div>
+      </div>
+    </div><!-- /section-catalogo -->
+
+    <!-- ======================== SECCIÓN: USUARIOS -->
+    <div id="section-usuarios" class="app-section hidden">
+
+      <div id="users-list-view">
+        <div class="page-header">
+          <div><h2 class="page-title">Usuarios</h2><p class="page-subtitle" id="users-count"></p></div>
+          <button class="btn btn-primary" id="btn-new-user">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Nuevo usuario
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Nombre</th>
+              <th style="width:160px">Usuario</th>
+              <th style="width:110px">Rol</th>
+              <th style="width:90px" class="text-center">Estado</th>
+              <th style="width:100px" class="text-center">Acciones</th>
+            </tr></thead>
+            <tbody id="users-tbody"></tbody>
+          </table>
+          <div id="no-users" class="empty-state hidden"><p>No hay usuarios</p></div>
+        </div>
+      </div>
+
+      <div id="users-form-view" class="hidden">
+        <div class="page-header">
+          <div class="page-header-left">
+            <button class="btn btn-ghost btn-sm" id="btn-users-back">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+              Volver
+            </button>
+            <h2 class="page-title" id="user-form-title">Nuevo Usuario</h2>
+          </div>
+        </div>
+        <form id="user-form">
+          <div class="card">
+            <div class="card-header">Datos del usuario</div>
+            <div class="card-body">
+              <div class="form-grid-2">
+                <div class="field">
+                  <label class="label required">Nombre completo</label>
+                  <input type="text" id="inp-user-fullname" class="input" placeholder="Ej: María García">
+                </div>
+                <div class="field">
+                  <label class="label required">Nombre de usuario</label>
+                  <input type="text" id="inp-user-username" class="input" placeholder="Ej: mgarcia" autocomplete="off">
+                </div>
+                <div class="field">
+                  <label class="label" id="pwd-label">Contraseña</label>
+                  <input type="password" id="inp-user-password" class="input" placeholder="Mínimo 4 caracteres" autocomplete="new-password">
+                </div>
+                <div class="field">
+                  <label class="label">Rol</label>
+                  <select id="inp-user-role" class="input select">
+                    <option value="vendedor">Vendedor</option>
+                    <option value="admin">Administrador</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="btn-user-cancel">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-user-save">Guardar</button>
+          </div>
+        </form>
+      </div>
+
+    </div><!-- /section-usuarios -->
+
+    <!-- ======================== SECCIÓN: REPORTES -->
+    <div id="section-reportes" class="app-section hidden">
+      <div class="page-header">
+        <div><h2 class="page-title">Reportes</h2><p class="page-subtitle" id="reports-period"></p></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" id="btn-report-pdf">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            PDF
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btn-report-excel">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+            Excel
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats cards -->
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value" id="stat-total-orders">—</div><div class="stat-label">Total pedidos</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-month-orders">—</div><div class="stat-label">Pedidos este mes</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-month-sales">—</div><div class="stat-label">Ventas este mes</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-avg">—</div><div class="stat-label">Ticket promedio</div></div>
+      </div>
+
+      <!-- Charts row -->
+      <div class="charts-row">
+        <div class="card" style="flex:2">
+          <div class="card-header">Pedidos por semana (últimas 8 semanas)</div>
+          <div class="card-body" style="position:relative;height:240px">
+            <canvas id="chart-weekly"></canvas>
+          </div>
+        </div>
+        <div class="card" style="flex:1">
+          <div class="card-header">Por estado</div>
+          <div class="card-body" style="position:relative;height:240px">
+            <canvas id="chart-status"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top productos -->
+      <div class="card">
+        <div class="card-header">Productos más vendidos</div>
+        <div class="card-body" style="padding:0">
+          <table class="table" id="top-products-table">
+            <thead><tr>
+              <th style="width:36px">#</th>
+              <th>Producto</th>
+              <th style="width:120px" class="text-right">Cant. vendida</th>
+              <th style="width:90px" class="text-center">Pedidos</th>
+              <th style="width:150px" class="text-right">Total generado</th>
+            </tr></thead>
+            <tbody id="top-products-tbody"></tbody>
+          </table>
+          <div id="no-top-products" class="empty-state hidden"><p>Sin datos todavía</p></div>
+        </div>
+      </div>
+    </div><!-- /section-reportes -->
+
+  </main><!-- /app-content -->
+</div><!-- /app -->
+
+<!-- ============================================================ MODALS -->
+
+<!-- Confirm -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-body">
+      <div class="modal-icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+      <p id="modal-message">¿Estás seguro?</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-cancel">Cancelar</button>
+      <button class="btn btn-danger" id="modal-confirm">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Producto -->
+<div id="product-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header"><h3 id="product-modal-title">Nuevo Producto</h3></div>
+    <div class="modal-form-body">
+      <div class="field">
+        <label class="label required">Nombre</label>
+        <input type="text" id="inp-prod-name" class="input" placeholder="Ej: Mesa de madera">
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label class="label required">Precio base</label>
+        <div class="input-with-suffix">
+          <input type="number" id="inp-prod-price" class="input" min="0" step="0.01" placeholder="0.00">
+          <span class="suffix" style="right:10px">$</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-save">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Configuración -->
+<div id="settings-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header"><h3>Configuración</h3></div>
+    <div class="modal-form-body">
+      <div class="field">
+        <label class="label">Nombre de la empresa</label>
+        <input type="text" id="inp-company-name" class="input" placeholder="Mi Empresa">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-settings-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-settings-save">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

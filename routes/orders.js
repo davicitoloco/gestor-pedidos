@@ -1,0 +1,284 @@
+const express = require('express');
+const router = express.Router();
+const { db, withTransaction } = require('../db');
+
+function requireAuth(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
+  next();
+}
+router.use(requireAuth);
+
+function isVendor(req) { return req.session.role === 'vendedor'; }
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function fmtMoney(v) {
+  return '$ ' + (v || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtDate(s) {
+  if (!s) return '-';
+  const d = s.split(' ')[0].split('-');
+  return `${d[2]}/${d[1]}/${d[0]}`;
+}
+function fmtDateTime(s) {
+  if (!s) return '-';
+  const [date, time] = s.split(' ');
+  const d = date.split('-');
+  return `${d[2]}/${d[1]}/${d[0]}${time ? ' ' + time.substring(0, 5) : ''}`;
+}
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function getCompanyName() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'company_name'").get();
+  return row ? row.value : 'Mi Empresa';
+}
+
+// ── GET /api/orders ───────────────────────────────────────────────────────────
+router.get('/', (req, res) => {
+  try {
+    const { status } = req.query;
+    const vendorFilter = isVendor(req) ? `AND o.created_by = ${req.session.userId}` : '';
+    const statusFilter = (status && status !== 'Todos') ? `AND o.status = ?` : '';
+    const params       = (status && status !== 'Todos') ? [status] : [];
+
+    const sql = `
+      SELECT
+        o.id,
+        printf('%03d', o.order_sequence) AS order_number,
+        o.customer_name, o.notes, o.delivery_date, o.status,
+        o.discount, o.created_at, o.updated_at,
+        COALESCE(u.full_name, u.username)        AS vendor_name,
+        COUNT(oi.id)                              AS item_count,
+        COALESCE(SUM(oi.quantity * oi.unit_price * (1.0 - oi.discount/100.0)), 0) AS subtotal,
+        COALESCE(SUM(oi.quantity * oi.unit_price * (1.0 - oi.discount/100.0)), 0)
+          * (1.0 - o.discount/100.0)              AS total
+      FROM orders o
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIN users u ON o.created_by = u.id
+      WHERE 1=1 ${vendorFilter} ${statusFilter}
+      GROUP BY o.id
+      ORDER BY o.order_sequence DESC
+    `;
+    res.json(db.prepare(sql).all(...params));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/orders/:id ───────────────────────────────────────────────────────
+router.get('/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare(`
+      SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
+             COALESCE(u.full_name, u.username) AS vendor_name
+      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+      WHERE o.id = ?
+    `).get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'Acceso denegado' });
+    const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
+    res.json({ ...order, items });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/orders/:id/print ─────────────────────────────────────────────────
+router.get('/:id/print', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare(`
+      SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
+             COALESCE(u.full_name, u.username) AS vendor_name
+      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+      WHERE o.id = ?
+    `).get(id);
+    if (!order) return res.status(404).send('Pedido no encontrado');
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).send('Acceso denegado');
+
+    const items    = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
+    const company  = getCompanyName();
+    const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+    const discAmt  = subtotal * order.discount / 100;
+    const total    = subtotal - discAmt;
+
+    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Cancelado':'#475569' };
+    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Cancelado':'#f1f5f9' };
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>Pedido #${esc(order.order_number)} — ${esc(company)}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1e293b;background:#fff}
+.page{padding:32px 40px;max-width:820px;margin:0 auto}
+.no-print{text-align:right;margin-bottom:18px}
+.print-btn{padding:9px 22px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600}
+.header{text-align:center;padding-bottom:18px;border-bottom:2px solid #2563eb;margin-bottom:22px}
+.header h1{font-size:26px;color:#2563eb;letter-spacing:.01em}
+.header h2{font-size:13px;color:#64748b;margin-top:4px;font-weight:normal;text-transform:uppercase;letter-spacing:.08em}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 30px;margin-bottom:26px}
+.info-item label{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:3px}
+.info-item p{font-size:13px;font-weight:500}
+.badge{display:inline-block;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:700}
+h3{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:12.5px}
+thead th{background:#2563eb;color:#fff;padding:8px 10px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+thead th.r{text-align:right}
+tbody td{padding:8px 10px;border-bottom:1px solid #e2e8f0}
+tbody td.r{text-align:right}
+tbody tr:nth-child(even) td{background:#f8fafc}
+.totals-wrap{display:flex;justify-content:flex-end}
+.totals{width:300px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+.totals tr td{padding:8px 14px;border-bottom:1px solid #e2e8f0;font-size:13px}
+.totals tr:last-child td{border-bottom:none}
+.totals .t-final td{font-weight:700;font-size:15px;color:#2563eb;background:#eff6ff;border-top:2px solid #2563eb}
+.t-label{color:#64748b}
+.t-val{text-align:right;font-weight:600}
+.notes-box{margin-top:20px;padding:14px 16px;background:#f8fafc;border-left:3px solid #2563eb;border-radius:0 6px 6px 0}
+.notes-box strong{display:block;margin-bottom:5px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+.footer{margin-top:36px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
+@media print{
+  .no-print{display:none}
+  body{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .page{padding:20px}
+}
+</style></head><body>
+<div class="page">
+  <div class="no-print">
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+  </div>
+  <div class="header">
+    <h1>${esc(company)}</h1>
+    <h2>Pedido de Venta</h2>
+  </div>
+  <div class="info-grid">
+    <div class="info-item"><label>Número</label><p>#${esc(order.order_number)}</p></div>
+    <div class="info-item"><label>Fecha de creación</label><p>${fmtDateTime(order.created_at)}</p></div>
+    <div class="info-item"><label>Cliente</label><p>${esc(order.customer_name)}</p></div>
+    <div class="info-item"><label>Fecha de entrega</label><p>${fmtDate(order.delivery_date)}</p></div>
+    <div class="info-item"><label>Vendedor</label><p>${esc(order.vendor_name || 'Sin asignar')}</p></div>
+    <div class="info-item"><label>Estado</label>
+      <p><span class="badge" style="background:${statusBg[order.status]||'#f1f5f9'};color:${statusColor[order.status]||'#475569'}">${esc(order.status)}</span></p>
+    </div>
+  </div>
+  <h3>Detalle del pedido</h3>
+  <table>
+    <thead><tr>
+      <th>Producto / Descripción</th>
+      <th class="r">Cantidad</th>
+      <th class="r">Precio unit.</th>
+      <th class="r">Desc. %</th>
+      <th class="r">Subtotal</th>
+    </tr></thead>
+    <tbody>
+      ${items.map(item => {
+        const sub = item.quantity * item.unit_price * (1 - item.discount / 100);
+        return `<tr>
+          <td>${esc(item.product_name)}</td>
+          <td class="r">${item.quantity}</td>
+          <td class="r">${fmtMoney(item.unit_price)}</td>
+          <td class="r">${item.discount > 0 ? item.discount + '%' : '—'}</td>
+          <td class="r">${fmtMoney(sub)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+  <div class="totals-wrap">
+    <table class="totals">
+      <tr><td class="t-label">Subtotal ítems</td><td class="t-val">${fmtMoney(subtotal)}</td></tr>
+      ${order.discount > 0 ? `<tr><td class="t-label">Descuento (${order.discount}%)</td><td class="t-val" style="color:#ef4444">−${fmtMoney(discAmt)}</td></tr>` : ''}
+      <tr class="t-final"><td>TOTAL</td><td class="t-val">${fmtMoney(total)}</td></tr>
+    </table>
+  </div>
+  ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
+  <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>
+</div>
+<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));</script>
+</body></html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// ── POST /api/orders ──────────────────────────────────────────────────────────
+router.post('/', (req, res) => {
+  try {
+    const { customer_name, notes, delivery_date, status, discount, items } = req.body;
+    if (!customer_name || !customer_name.trim())
+      return res.status(400).json({ error: 'El nombre del cliente es requerido' });
+
+    const orderId = withTransaction(() => {
+      const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
+      const result = db.prepare(`
+        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(next, customer_name.trim(), notes || '', delivery_date || null,
+             status || 'Pendiente', parseFloat(discount) || 0, req.session.userId);
+      const oid = Number(result.lastInsertRowid);
+      if (items && items.length > 0) {
+        const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount) VALUES (?, ?, ?, ?, ?)');
+        for (const it of items) {
+          if (it.product_name && it.product_name.trim())
+            ins.run(oid, it.product_name.trim(), parseFloat(it.quantity)||1, parseFloat(it.unit_price)||0, parseFloat(it.discount)||0);
+        }
+      }
+      return oid;
+    });
+
+    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON o.created_by = u.id WHERE o.id = ?`).get(orderId);
+    const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(orderId);
+    res.status(201).json({ ...order, items: orderItems });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── PUT /api/orders/:id ───────────────────────────────────────────────────────
+router.put('/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && existing.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'No podés editar pedidos de otros vendedores' });
+
+    const { customer_name, notes, delivery_date, status, discount, items } = req.body;
+    withTransaction(() => {
+      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+        customer_name !== undefined ? customer_name.trim() : existing.customer_name,
+        notes !== undefined ? notes : existing.notes,
+        delivery_date !== undefined ? (delivery_date || null) : existing.delivery_date,
+        status || existing.status,
+        discount !== undefined ? (parseFloat(discount) || 0) : existing.discount,
+        id
+      );
+      if (items !== undefined) {
+        db.prepare('DELETE FROM order_items WHERE order_id = ?').run(id);
+        if (items.length > 0) {
+          const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount) VALUES (?, ?, ?, ?, ?)');
+          for (const it of items) {
+            if (it.product_name && it.product_name.trim())
+              ins.run(id, it.product_name.trim(), parseFloat(it.quantity)||1, parseFloat(it.unit_price)||0, parseFloat(it.discount)||0);
+          }
+        }
+      }
+    });
+
+    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON o.created_by = u.id WHERE o.id = ?`).get(id);
+    const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
+    res.json({ ...order, items: orderItems });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── DELETE /api/orders/:id ────────────────────────────────────────────────────
+router.delete('/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'No podés eliminar pedidos de otros vendedores' });
+    db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+module.exports = router;
