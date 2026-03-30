@@ -273,8 +273,6 @@ async function openOrderForm(orderId, prefillCustomer = null) {
     loadDeliveries(orderId);
   } else {
     delivCard.classList.add('hidden');
-    $('deliveries-body').innerHTML = '';
-    $('no-deliveries-msg').classList.remove('hidden');
   }
 
   showOrdersSubview('form');
@@ -866,16 +864,12 @@ async function loadDeliveries(orderId) {
 }
 
 function renderDeliveries(deliveries) {
-  const body  = $('deliveries-body');
-  const noMsg = $('no-deliveries-msg');
+  const body = $('deliveries-body');
 
   if (!deliveries.length) {
-    body.innerHTML = '';
-    body.appendChild(noMsg);
-    noMsg.classList.remove('hidden');
+    body.innerHTML = '<div class="empty-items">Todavía no hay entregas registradas para este pedido.</div>';
     return;
   }
-  noMsg.classList.add('hidden');
 
   body.innerHTML = deliveries.map((d, i) => `
     <div class="delivery-entry">

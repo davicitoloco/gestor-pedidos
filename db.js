@@ -3,10 +3,13 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
 
-const DATA_DIR = path.join(__dirname, 'data');
+// DATABASE_PATH permite montar un volumen persistente en Railway/Docker.
+// Si no está definida, usa ./data/pedidos.db como fallback.
+const DB_FILE  = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'pedidos.db');
+const DATA_DIR = path.dirname(DB_FILE);
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new DatabaseSync(path.join(DATA_DIR, 'pedidos.db'));
+const db = new DatabaseSync(DB_FILE);
 db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 
