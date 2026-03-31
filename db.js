@@ -9,6 +9,7 @@ const DB_FILE  = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'pedi
 const DATA_DIR = path.dirname(DB_FILE);
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
+const dbIsNew = !fs.existsSync(DB_FILE);
 const db = new DatabaseSync(DB_FILE);
 db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
@@ -119,4 +120,4 @@ function withTransaction(fn) {
   catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
-module.exports = { db, withTransaction };
+module.exports = { db, withTransaction, DB_FILE, dbIsNew };

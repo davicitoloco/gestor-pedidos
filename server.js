@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-require('./db');
+const { DB_FILE, dbIsNew } = require('./db');
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -41,4 +41,9 @@ app.use('/api/stock',     require('./routes/stock'));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, () => console.log(`\n  Gestor de Pedidos → http://localhost:${PORT}\n`));
+app.listen(PORT, () => {
+  console.log(`\n  Gestor de Pedidos → http://localhost:${PORT}`);
+  console.log(`  Base de datos      → ${DB_FILE} ${dbIsNew ? '[NUEVA]' : '[existente]'}`);
+  if (dbIsNew) console.log('  ⚠  Base de datos creada desde cero. Si esto ocurre en cada deploy, el volumen no está montado correctamente.');
+  console.log();
+});
