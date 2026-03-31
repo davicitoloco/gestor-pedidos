@@ -651,6 +651,13 @@ $('user-form').addEventListener('submit', async e => {
 });
 
 /* ================================================================ REPORTS */
+
+const rankingState = {
+  from:     '',
+  to:       '',
+  expanded: { customers: false, vendors: false, delivered: false, stocked: false, discounts: false }
+};
+
 async function loadReports() {
   const months = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const now = new Date();
@@ -667,7 +674,115 @@ async function loadReports() {
     renderStatusChart(stats.by_status);
     renderTopProducts(topProds);
   } catch (err) { toast(err.message, 'error'); }
+
+  loadRankings();
 }
+
+function rankingQS(key) {
+  const limit = rankingState.expanded[key] ? 50 : 10;
+  const p = new URLSearchParams({ limit });
+  if (rankingState.from) p.set('from', rankingState.from);
+  if (rankingState.to)   p.set('to',   rankingState.to);
+  return '?' + p.toString();
+}
+
+async function loadRankings() {
+  const keys = ['customers', 'vendors', 'delivered', 'stocked', 'discounts'];
+  const endpoints = {
+    customers: '/reports/top-customers',
+    vendors:   '/reports/top-vendors',
+    delivered: '/reports/top-delivered',
+    stocked:   '/reports/top-stocked',
+    discounts: '/reports/top-discounts'
+  };
+  await Promise.allSettled(
+    keys.map(k => api('GET', endpoints[k] + rankingQS(k))
+      .then(data => renderRanking(k, data))
+      .catch(() => {})
+    )
+  );
+}
+
+function renderRanking(key, data) {
+  const tbody  = $(`rk-${key}-tbody`);
+  const noEl   = $(`no-rk-${key}`);
+  const moreBtn = document.querySelector(`.ranking-more-btn[data-key="${key}"]`);
+  if (!tbody) return;
+
+  if (!data.length) {
+    tbody.innerHTML = '';
+    noEl.classList.remove('hidden');
+    if (moreBtn) moreBtn.classList.add('hidden');
+    return;
+  }
+  noEl.classList.add('hidden');
+  if (moreBtn) {
+    moreBtn.classList.remove('hidden');
+    moreBtn.textContent = rankingState.expanded[key] ? 'Ver menos' : 'Ver más';
+  }
+
+  const rows = {
+    customers: d => `<td style="color:var(--text-muted);font-size:.82rem;font-weight:600">${d._i}</td>
+      <td style="font-weight:500">${esc(d.customer_name)}</td>
+      <td class="text-center">${d.order_count}</td>
+      <td class="text-right" style="font-weight:600;color:var(--primary)">${fmtMoney(d.total)}</td>
+      <td class="text-right" style="color:var(--text-muted)">${fmtMoney(d.avg_ticket)}</td>`,
+
+    vendors: d => `<td style="color:var(--text-muted);font-size:.82rem;font-weight:600">${d._i}</td>
+      <td style="font-weight:500">${esc(d.vendor_name)}</td>
+      <td class="text-center">${d.order_count}</td>
+      <td class="text-right" style="font-weight:600;color:var(--primary)">${fmtMoney(d.total)}</td>
+      <td class="text-right" style="color:var(--text-muted)">${fmtMoney(d.avg_ticket)}</td>`,
+
+    delivered: d => `<td style="color:var(--text-muted);font-size:.82rem;font-weight:600">${d._i}</td>
+      <td>${esc(d.product_name)}</td>
+      <td class="text-right" style="font-weight:600">${d.total_delivered}</td>
+      <td class="text-right" style="color:var(--primary)">${fmtMoney(d.revenue)}</td>`,
+
+    stocked: d => `<td style="color:var(--text-muted);font-size:.82rem;font-weight:600">${d._i}</td>
+      <td>${esc(d.product_name)}</td>
+      <td class="text-right" style="font-weight:600">${d.total_ingresado}</td>`,
+
+    discounts: d => `<td><span class="order-num">#${esc(d.order_number)}</span></td>
+      <td>${esc(d.customer_name)}</td>
+      <td class="text-center" style="font-weight:600">${d.discount_pct}%</td>
+      <td class="text-right" style="color:var(--text-muted)">${fmtMoney(d.subtotal)}</td>
+      <td class="text-right" style="font-weight:600;color:var(--danger)">${fmtMoney(d.discount_amount)}</td>`
+  };
+
+  tbody.innerHTML = data.map((d, i) => `<tr>${rows[key]({ ...d, _i: i + 1 })}</tr>`).join('');
+}
+
+// Date filter controls
+$('btn-ranking-filter').addEventListener('click', () => {
+  rankingState.from = $('ranking-from').value;
+  rankingState.to   = $('ranking-to').value;
+  loadRankings();
+});
+
+$('btn-ranking-reset').addEventListener('click', () => {
+  rankingState.from = '';
+  rankingState.to   = '';
+  $('ranking-from').value = '';
+  $('ranking-to').value   = '';
+  loadRankings();
+});
+
+document.querySelectorAll('.ranking-more-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.key;
+    rankingState.expanded[key] = !rankingState.expanded[key];
+    btn.textContent = rankingState.expanded[key] ? 'Ver menos' : 'Ver más';
+    const endpoint = {
+      customers: '/reports/top-customers', vendors: '/reports/top-vendors',
+      delivered: '/reports/top-delivered', stocked: '/reports/top-stocked',
+      discounts: '/reports/top-discounts'
+    }[key];
+    api('GET', endpoint + rankingQS(key))
+      .then(data => renderRanking(key, data))
+      .catch(err => toast(err.message, 'error'));
+  });
+});
 
 function renderStats(stats) {
   $('stat-total-orders').textContent  = stats.total_orders;

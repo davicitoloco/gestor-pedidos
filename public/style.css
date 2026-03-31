@@ -224,3 +224,15 @@ tr.stock-critical td { background:#fff1f2 }
   background:#fff;border:1px solid #f59e0b;border-radius:20px;
   padding:1px 10px;font-size:.82rem;color:#92400e
 }
+
+/* ============================================================ RANKINGS */
+.rankings-section-header{
+  display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:12px;margin:24px 0 14px;
+}
+.rankings-title{font-size:1rem;font-weight:700;color:var(--text)}
+.rankings-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rankings-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ranking-full{grid-column:1/-1}
+.ranking-half{}
+@media(max-width:860px){.rankings-grid{grid-template-columns:1fr}.ranking-half{grid-column:auto}}

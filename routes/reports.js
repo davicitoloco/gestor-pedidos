@@ -131,6 +131,145 @@ router.get('/top-products', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Helpers rankings ─────────────────────────────────────────────────────────
+function validateDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : null; }
+
+function rangeClause(alias, col, from, to) {
+  const parts = [];
+  if (from) parts.push(`${alias}.${col} >= ?`);
+  if (to)   parts.push(`${alias}.${col} <= ?`);
+  return parts.length ? 'AND ' + parts.join(' AND ') : '';
+}
+function rangeParams(from, to) {
+  const p = [];
+  if (from) p.push(from);
+  if (to)   p.push(to + ' 23:59:59');
+  return p;
+}
+function rankingLimit(req) { return Math.min(parseInt(req.query.limit) || 10, 100); }
+
+// ── GET /api/reports/top-customers ───────────────────────────────────────────
+router.get('/top-customers', (req, res) => {
+  try {
+    const from  = validateDate(req.query.from);
+    const to    = validateDate(req.query.to);
+    const limit = rankingLimit(req);
+    const rows = db.prepare(`
+      SELECT TRIM(o.customer_name) AS customer_name,
+             COUNT(DISTINCT o.id)   AS order_count,
+             COALESCE(SUM(sub.t * (1.0 - o.discount/100.0)), 0) AS total,
+             COALESCE(AVG(sub.t * (1.0 - o.discount/100.0)), 0) AS avg_ticket
+      FROM orders o
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
+        FROM order_items GROUP BY order_id
+      ) sub ON sub.order_id = o.id
+      WHERE o.status != 'Cancelado'
+        ${rangeClause('o', 'created_at', from, to)}
+      GROUP BY LOWER(TRIM(o.customer_name))
+      ORDER BY total DESC
+      LIMIT ?
+    `).all(...rangeParams(from, to), limit);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/top-delivered ───────────────────────────────────────────
+router.get('/top-delivered', (req, res) => {
+  try {
+    const from  = validateDate(req.query.from);
+    const to    = validateDate(req.query.to);
+    const limit = rankingLimit(req);
+    const rows = db.prepare(`
+      SELECT TRIM(oi.product_name) AS product_name,
+             SUM(di.quantity_delivered) AS total_delivered,
+             SUM(di.quantity_delivered * oi.unit_price * (1.0 - oi.discount/100.0)) AS revenue
+      FROM delivery_items di
+      JOIN order_items oi ON di.order_item_id = oi.id
+      JOIN deliveries d   ON di.delivery_id = d.id
+      WHERE 1=1 ${rangeClause('d', 'created_at', from, to)}
+      GROUP BY LOWER(TRIM(oi.product_name))
+      ORDER BY total_delivered DESC
+      LIMIT ?
+    `).all(...rangeParams(from, to), limit);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/top-stocked ─────────────────────────────────────────────
+router.get('/top-stocked', (req, res) => {
+  try {
+    const from  = validateDate(req.query.from);
+    const to    = validateDate(req.query.to);
+    const limit = rankingLimit(req);
+    const rows = db.prepare(`
+      SELECT p.name AS product_name,
+             SUM(sm.quantity) AS total_ingresado
+      FROM stock_movements sm
+      JOIN products p ON sm.product_id = p.id
+      WHERE sm.type = 'ingreso'
+        ${rangeClause('sm', 'created_at', from, to)}
+      GROUP BY sm.product_id
+      ORDER BY total_ingresado DESC
+      LIMIT ?
+    `).all(...rangeParams(from, to), limit);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/top-discounts ───────────────────────────────────────────
+router.get('/top-discounts', (req, res) => {
+  try {
+    const from  = validateDate(req.query.from);
+    const to    = validateDate(req.query.to);
+    const limit = rankingLimit(req);
+    const rows = db.prepare(`
+      SELECT printf('%03d', o.order_sequence) AS order_number,
+             o.customer_name,
+             o.discount        AS discount_pct,
+             COALESCE(sub.t, 0) AS subtotal,
+             COALESCE(sub.t * (o.discount/100.0), 0) AS discount_amount
+      FROM orders o
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
+        FROM order_items GROUP BY order_id
+      ) sub ON sub.order_id = o.id
+      WHERE o.discount > 0 AND o.status != 'Cancelado'
+        ${rangeClause('o', 'created_at', from, to)}
+      ORDER BY discount_amount DESC
+      LIMIT ?
+    `).all(...rangeParams(from, to), limit);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/top-vendors ─────────────────────────────────────────────
+router.get('/top-vendors', (req, res) => {
+  try {
+    const from  = validateDate(req.query.from);
+    const to    = validateDate(req.query.to);
+    const limit = rankingLimit(req);
+    const rows = db.prepare(`
+      SELECT COALESCE(u.full_name, u.username, 'Sin asignar') AS vendor_name,
+             COUNT(DISTINCT o.id) AS order_count,
+             COALESCE(SUM(sub.t * (1.0 - o.discount/100.0)), 0) AS total,
+             COALESCE(AVG(sub.t * (1.0 - o.discount/100.0)), 0) AS avg_ticket
+      FROM orders o
+      LEFT JOIN users u ON o.created_by = u.id
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
+        FROM order_items GROUP BY order_id
+      ) sub ON sub.order_id = o.id
+      WHERE o.status != 'Cancelado'
+        ${rangeClause('o', 'created_at', from, to)}
+      GROUP BY o.created_by
+      ORDER BY total DESC
+      LIMIT ?
+    `).all(...rangeParams(from, to), limit);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── GET /api/reports/excel ────────────────────────────────────────────────────
 router.get('/excel', async (req, res) => {
   try {
