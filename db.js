@@ -5,7 +5,7 @@ const fs = require('fs');
 
 // DATABASE_PATH permite montar un volumen persistente en Railway/Docker.
 // Si no está definida, usa ./data/pedidos.db como fallback.
-const DB_FILE  = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'pedidos.db');
+const DB_FILE  = process.env.DATABASE_PATH || '/data/pedidos.db';
 const DATA_DIR = path.dirname(DB_FILE);
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
