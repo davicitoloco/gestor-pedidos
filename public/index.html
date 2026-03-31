@@ -793,24 +793,33 @@
 
 <!-- ===================================================== MODAL: Importar Clientes -->
 <div id="import-clients-modal" class="modal-overlay hidden">
-  <div class="modal" style="max-width:680px">
-    <div class="modal-header">Importar Clientes</div>
+  <div class="modal" style="max-width:700px">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between">
+      <span>Importar Clientes</span>
+      <button class="btn btn-secondary btn-sm" id="btn-clients-template">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Descargar plantilla de ejemplo
+      </button>
+    </div>
     <div class="modal-form-body">
-      <p style="color:var(--text-muted);font-size:.88rem;margin-bottom:16px">
-        Seleccioná un archivo <strong>Excel (.xlsx)</strong> o <strong>CSV</strong> con las columnas:<br>
-        <code style="font-size:.82rem;background:var(--bg);padding:2px 6px;border-radius:4px">nombre</code>&nbsp;
-        <code style="font-size:.82rem;background:var(--bg);padding:2px 6px;border-radius:4px">telefono</code>&nbsp;
-        <code style="font-size:.82rem;background:var(--bg);padding:2px 6px;border-radius:4px">email</code>&nbsp;
-        <code style="font-size:.82rem;background:var(--bg);padding:2px 6px;border-radius:4px">direccion</code>
-        <span style="color:var(--text-muted)">&nbsp;(todas opcionales excepto nombre)</span>
-      </p>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:16px;font-size:.86rem;color:var(--text-muted);line-height:1.6">
+        El archivo debe tener una <strong>primera fila con encabezados</strong>. Solo <strong>nombre</strong> es obligatorio, el resto es opcional.<br>
+        Encabezados aceptados:
+        <code style="background:#fff;padding:1px 6px;border-radius:4px;margin:0 2px">nombre</code>
+        <code style="background:#fff;padding:1px 6px;border-radius:4px;margin:0 2px">telefono</code>
+        <code style="background:#fff;padding:1px 6px;border-radius:4px;margin:0 2px">email</code>
+        <code style="background:#fff;padding:1px 6px;border-radius:4px;margin:0 2px">direccion</code><br>
+        Formatos soportados: <strong>.xlsx</strong> (Excel) · <strong>.csv</strong> (texto separado por comas).<br>
+        Si usás <strong>Google Sheets</strong>: Archivo → Descargar → Microsoft Excel (.xlsx)
+      </div>
+      <div id="import-clients-error" class="import-error hidden"></div>
       <div class="field">
-        <label class="label">Archivo</label>
+        <label class="label">Seleccioná el archivo</label>
         <input type="file" id="inp-import-clients-file" class="input" accept=".xlsx,.xls,.csv">
       </div>
       <div id="import-clients-preview" class="hidden" style="margin-top:16px">
         <p id="import-clients-count" style="font-size:.85rem;color:var(--text-muted);margin-bottom:8px"></p>
-        <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+        <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
           <table class="table" style="font-size:.85rem">
             <thead><tr>
               <th>Nombre</th>

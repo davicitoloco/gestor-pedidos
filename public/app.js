@@ -1109,17 +1109,50 @@ $('btn-delivery-confirm').addEventListener('click', async () => {
 
 function parseFileRows(file) {
   return new Promise((resolve, reject) => {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
     const reader = new FileReader();
+
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo. Verificá que no esté dañado o abierto en otro programa.'));
+
     reader.onload = e => {
       try {
-        const data = new Uint8Array(e.target.result);
-        const wb   = XLSX.read(data, { type: 'array' });
+        let wb;
+        if (ext === 'csv') {
+          // Los CSV deben leerse como texto, no como binario
+          wb = XLSX.read(e.target.result, { type: 'string', raw: false });
+        } else {
+          wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        }
+
+        if (!wb.SheetNames.length)
+          return reject(new Error('El archivo no contiene hojas de datos.'));
+
         const ws   = wb.Sheets[wb.SheetNames[0]];
-        resolve(XLSX.utils.sheet_to_json(ws, { defval: '' }));
-      } catch (err) { reject(err); }
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+        if (!rows.length)
+          return reject(new Error('El archivo está vacío o solo tiene encabezados. Agregá al menos una fila de datos.'));
+
+        resolve(rows);
+      } catch (err) {
+        const msg = err.message || '';
+        let human;
+        if (msg.includes('pattern') || msg.includes('zip') || msg.includes('PK')) {
+          human = 'El archivo no es un Excel válido (.xlsx). Si usás Google Sheets, exportá desde Archivo → Descargar → .xlsx o .csv. Si tenés un .xls antiguo, abrilo y guardalo como .xlsx.';
+        } else if (msg.includes('CFB') || msg.includes('BIFF')) {
+          human = 'Formato Excel antiguo (.xls) no compatible. Abrí el archivo y guardalo como .xlsx, luego intentá de nuevo.';
+        } else {
+          human = `No se pudo leer el archivo: ${msg || 'formato no reconocido'}. Descargá la plantilla de ejemplo para ver el formato correcto.`;
+        }
+        reject(new Error(human));
+      }
     };
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(file);
+
+    if (ext === 'csv') {
+      reader.readAsText(file, 'UTF-8');
+    } else {
+      reader.readAsArrayBuffer(file);
+    }
   });
 }
 
@@ -1202,10 +1235,24 @@ $('btn-import-clients').addEventListener('click', () => {
   $('inp-import-clients-file').value = '';
   $('import-clients-preview').classList.add('hidden');
   $('btn-import-clients-confirm').classList.add('hidden');
+  $('import-clients-error').classList.add('hidden');
   $('import-clients-modal').classList.remove('hidden');
 });
 
 $('btn-import-clients-cancel').addEventListener('click', () => $('import-clients-modal').classList.add('hidden'));
+
+$('btn-clients-template').addEventListener('click', () => {
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['nombre', 'telefono', 'email', 'direccion'],
+    ['Juan García', '11 1234-5678', 'juan@ejemplo.com', 'Av. Corrientes 1234, CABA'],
+    ['María López', '351 555-6789', 'maria@empresa.com', 'San Martín 567, Córdoba'],
+    ['Empresa ABC S.A.', '11 9876-5432', 'compras@abc.com', 'Callao 890, CABA']
+  ]);
+  ws['!cols'] = [{ wch: 32 }, { wch: 18 }, { wch: 30 }, { wch: 38 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+  XLSX.writeFile(wb, 'plantilla-clientes.xlsx');
+});
 $('import-clients-modal').addEventListener('click', e => {
   if (e.target === $('import-clients-modal')) $('import-clients-modal').classList.add('hidden');
 });
@@ -1213,16 +1260,26 @@ $('import-clients-modal').addEventListener('click', e => {
 $('inp-import-clients-file').addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
+
+  const errEl = $('import-clients-error');
+  errEl.classList.add('hidden');
+  $('import-clients-preview').classList.add('hidden');
+  $('btn-import-clients-confirm').classList.add('hidden');
+
   try {
     const rows = await parseFileRows(file);
     importClientsData = rows.map(r => ({
       nombre:   normalizeKey(r, ['nombre','name','cliente','customer','razón social','razon social']),
-      telefono: normalizeKey(r, ['telefono','teléfono','phone','tel','celular']),
-      email:    normalizeKey(r, ['email','correo','mail','e-mail']),
+      telefono: normalizeKey(r, ['telefono','teléfono','phone','tel','celular','móvil','movil']),
+      email:    normalizeKey(r, ['email','correo','mail','e-mail','correo electrónico']),
       direccion:normalizeKey(r, ['direccion','dirección','address','domicilio'])
     })).filter(r => r.nombre);
 
-    if (!importClientsData.length) { toast('No se encontraron filas con nombre de cliente', 'error'); return; }
+    if (!importClientsData.length) {
+      errEl.textContent = 'No se encontró ninguna columna "nombre" en el archivo. Revisá que la primera fila tenga los encabezados correctos (nombre, telefono, email, direccion). Descargá la plantilla de ejemplo para ver el formato.';
+      errEl.classList.remove('hidden');
+      return;
+    }
 
     $('import-clients-count').textContent = `${importClientsData.length} cliente${importClientsData.length !== 1 ? 's' : ''} encontrado${importClientsData.length !== 1 ? 's' : ''}`;
     $('import-clients-tbody').innerHTML = importClientsData.map(c => `
@@ -1235,7 +1292,10 @@ $('inp-import-clients-file').addEventListener('change', async e => {
     `).join('');
     $('import-clients-preview').classList.remove('hidden');
     $('btn-import-clients-confirm').classList.remove('hidden');
-  } catch (err) { toast('Error al leer el archivo: ' + err.message, 'error'); }
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
 });
 
 $('btn-import-clients-confirm').addEventListener('click', async () => {

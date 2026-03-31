@@ -220,6 +220,11 @@ tr.stock-critical td { background:#fff1f2 }
   background:#fef3c7;border:1px solid #f59e0b;border-radius:var(--radius);
   font-size:.88rem;color:#78350f
 }
+.import-error{
+  padding:10px 14px;background:#fff1f2;border:1px solid #fca5a5;
+  border-radius:var(--radius-sm);color:#991b1b;font-size:.86rem;
+  line-height:1.55;margin-bottom:14px
+}
 .alert-chip{
   background:#fff;border:1px solid #f59e0b;border-radius:20px;
   padding:1px 10px;font-size:.82rem;color:#92400e
