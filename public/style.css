@@ -206,3 +206,21 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .delivery-items-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
 .delivery-item-chip{font-size:.82rem;padding:2px 10px;background:var(--primary-light);color:var(--primary);border-radius:20px}
 .delivery-notes{font-size:.82rem;color:var(--text-muted);margin-top:4px;font-style:italic}
+
+/* ============================================================ STOCK */
+.badge-stock-ok { background:#dcfce7;color:#166534;padding:2px 10px;border-radius:20px;font-size:.78rem;font-weight:700;display:inline-block }
+.badge-stock-low{ background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:20px;font-size:.78rem;font-weight:700;display:inline-block }
+.badge-stock-out{ background:#fee2e2;color:#991b1b;padding:2px 10px;border-radius:20px;font-size:.78rem;font-weight:700;display:inline-block }
+tr.stock-low td { background:#fffbeb }
+tr.stock-critical td { background:#fff1f2 }
+
+.stock-alerts-banner{
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+  padding:12px 16px;margin-bottom:18px;
+  background:#fef3c7;border:1px solid #f59e0b;border-radius:var(--radius);
+  font-size:.88rem;color:#78350f
+}
+.alert-chip{
+  background:#fff;border:1px solid #f59e0b;border-radius:20px;
+  padding:1px 10px;font-size:.82rem;color:#92400e
+}

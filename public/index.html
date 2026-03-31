@@ -57,6 +57,10 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
         Catálogo
       </a>
+      <a class="nav-item admin-only" data-section="stock" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="17"/><line x1="9.5" y1="14.5" x2="14.5" y2="14.5"/></svg>
+        Stock
+      </a>
       <a class="nav-item admin-only" data-section="usuarios" href="#">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         Usuarios
@@ -360,8 +364,9 @@
           <thead><tr>
             <th>Nombre</th>
             <th style="width:160px" class="text-right">Precio base</th>
+            <th style="width:90px" class="text-center">Stock</th>
             <th style="width:100px" class="text-center">Estado</th>
-            <th style="width:90px" class="text-center admin-only-col">Acciones</th>
+            <th style="width:110px" class="text-center admin-only-col">Acciones</th>
           </tr></thead>
           <tbody id="catalog-tbody"></tbody>
         </table>
@@ -371,6 +376,38 @@
         </div>
       </div>
     </div><!-- /section-catalogo -->
+
+    <!-- ======================== SECCIÓN: STOCK -->
+    <div id="section-stock" class="app-section hidden">
+
+      <!-- Panel de alertas -->
+      <div id="stock-alerts-banner" class="stock-alerts-banner hidden"></div>
+
+      <div class="page-header">
+        <div><h2 class="page-title">Gestión de Stock</h2><p class="page-subtitle" id="stock-count"></p></div>
+        <button class="btn btn-primary" id="btn-new-ingreso">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Registrar ingreso
+        </button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th>Producto</th>
+            <th style="width:110px" class="text-center">Stock actual</th>
+            <th style="width:100px" class="text-center">Mínimo</th>
+            <th style="width:120px" class="text-center">Estado stock</th>
+            <th style="width:120px" class="text-center">Acciones</th>
+          </tr></thead>
+          <tbody id="stock-tbody"></tbody>
+        </table>
+        <div id="no-stock" class="empty-state hidden">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/></svg>
+          <p>No hay productos en el catálogo</p>
+        </div>
+      </div>
+    </div><!-- /section-stock -->
 
     <!-- ======================== SECCIÓN: USUARIOS -->
     <div id="section-usuarios" class="app-section hidden">
@@ -538,6 +575,10 @@
           <span class="suffix" style="right:10px">$</span>
         </div>
       </div>
+      <div class="field" style="margin-top:14px">
+        <label class="label">Stock mínimo (alerta)</label>
+        <input type="number" id="inp-prod-stock-min" class="input" min="0" step="1" placeholder="0 = sin alerta">
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-prod-cancel">Cancelar</button>
@@ -565,6 +606,54 @@
 
 <!-- Toast -->
 <div id="toast" class="toast hidden"></div>
+
+<!-- ===================================================== MODAL: Registrar ingreso -->
+<div id="ingreso-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header"><h3>Registrar ingreso de mercadería</h3></div>
+    <div class="modal-form-body">
+      <div class="field">
+        <label class="label required">Producto</label>
+        <select id="inp-ingreso-product" class="input select"></select>
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label class="label required">Cantidad que ingresa</label>
+        <input type="number" id="inp-ingreso-qty" class="input" min="1" step="any" placeholder="Ej: 50">
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label class="label">Observaciones</label>
+        <input type="text" id="inp-ingreso-notes" class="input" placeholder="Ej: Remito 1234, proveedor...">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-ingreso-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-ingreso-confirm">Registrar ingreso</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Historial de movimientos -->
+<div id="movements-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header"><h3 id="movements-modal-title">Historial de movimientos</h3></div>
+    <div class="modal-form-body" style="padding:0;max-height:420px;overflow-y:auto">
+      <table class="table" style="font-size:.88rem">
+        <thead><tr>
+          <th style="width:140px">Fecha</th>
+          <th style="width:80px" class="text-center">Tipo</th>
+          <th style="width:80px" class="text-center">Cantidad</th>
+          <th>Referencia / Notas</th>
+          <th style="width:110px">Usuario</th>
+        </tr></thead>
+        <tbody id="movements-tbody"></tbody>
+      </table>
+      <div id="no-movements" class="empty-state hidden"><p>Sin movimientos registrados</p></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-movements-close">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <!-- ===================================================== MODAL: Importar Productos -->
 <div id="import-products-modal" class="modal-overlay hidden">

@@ -216,10 +216,12 @@ router.post('/', (req, res) => {
              status || 'Pendiente', parseFloat(discount) || 0, req.session.userId);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
-        const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount) VALUES (?, ?, ?, ?, ?)');
+        const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
         for (const it of items) {
-          if (it.product_name && it.product_name.trim())
-            ins.run(oid, it.product_name.trim(), parseFloat(it.quantity)||1, parseFloat(it.unit_price)||0, parseFloat(it.discount)||0);
+          if (it.product_name && it.product_name.trim()) {
+            const prod = db.prepare('SELECT id FROM products WHERE name = ?').get(it.product_name.trim());
+            ins.run(oid, it.product_name.trim(), parseFloat(it.quantity)||1, parseFloat(it.unit_price)||0, parseFloat(it.discount)||0, prod ? prod.id : null);
+          }
         }
       }
       return oid;
@@ -253,10 +255,12 @@ router.put('/:id', (req, res) => {
       if (items !== undefined) {
         db.prepare('DELETE FROM order_items WHERE order_id = ?').run(id);
         if (items.length > 0) {
-          const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount) VALUES (?, ?, ?, ?, ?)');
+          const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
           for (const it of items) {
-            if (it.product_name && it.product_name.trim())
-              ins.run(id, it.product_name.trim(), parseFloat(it.quantity)||1, parseFloat(it.unit_price)||0, parseFloat(it.discount)||0);
+            if (it.product_name && it.product_name.trim()) {
+              const prod = db.prepare('SELECT id FROM products WHERE name = ?').get(it.product_name.trim());
+              ins.run(id, it.product_name.trim(), parseFloat(it.quantity)||1, parseFloat(it.unit_price)||0, parseFloat(it.discount)||0, prod ? prod.id : null);
+            }
           }
         }
       }
@@ -320,6 +324,23 @@ router.post('/:id/deliveries', (req, res) => {
       for (const item of validItems)
         ins.run(delivId, item.order_item_id, parseFloat(item.quantity_delivered));
 
+      // Descontar stock por entrega
+      const ref = `Pedido #${String(order.order_sequence).padStart(3, '0')}`;
+      for (const item of validItems) {
+        const oi = db.prepare('SELECT product_id, product_name FROM order_items WHERE id = ?').get(item.order_item_id);
+        let productId = oi && oi.product_id;
+        if (!productId && oi) {
+          const prod = db.prepare('SELECT id FROM products WHERE name = ?').get(oi.product_name);
+          if (prod) productId = prod.id;
+        }
+        if (productId) {
+          const qty = parseFloat(item.quantity_delivered);
+          db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(qty, productId);
+          db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by) VALUES (?, 'egreso', ?, ?, ?)`)
+            .run(productId, qty, ref, req.session.userId);
+        }
+      }
+
       // Recalcular estado automáticamente
       const summary = db.prepare(`
         SELECT oi.quantity, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
@@ -334,6 +355,62 @@ router.post('/:id/deliveries', (req, res) => {
       const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
       db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
         .run(newStatus, id);
+    });
+
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── DELETE /api/orders/:id/deliveries/:delivId ───────────────────────────────
+router.delete('/:id/deliveries/:delivId', (req, res) => {
+  try {
+    const orderId  = Number(req.params.id);
+    const delivId  = Number(req.params.delivId);
+    const order    = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'Acceso denegado' });
+    const delivery = db.prepare('SELECT * FROM deliveries WHERE id = ? AND order_id = ?').get(delivId, orderId);
+    if (!delivery) return res.status(404).json({ error: 'Entrega no encontrada' });
+
+    withTransaction(() => {
+      // Restaurar stock
+      const delivItems = db.prepare(`
+        SELECT di.quantity_delivered, oi.product_id, oi.product_name
+        FROM delivery_items di JOIN order_items oi ON di.order_item_id = oi.id
+        WHERE di.delivery_id = ?
+      `).all(delivId);
+
+      const ref = `Pedido #${String(order.order_sequence).padStart(3, '0')} (cancelación entrega)`;
+      for (const item of delivItems) {
+        let productId = item.product_id;
+        if (!productId) {
+          const prod = db.prepare('SELECT id FROM products WHERE name = ?').get(item.product_name);
+          if (prod) productId = prod.id;
+        }
+        if (productId) {
+          db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity_delivered, productId);
+          db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by) VALUES (?, 'ingreso', ?, ?, ?)`)
+            .run(productId, item.quantity_delivered, ref, req.session.userId);
+        }
+      }
+
+      db.prepare('DELETE FROM deliveries WHERE id = ?').run(delivId);
+
+      // Recalcular estado
+      const summary = db.prepare(`
+        SELECT oi.quantity, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
+        FROM order_items oi
+        LEFT JOIN delivery_items di ON di.order_item_id = oi.id
+        WHERE oi.order_id = ?
+        GROUP BY oi.id
+      `).all(orderId);
+
+      const allDone  = summary.length > 0 && summary.every(r => r.total_delivered >= r.quantity);
+      const anyDone  = summary.some(r => r.total_delivered > 0);
+      const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
+      db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
+        .run(newStatus, orderId);
     });
 
     res.json({ success: true });

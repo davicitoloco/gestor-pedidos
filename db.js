@@ -75,6 +75,16 @@ db.exec(`
     order_item_id INTEGER NOT NULL REFERENCES order_items(id),
     quantity_delivered REAL NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS stock_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    type TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    reference TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
@@ -86,6 +96,9 @@ addColIfMissing('users', 'role',      "TEXT NOT NULL DEFAULT 'vendedor'");
 addColIfMissing('users', 'full_name', "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('users', 'active',    "INTEGER NOT NULL DEFAULT 1");
 addColIfMissing('orders', 'created_by', "INTEGER REFERENCES users(id)");
+addColIfMissing('products', 'stock',     'INTEGER NOT NULL DEFAULT 0');
+addColIfMissing('products', 'stock_min', 'INTEGER NOT NULL DEFAULT 0');
+addColIfMissing('order_items', 'product_id', 'INTEGER REFERENCES products(id)');
 
 // Settings por defecto
 db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run('company_name', 'Mi Empresa');

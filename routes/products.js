@@ -27,9 +27,11 @@ router.get('/', (req, res) => {
 // POST /api/products — solo admin
 router.post('/', requireAdmin, (req, res) => {
   try {
-    const { name, base_price } = req.body;
+    const { name, base_price, stock_min } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Nombre requerido' });
-    const result = db.prepare('INSERT INTO products (name, base_price) VALUES (?, ?)').run(name.trim(), parseFloat(base_price) || 0);
+    const result = db.prepare('INSERT INTO products (name, base_price, stock_min) VALUES (?, ?, ?)').run(
+      name.trim(), parseFloat(base_price) || 0, parseInt(stock_min) || 0
+    );
     const product = db.prepare('SELECT * FROM products WHERE id = ?').get(Number(result.lastInsertRowid));
     res.status(201).json(product);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -41,11 +43,12 @@ router.put('/:id', requireAdmin, (req, res) => {
     const id = Number(req.params.id);
     const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'Producto no encontrado' });
-    const { name, base_price, active } = req.body;
-    db.prepare('UPDATE products SET name = ?, base_price = ?, active = ? WHERE id = ?').run(
+    const { name, base_price, active, stock_min } = req.body;
+    db.prepare('UPDATE products SET name = ?, base_price = ?, active = ?, stock_min = ? WHERE id = ?').run(
       name !== undefined ? name.trim() : existing.name,
       base_price !== undefined ? parseFloat(base_price) : existing.base_price,
       active !== undefined ? (active ? 1 : 0) : existing.active,
+      stock_min !== undefined ? (parseInt(stock_min) || 0) : existing.stock_min,
       id
     );
     res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));

@@ -155,6 +155,7 @@ function navigate(section) {
   if (section === 'pedidos')   loadOrders();
   if (section === 'clientes')  { showClientsSubview('list'); loadClients(); }
   if (section === 'catalogo')  loadCatalog();
+  if (section === 'stock')     loadStock();
   if (section === 'usuarios')  { showUsersSubview('list'); loadUsers(); }
   if (section === 'reportes')  loadReports();
 }
@@ -446,10 +447,15 @@ function renderCatalog(products) {
   if (products.length === 0) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
   noEl.classList.add('hidden');
 
-  tbody.innerHTML = products.map(p => `
-    <tr>
+  tbody.innerHTML = products.map(p => {
+    const stockClass = p.active && p.stock === 0 ? 'stock-critical' : (p.active && p.stock_min > 0 && p.stock <= p.stock_min ? 'stock-low' : '');
+    return `
+    <tr class="${stockClass}">
       <td style="${!p.active ? 'opacity:.5;text-decoration:line-through' : ''}">${esc(p.name)}</td>
       <td class="text-right" style="font-weight:600">${fmtMoney(p.base_price)}</td>
+      <td class="text-center">
+        ${p.active ? stockBadge(p.stock, p.stock_min) : '<span class="badge badge-default">—</span>'}
+      </td>
       <td class="text-center">
         ${p.active
           ? '<span class="badge badge-success">Activo</span>'
@@ -459,14 +465,17 @@ function renderCatalog(products) {
         <button class="btn-icon" onclick="openProductModal(${p.id})" title="Editar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
+        <button class="btn-icon" onclick="openMovementsModal(${p.id},'${esc(p.name)}')" title="Historial de movimientos">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
+        </button>
         ${p.active ? `<button class="btn-icon btn-delete" onclick="toggleProduct(${p.id},0)" title="Desactivar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>` : `<button class="btn-icon" onclick="toggleProduct(${p.id},1)" title="Activar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
         </button>`}
       </td>` : ''}
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 $('btn-new-product').addEventListener('click', () => openProductModal(null));
@@ -476,13 +485,18 @@ function openProductModal(id) {
   $('product-modal-title').textContent = id ? 'Editar Producto' : 'Nuevo Producto';
   $('product-modal').classList.remove('hidden');
   if (id) {
-    const p = api('GET', '/products?all=1').then(list => {
+    api('GET', '/products?all=1').then(list => {
       const prod = list.find(x => x.id === id);
-      if (prod) { $('inp-prod-name').value = prod.name; $('inp-prod-price').value = prod.base_price; }
+      if (prod) {
+        $('inp-prod-name').value = prod.name;
+        $('inp-prod-price').value = prod.base_price;
+        $('inp-prod-stock-min').value = prod.stock_min || 0;
+      }
     });
   } else {
     $('inp-prod-name').value = '';
     $('inp-prod-price').value = '';
+    $('inp-prod-stock-min').value = '0';
   }
   setTimeout(() => $('inp-prod-name').focus(), 50);
 }
@@ -502,15 +516,16 @@ $('btn-prod-cancel').addEventListener('click', () => $('product-modal').classLis
 $('product-modal').addEventListener('click', e => { if (e.target === $('product-modal')) $('product-modal').classList.add('hidden'); });
 
 $('btn-prod-save').addEventListener('click', async () => {
-  const name  = $('inp-prod-name').value.trim();
-  const price = parseFloat($('inp-prod-price').value) || 0;
+  const name      = $('inp-prod-name').value.trim();
+  const price     = parseFloat($('inp-prod-price').value) || 0;
+  const stock_min = parseInt($('inp-prod-stock-min').value) || 0;
   if (!name) { toast('El nombre es requerido', 'error'); $('inp-prod-name').focus(); return; }
   try {
     if (state.editingProdId) {
-      await api('PUT', `/products/${state.editingProdId}`, { name, base_price: price });
+      await api('PUT', `/products/${state.editingProdId}`, { name, base_price: price, stock_min });
       toast('Producto actualizado', 'success');
     } else {
-      await api('POST', '/products', { name, base_price: price });
+      await api('POST', '/products', { name, base_price: price, stock_min });
       toast('Producto creado', 'success');
     }
     $('product-modal').classList.add('hidden');
@@ -876,6 +891,10 @@ function renderDeliveries(deliveries) {
       <div class="delivery-entry-header">
         <span class="delivery-num">Entrega #${i + 1}</span>
         <span class="delivery-date">${fmtDateTime(d.created_at)}</span>
+        <button class="btn-icon btn-delete" style="margin-left:auto"
+          onclick="deleteDelivery(${state.editingOrderId},${d.id},${i+1})" title="Cancelar esta entrega">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>
       </div>
       <div class="delivery-items-list">
         ${d.items.map(it => `
@@ -1117,6 +1136,148 @@ $('btn-import-clients-confirm').addEventListener('click', async () => {
   } catch (err) { toast(err.message, 'error'); }
   finally { btn.disabled = false; }
 });
+
+/* ================================================================ STOCK */
+
+function stockBadge(stock, stock_min) {
+  if (stock === 0)
+    return `<span class="badge badge-stock-out">Sin stock</span>`;
+  if (stock_min > 0 && stock <= stock_min)
+    return `<span class="badge badge-stock-low">${stock}</span>`;
+  return `<span class="badge badge-stock-ok">${stock}</span>`;
+}
+
+async function loadStock() {
+  try {
+    const [products, alerts] = await Promise.all([
+      api('GET', '/stock'),
+      api('GET', '/stock/alerts')
+    ]);
+    renderStockAlertsBanner(alerts);
+    renderStock(products);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderStockAlertsBanner(alerts) {
+  const banner = $('stock-alerts-banner');
+  if (!banner) return;
+  if (!alerts.length) { banner.classList.add('hidden'); return; }
+  banner.classList.remove('hidden');
+  banner.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    <strong>${alerts.length} producto${alerts.length !== 1 ? 's' : ''} con stock bajo:</strong>
+    ${alerts.map(a => `<span class="alert-chip">${esc(a.name)} <strong>(${a.stock})</strong></span>`).join('')}
+  `;
+}
+
+function renderStock(products) {
+  const tbody = $('stock-tbody');
+  const noEl  = $('no-stock');
+  $('stock-count').textContent = `${products.length} producto${products.length !== 1 ? 's' : ''}`;
+
+  if (!products.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
+  noEl.classList.add('hidden');
+
+  tbody.innerHTML = products.map(p => {
+    const isLow  = p.stock_min > 0 && p.stock <= p.stock_min && p.stock > 0;
+    const isOut  = p.stock === 0;
+    const rowCls = isOut ? 'stock-critical' : isLow ? 'stock-low' : '';
+    return `<tr class="${rowCls}">
+      <td style="font-weight:500">${esc(p.name)}</td>
+      <td class="text-center" style="font-weight:700;font-size:1.05rem">${p.stock}</td>
+      <td class="text-center" style="color:var(--text-muted)">${p.stock_min || '—'}</td>
+      <td class="text-center">${stockBadge(p.stock, p.stock_min)}</td>
+      <td class="text-center" style="white-space:nowrap">
+        <button class="btn-icon" onclick="openIngresoModal(${p.id})" title="Registrar ingreso">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="btn-icon" onclick="openMovementsModal(${p.id},'${esc(p.name)}')" title="Ver historial">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+$('btn-new-ingreso').addEventListener('click', () => openIngresoModal(null));
+
+window.openIngresoModal = async function(productId) {
+  try {
+    const products = await api('GET', '/stock');
+    const sel = $('inp-ingreso-product');
+    sel.innerHTML = products.map(p =>
+      `<option value="${p.id}" ${p.id === productId ? 'selected' : ''}>${esc(p.name)} (stock: ${p.stock})</option>`
+    ).join('');
+    $('inp-ingreso-qty').value   = '';
+    $('inp-ingreso-notes').value = '';
+    $('ingreso-modal').classList.remove('hidden');
+    setTimeout(() => (productId ? $('inp-ingreso-qty') : $('inp-ingreso-product')).focus(), 50);
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+$('btn-ingreso-cancel').addEventListener('click', () => $('ingreso-modal').classList.add('hidden'));
+$('ingreso-modal').addEventListener('click', e => { if (e.target === $('ingreso-modal')) $('ingreso-modal').classList.add('hidden'); });
+
+$('btn-ingreso-confirm').addEventListener('click', async () => {
+  const product_id = $('inp-ingreso-product').value;
+  const quantity   = parseFloat($('inp-ingreso-qty').value);
+  const notes      = $('inp-ingreso-notes').value.trim();
+  if (!product_id) { toast('Seleccioná un producto', 'error'); return; }
+  if (!quantity || quantity <= 0) { toast('Ingresá una cantidad mayor a 0', 'error'); $('inp-ingreso-qty').focus(); return; }
+  const btn = $('btn-ingreso-confirm');
+  btn.disabled = true;
+  try {
+    await api('POST', '/stock/ingresos', { product_id, quantity, notes });
+    $('ingreso-modal').classList.add('hidden');
+    toast('Ingreso registrado correctamente', 'success');
+    loadStock();
+    await loadProductCatalog();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.openMovementsModal = async function(productId, productName) {
+  $('movements-modal-title').textContent = `Historial — ${productName}`;
+  $('movements-modal').classList.remove('hidden');
+  $('movements-tbody').innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted)">Cargando...</td></tr>';
+  $('no-movements').classList.add('hidden');
+  try {
+    const data = await api('GET', `/stock/movements/${productId}`);
+    if (!data.movements.length) {
+      $('movements-tbody').innerHTML = '';
+      $('no-movements').classList.remove('hidden');
+      return;
+    }
+    $('movements-tbody').innerHTML = data.movements.map(m => `
+      <tr>
+        <td style="color:var(--text-muted)">${fmtDateTime(m.created_at)}</td>
+        <td class="text-center">
+          ${m.type === 'ingreso'
+            ? '<span class="badge badge-stock-ok">Ingreso</span>'
+            : '<span class="badge badge-stock-out">Egreso</span>'}
+        </td>
+        <td class="text-center" style="font-weight:600">${m.quantity}</td>
+        <td style="font-size:.85rem">${esc(m.reference || m.notes || '—')}</td>
+        <td style="color:var(--text-muted);font-size:.83rem">${esc(m.user_name || '—')}</td>
+      </tr>
+    `).join('');
+  } catch (err) { toast(err.message, 'error'); $('movements-modal').classList.add('hidden'); }
+};
+
+$('btn-movements-close').addEventListener('click', () => $('movements-modal').classList.add('hidden'));
+$('movements-modal').addEventListener('click', e => { if (e.target === $('movements-modal')) $('movements-modal').classList.add('hidden'); });
+
+window.deleteDelivery = async function(orderId, delivId, num) {
+  if (!await confirm(`¿Cancelar la Entrega #${num}? El stock de los productos se va a restaurar.`)) return;
+  try {
+    await api('DELETE', `/orders/${orderId}/deliveries/${delivId}`);
+    toast('Entrega cancelada y stock restaurado', 'success');
+    const updated = await api('GET', `/orders/${orderId}`);
+    $('inp-status').value = updated.status;
+    $('form-status-badge').innerHTML = statusBadge(updated.status);
+    loadDeliveries(orderId);
+  } catch (err) { toast(err.message, 'error'); }
+};
 
 /* ================================================================ INIT */
 checkAuth();
