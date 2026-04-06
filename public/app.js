@@ -1116,19 +1116,22 @@ function parseFileRows(file) {
 
     reader.onload = e => {
       try {
+        // cellDates:false + cellNF:false evitan que SheetJS intente convertir
+        // celdas con formato de fecha/número, que causa "did not match pattern"
+        const readOpts = { cellDates: false, cellNF: false, cellStyles: false };
         let wb;
         if (ext === 'csv') {
-          // Los CSV deben leerse como texto, no como binario
-          wb = XLSX.read(e.target.result, { type: 'string', raw: false });
+          wb = XLSX.read(e.target.result, { type: 'string', ...readOpts });
         } else {
-          wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', ...readOpts });
         }
 
         if (!wb.SheetNames.length)
           return reject(new Error('El archivo no contiene hojas de datos.'));
 
-        const ws   = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        // raw:true devuelve el valor crudo de cada celda sin intentar formatearlo
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
 
         if (!rows.length)
           return reject(new Error('El archivo está vacío o solo tiene encabezados. Agregá al menos una fila de datos.'));
@@ -1137,7 +1140,7 @@ function parseFileRows(file) {
       } catch (err) {
         const msg = err.message || '';
         let human;
-        if (msg.includes('pattern') || msg.includes('zip') || msg.includes('PK')) {
+        if (msg.includes('zip') || msg.includes('PK')) {
           human = 'El archivo no es un Excel válido (.xlsx). Si usás Google Sheets, exportá desde Archivo → Descargar → .xlsx o .csv. Si tenés un .xls antiguo, abrilo y guardalo como .xlsx.';
         } else if (msg.includes('CFB') || msg.includes('BIFF')) {
           human = 'Formato Excel antiguo (.xls) no compatible. Abrí el archivo y guardalo como .xlsx, luego intentá de nuevo.';
