@@ -191,6 +191,9 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .modal-icon{flex-shrink:0;margin-top:2px}
 .modal-body p{font-size:.93rem;line-height:1.5}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;padding:13px 18px;border-top:1px solid var(--border);background:var(--bg)}
+.delivery-complete-toggle{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:var(--radius-sm);margin-bottom:14px;cursor:pointer;font-weight:600;color:#1d4ed8;font-size:.9rem;user-select:none}
+.delivery-complete-toggle input[type=checkbox]{width:16px;height:16px;accent-color:#2563eb;cursor:pointer;flex-shrink:0}
+.delivery-complete-toggle.active{background:#dbeafe;border-color:#2563eb}
 
 /* ============================================================ TOAST */
 .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:var(--radius);font-weight:500;font-size:.88rem;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:1000;animation:slideUp .2s ease;max-width:360px}

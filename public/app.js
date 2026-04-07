@@ -165,7 +165,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
 });
 
 /* ================================================================ ORDERS LIST */
-let _allOrders = [];
+let _ordersSearchTimer = null;
 
 async function loadOrders() {
   showOrdersSubview('list');
@@ -173,21 +173,19 @@ async function loadOrders() {
     b.classList.toggle('active', b.dataset.status === state.filterStatus)
   );
   try {
-    const qs = state.filterStatus !== 'Todos' ? `?status=${encodeURIComponent(state.filterStatus)}` : '';
-    _allOrders = await api('GET', `/orders${qs}`);
-    applyOrderSearch();
+    const params = new URLSearchParams();
+    if (state.filterStatus !== 'Todos') params.set('status', state.filterStatus);
+    const q = ($('inp-orders-search').value || '').trim();
+    if (q) params.set('search', q);
+    const qs = params.toString() ? `?${params}` : '';
+    const orders = await api('GET', `/orders${qs}`);
+    renderOrders(orders, q);
   } catch (err) { toast(err.message, 'error'); }
 }
 
 function applyOrderSearch() {
-  const q = ($('inp-orders-search').value || '').toLowerCase().trim();
-  const filtered = q
-    ? _allOrders.filter(o =>
-        String(o.order_number).includes(q) ||
-        (o.customer_name || '').toLowerCase().includes(q)
-      )
-    : _allOrders;
-  renderOrders(filtered, q);
+  clearTimeout(_ordersSearchTimer);
+  _ordersSearchTimer = setTimeout(loadOrders, 250);
 }
 
 function renderOrders(orders, searchQuery = '') {
@@ -1089,9 +1087,20 @@ async function openDeliveryModal() {
     `).join('');
 
     $('inp-delivery-notes').value = '';
+    $('chk-delivery-complete').checked = false;
+    $('chk-delivery-complete').closest('label').classList.remove('active');
     $('delivery-modal').classList.remove('hidden');
   } catch (err) { toast(err.message, 'error'); }
 }
+
+$('chk-delivery-complete').addEventListener('change', function () {
+  const checked = this.checked;
+  this.closest('label').classList.toggle('active', checked);
+  document.querySelectorAll('.delivery-qty-inp').forEach(inp => {
+    if (inp.disabled) return;
+    inp.value = checked ? (inp.max || 0) : 0;
+  });
+});
 
 $('btn-delivery-confirm').addEventListener('click', async () => {
   const orderId = state.editingOrderId;

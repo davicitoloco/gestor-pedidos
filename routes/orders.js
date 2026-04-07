@@ -36,10 +36,13 @@ function getCompanyName() {
 // ── GET /api/orders ───────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, search } = req.query;
     const vendorFilter = isVendor(req) ? `AND o.created_by = ${req.session.userId}` : '';
     const statusFilter = (status && status !== 'Todos') ? `AND o.status = ?` : '';
-    const params       = (status && status !== 'Todos') ? [status] : [];
+    const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ?)` : '';
+    const params = [];
+    if (status && status !== 'Todos') params.push(status);
+    if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q); }
 
     const sql = `
       SELECT
@@ -55,7 +58,7 @@ router.get('/', (req, res) => {
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN users u ON o.created_by = u.id
-      WHERE 1=1 ${vendorFilter} ${statusFilter}
+      WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter}
       GROUP BY o.id
       ORDER BY o.order_sequence DESC
     `;
