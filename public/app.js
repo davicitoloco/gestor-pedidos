@@ -1123,7 +1123,7 @@ function parseFileRows(file) {
         if (ext === 'csv') {
           wb = XLSX.read(e.target.result, { type: 'string', ...readOpts });
         } else {
-          wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', ...readOpts });
+          wb = XLSX.read(e.target.result, { type: 'binary', ...readOpts });
         }
 
         if (!wb.SheetNames.length)
@@ -1154,7 +1154,7 @@ function parseFileRows(file) {
     if (ext === 'csv') {
       reader.readAsText(file, 'UTF-8');
     } else {
-      reader.readAsArrayBuffer(file);
+      reader.readAsBinaryString(file);
     }
   });
 }

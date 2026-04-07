@@ -330,7 +330,7 @@ router.post('/:id/deliveries', (req, res) => {
         const oi = db.prepare('SELECT product_id, product_name FROM order_items WHERE id = ?').get(item.order_item_id);
         let productId = oi && oi.product_id;
         if (!productId && oi) {
-          const prod = db.prepare('SELECT id FROM products WHERE name = ?').get(oi.product_name);
+          const prod = db.prepare('SELECT id FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))').get(oi.product_name);
           if (prod) productId = prod.id;
         }
         if (productId) {
@@ -385,7 +385,7 @@ router.delete('/:id/deliveries/:delivId', (req, res) => {
       for (const item of delivItems) {
         let productId = item.product_id;
         if (!productId) {
-          const prod = db.prepare('SELECT id FROM products WHERE name = ?').get(item.product_name);
+          const prod = db.prepare('SELECT id FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))').get(item.product_name);
           if (prod) productId = prod.id;
         }
         if (productId) {
