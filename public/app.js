@@ -165,6 +165,8 @@ document.querySelectorAll('.nav-item').forEach(btn => {
 });
 
 /* ================================================================ ORDERS LIST */
+let _allOrders = [];
+
 async function loadOrders() {
   showOrdersSubview('list');
   document.querySelectorAll('.filter-btn').forEach(b =>
@@ -172,17 +174,33 @@ async function loadOrders() {
   );
   try {
     const qs = state.filterStatus !== 'Todos' ? `?status=${encodeURIComponent(state.filterStatus)}` : '';
-    const orders = await api('GET', `/orders${qs}`);
-    renderOrders(orders);
+    _allOrders = await api('GET', `/orders${qs}`);
+    applyOrderSearch();
   } catch (err) { toast(err.message, 'error'); }
 }
 
-function renderOrders(orders) {
+function applyOrderSearch() {
+  const q = ($('inp-orders-search').value || '').toLowerCase().trim();
+  const filtered = q
+    ? _allOrders.filter(o =>
+        String(o.order_number).includes(q) ||
+        (o.customer_name || '').toLowerCase().includes(q)
+      )
+    : _allOrders;
+  renderOrders(filtered, q);
+}
+
+function renderOrders(orders, searchQuery = '') {
   const tbody = $('orders-tbody');
   const noEl  = $('no-orders');
   $('list-count').textContent = orders.length === 0 ? 'Sin pedidos' : `${orders.length} pedido${orders.length !== 1 ? 's' : ''}`;
 
-  if (orders.length === 0) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
+  if (orders.length === 0) {
+    tbody.innerHTML = '';
+    $('no-orders-msg').textContent = searchQuery ? 'No se encontraron pedidos' : 'No hay pedidos';
+    noEl.classList.remove('hidden');
+    return;
+  }
   noEl.classList.add('hidden');
 
   tbody.innerHTML = orders.map(o => `
@@ -214,6 +232,7 @@ function renderOrders(orders) {
 document.querySelectorAll('.filter-btn').forEach(btn => {
   btn.addEventListener('click', () => { state.filterStatus = btn.dataset.status; loadOrders(); });
 });
+$('inp-orders-search').addEventListener('input', applyOrderSearch);
 $('btn-new-order').addEventListener('click', () => openOrderForm(null));
 
 function showOrdersSubview(view) {

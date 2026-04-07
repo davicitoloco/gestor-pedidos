@@ -101,10 +101,12 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .page-subtitle{color:var(--text-muted);font-size:.85rem;margin-top:2px}
 
 /* ============================================================ FILTER BAR */
-.filter-bar{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.filter-bar{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
 .filter-btn{padding:5px 14px;border:1.5px solid var(--border);border-radius:20px;background:var(--white);color:var(--text-muted);font-size:.83rem;font-weight:500;cursor:pointer;transition:all .15s}
 .filter-btn:hover{border-color:var(--primary);color:var(--primary)}
 .filter-btn.active{background:var(--primary);border-color:var(--primary);color:#fff}
+.search-orders{margin-left:auto;padding:5px 12px;border:1.5px solid var(--border);border-radius:20px;font-size:.83rem;outline:none;background:var(--white);color:var(--text);width:210px;transition:border-color .15s}
+.search-orders:focus{border-color:var(--primary)}
 
 /* ============================================================ TABLES */
 .table-wrap{background:var(--white);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow)}
