@@ -727,9 +727,9 @@ function renderDiscountsPieChart(data) {
   if (!data.length) { wrap.classList.add('hidden'); return; }
   wrap.classList.remove('hidden');
 
-  const labels = data.map(d => `#${d.order_number} ${d.customer_name}`);
-  const values = data.map(d => parseFloat(d.discount_amount.toFixed(2)));
-  const palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#6366f1','#84cc16'];
+  const labels  = data.map(d => d.range);
+  const values  = data.map(d => parseFloat(d.total_amount.toFixed(2)));
+  const palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6'];
 
   if (_discountsPieChart) { _discountsPieChart.destroy(); _discountsPieChart = null; }
 
@@ -742,10 +742,10 @@ function renderDiscountsPieChart(data) {
     options: {
       responsive: true,
       plugins: {
-        legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } },
+        legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 14, padding: 12 } },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.label}: ${fmtMoney(ctx.parsed)} (${((ctx.parsed / values.reduce((a,b)=>a+b,0))*100).toFixed(1)}%)`
+            label: ctx => ` ${ctx.label}: ${fmtMoney(ctx.parsed)} (${data[ctx.dataIndex].pct_of_total}%)`
           }
         }
       }
@@ -768,8 +768,12 @@ function renderRanking(key, data) {
   }
   noEl.classList.add('hidden');
   if (moreBtn) {
-    moreBtn.classList.remove('hidden');
-    moreBtn.textContent = rankingState.expanded[key] ? 'Ver menos' : 'Ver más';
+    if (key === 'discounts') {
+      moreBtn.classList.add('hidden');
+    } else {
+      moreBtn.classList.remove('hidden');
+      moreBtn.textContent = rankingState.expanded[key] ? 'Ver menos' : 'Ver más';
+    }
   }
 
   const rows = {
@@ -794,11 +798,10 @@ function renderRanking(key, data) {
       <td>${esc(d.product_name)}</td>
       <td class="text-right" style="font-weight:600">${d.total_ingresado}</td>`,
 
-    discounts: d => `<td><span class="order-num">#${esc(d.order_number)}</span></td>
-      <td>${esc(d.customer_name)}</td>
-      <td class="text-center" style="font-weight:600">${d.discount_pct}%</td>
-      <td class="text-right" style="color:var(--text-muted)">${fmtMoney(d.subtotal)}</td>
-      <td class="text-right" style="font-weight:600;color:var(--danger)">${fmtMoney(d.discount_amount)}</td>`
+    discounts: d => `<td style="font-weight:600">${esc(d.range)}</td>
+      <td class="text-center">${d.order_count}</td>
+      <td class="text-right" style="font-weight:600;color:var(--danger)">${fmtMoney(d.total_amount)}</td>
+      <td class="text-right" style="color:var(--text-muted)">${d.pct_of_total}%</td>`
   };
 
   tbody.innerHTML = data.map((d, i) => `<tr>${rows[key]({ ...d, _i: i + 1 })}</tr>`).join('');

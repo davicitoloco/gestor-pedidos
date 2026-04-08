@@ -104,6 +104,28 @@ router.get('/:id/print', (req, res) => {
     const discAmt  = subtotal * order.discount / 100;
     const total    = subtotal - discAmt;
 
+    // Historial de entregas
+    const deliveries = db.prepare(`
+      SELECT d.id, d.notes, d.created_at,
+             COALESCE(u.full_name, u.username) AS delivered_by
+      FROM deliveries d
+      LEFT JOIN users u ON d.created_by = u.id
+      WHERE d.order_id = ? ORDER BY d.created_at ASC
+    `).all(id);
+    for (const d of deliveries) {
+      d.items = db.prepare(`
+        SELECT oi.product_name, di.quantity_delivered, oi.quantity AS quantity_ordered
+        FROM delivery_items di
+        JOIN order_items oi ON di.order_item_id = oi.id
+        WHERE di.delivery_id = ?
+      `).all(d.id);
+    }
+    // Totales entregados por ítem
+    const deliveredMap = {};
+    for (const d of deliveries)
+      for (const di of d.items)
+        deliveredMap[di.product_name] = (deliveredMap[di.product_name] || 0) + di.quantity_delivered;
+
     const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Cancelado':'#475569' };
     const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Cancelado':'#f1f5f9' };
 
@@ -138,6 +160,18 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 .t-val{text-align:right;font-weight:600}
 .notes-box{margin-top:20px;padding:14px 16px;background:#f8fafc;border-left:3px solid #2563eb;border-radius:0 6px 6px 0}
 .notes-box strong{display:block;margin-bottom:5px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+.delivery-section{margin-top:28px}
+.delivery-entry{border:1px solid #e2e8f0;border-radius:6px;margin-bottom:12px;overflow:hidden}
+.delivery-entry-hdr{background:#f8fafc;padding:8px 12px;display:flex;gap:16px;align-items:center;font-size:11px;border-bottom:1px solid #e2e8f0}
+.delivery-entry-hdr strong{font-size:12px;color:#1e293b}
+.delivery-entry-hdr span{color:#64748b}
+.delivery-entry-hdr .d-type{margin-left:auto;font-weight:700;padding:2px 8px;border-radius:10px;font-size:10px}
+.d-total{background:#dcfce7;color:#166534}
+.d-partial{background:#fef3c7;color:#92400e}
+.delivery-entry table{margin:0}
+.delivery-entry td,.delivery-entry th{font-size:11.5px}
+.delivery-notes-pdf{padding:7px 12px;font-size:11px;color:#475569;background:#fffbeb;border-top:1px solid #fde68a}
+.summary-section{margin-top:24px}
 .footer{margin-top:36px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
 @media print{
   .no-print{display:none}
@@ -193,6 +227,65 @@ tbody tr:nth-child(even) td{background:#f8fafc}
     </table>
   </div>
   ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
+
+  ${deliveries.length ? `
+  <div class="delivery-section">
+    <h3>Historial de entregas</h3>
+    ${deliveries.map((d, i) => {
+      const totalDelivered = d.items.reduce((s, it) => s + it.quantity_delivered, 0);
+      const totalOrdered   = d.items.reduce((s, it) => s + it.quantity_ordered, 0);
+      const isComplete     = totalDelivered >= totalOrdered;
+      return `<div class="delivery-entry">
+        <div class="delivery-entry-hdr">
+          <strong>Entrega #${i + 1}</strong>
+          <span>${fmtDateTime(d.created_at)}</span>
+          ${d.delivered_by ? `<span>por ${esc(d.delivered_by)}</span>` : ''}
+          <span class="d-type ${isComplete ? 'd-total' : 'd-partial'}">${isComplete ? 'TOTAL' : 'PARCIAL'}</span>
+        </div>
+        <table>
+          <thead><tr>
+            <th>Producto</th>
+            <th class="r">Pedido</th>
+            <th class="r">Entregado</th>
+          </tr></thead>
+          <tbody>
+            ${d.items.map(it => `<tr>
+              <td>${esc(it.product_name)}</td>
+              <td class="r">${it.quantity_ordered}</td>
+              <td class="r" style="font-weight:600;color:#166534">${it.quantity_delivered}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        ${d.notes ? `<div class="delivery-notes-pdf">📝 ${esc(d.notes)}</div>` : ''}
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div class="summary-section">
+    <h3>Resumen de entregas por ítem</h3>
+    <table>
+      <thead><tr>
+        <th>Producto</th>
+        <th class="r">Pedido</th>
+        <th class="r">Total entregado</th>
+        <th class="r">Pendiente</th>
+      </tr></thead>
+      <tbody>
+        ${items.map(item => {
+          const delivered = deliveredMap[item.product_name] || 0;
+          const pending   = Math.max(0, item.quantity - delivered);
+          return `<tr>
+            <td>${esc(item.product_name)}</td>
+            <td class="r">${item.quantity}</td>
+            <td class="r" style="font-weight:600;color:${delivered >= item.quantity ? '#166534' : '#92400e'}">${delivered}</td>
+            <td class="r" style="color:${pending > 0 ? '#ef4444' : '#94a3b8'}">${pending > 0 ? pending : '—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
   <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>
 </div>
 <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));</script>

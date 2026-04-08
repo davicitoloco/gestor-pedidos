@@ -220,14 +220,11 @@ router.get('/top-stocked', (req, res) => {
 // ── GET /api/reports/top-discounts ───────────────────────────────────────────
 router.get('/top-discounts', (req, res) => {
   try {
-    const from  = validateDate(req.query.from);
-    const to    = validateDate(req.query.to);
-    const limit = rankingLimit(req);
+    const from = validateDate(req.query.from);
+    const to   = validateDate(req.query.to);
+
     const rows = db.prepare(`
-      SELECT printf('%03d', o.order_sequence) AS order_number,
-             o.customer_name,
-             o.discount        AS discount_pct,
-             COALESCE(sub.t, 0) AS subtotal,
+      SELECT o.discount AS discount_pct,
              COALESCE(sub.t * (o.discount/100.0), 0) AS discount_amount
       FROM orders o
       LEFT JOIN (
@@ -236,10 +233,29 @@ router.get('/top-discounts', (req, res) => {
       ) sub ON sub.order_id = o.id
       WHERE o.discount > 0 AND o.status != 'Cancelado'
         ${rangeClause('o', 'created_at', from, to)}
-      ORDER BY discount_amount DESC
-      LIMIT ?
-    `).all(...rangeParams(from, to), limit);
-    res.json(rows);
+    `).all(...rangeParams(from, to));
+
+    const ranges = [
+      { label: '1% - 5%',    min: 1,  max: 5  },
+      { label: '6% - 10%',   min: 6,  max: 10 },
+      { label: '11% - 20%',  min: 11, max: 20 },
+      { label: '21% - 30%',  min: 21, max: 30 },
+      { label: 'Más de 30%', min: 31, max: Infinity }
+    ];
+    const totalAmount = rows.reduce((s, r) => s + r.discount_amount, 0);
+
+    const result = ranges.map(rng => {
+      const inRange = rows.filter(r => r.discount_pct >= rng.min && r.discount_pct <= rng.max);
+      const amount  = inRange.reduce((s, r) => s + r.discount_amount, 0);
+      return {
+        range:        rng.label,
+        order_count:  inRange.length,
+        total_amount: amount,
+        pct_of_total: totalAmount > 0 ? Math.round(amount / totalAmount * 1000) / 10 : 0
+      };
+    }).filter(r => r.order_count > 0);
+
+    res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
