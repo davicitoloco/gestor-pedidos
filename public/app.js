@@ -720,6 +720,39 @@ async function loadRankings() {
   );
 }
 
+let _discountsPieChart = null;
+
+function renderDiscountsPieChart(data) {
+  const wrap = $('discounts-chart-wrap');
+  if (!data.length) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+
+  const labels = data.map(d => `#${d.order_number} ${d.customer_name}`);
+  const values = data.map(d => parseFloat(d.discount_amount.toFixed(2)));
+  const palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#6366f1','#84cc16'];
+
+  if (_discountsPieChart) { _discountsPieChart.destroy(); _discountsPieChart = null; }
+
+  _discountsPieChart = new Chart($('discounts-pie-chart'), {
+    type: 'pie',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: palette.slice(0, values.length), borderWidth: 2, borderColor: '#fff' }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.label}: ${fmtMoney(ctx.parsed)} (${((ctx.parsed / values.reduce((a,b)=>a+b,0))*100).toFixed(1)}%)`
+          }
+        }
+      }
+    }
+  });
+}
+
 function renderRanking(key, data) {
   const tbody  = $(`rk-${key}-tbody`);
   const noEl   = $(`no-rk-${key}`);
@@ -730,6 +763,7 @@ function renderRanking(key, data) {
     tbody.innerHTML = '';
     noEl.classList.remove('hidden');
     if (moreBtn) moreBtn.classList.add('hidden');
+    if (key === 'discounts') renderDiscountsPieChart([]);
     return;
   }
   noEl.classList.add('hidden');
@@ -768,6 +802,8 @@ function renderRanking(key, data) {
   };
 
   tbody.innerHTML = data.map((d, i) => `<tr>${rows[key]({ ...d, _i: i + 1 })}</tr>`).join('');
+
+  if (key === 'discounts') renderDiscountsPieChart(data);
 }
 
 // Date filter controls
@@ -1023,10 +1059,10 @@ function renderDeliveries(deliveries) {
       <div class="delivery-entry-header">
         <span class="delivery-num">Entrega #${i + 1}</span>
         <span class="delivery-date">${fmtDateTime(d.created_at)}</span>
-        <button class="btn-icon btn-delete" style="margin-left:auto"
+        ${isAdmin() ? `<button class="btn-icon btn-delete" style="margin-left:auto"
           onclick="deleteDelivery(${state.editingOrderId},${d.id},${i+1})" title="Cancelar esta entrega">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-        </button>
+        </button>` : ''}
       </div>
       <div class="delivery-items-list">
         ${d.items.map(it => `
