@@ -111,6 +111,7 @@ async function showApp() {
   try {
     const cfg = await api('GET', '/settings');
     $('sidebar-company').textContent = cfg.company_name || 'Pedidos';
+    $('mobile-company-name').textContent = cfg.company_name || 'Pedidos';
     $('inp-company-name').value = cfg.company_name || '';
   } catch {}
 
@@ -144,6 +145,11 @@ $('btn-logout').addEventListener('click', async () => {
 });
 
 /* ================================================================ NAVIGATION */
+function closeMobileSidebar() {
+  document.querySelector('.sidebar').classList.remove('open');
+  $('sidebar-overlay').classList.remove('open');
+}
+
 function navigate(section) {
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.section === section)
@@ -151,6 +157,7 @@ function navigate(section) {
   document.querySelectorAll('.app-section').forEach(el => el.classList.add('hidden'));
   const sec = $(`section-${section}`);
   if (sec) sec.classList.remove('hidden');
+  closeMobileSidebar();
 
   if (section === 'pedidos')   loadOrders();
   if (section === 'clientes')  { showClientsSubview('list'); loadClients(); }
@@ -163,6 +170,12 @@ function navigate(section) {
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.addEventListener('click', e => { e.preventDefault(); navigate(btn.dataset.section); });
 });
+
+$('btn-hamburger').addEventListener('click', () => {
+  document.querySelector('.sidebar').classList.toggle('open');
+  $('sidebar-overlay').classList.toggle('open');
+});
+$('sidebar-overlay').addEventListener('click', closeMobileSidebar);
 
 /* ================================================================ ORDERS LIST */
 let _ordersSearchTimer = null;
@@ -207,10 +220,10 @@ function renderOrders(orders, searchQuery = '') {
       <td>${esc(o.customer_name)}</td>
       <td>${statusBadge(o.status)}</td>
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(o.vendor_name||'—')}</td>` : ''}
-      <td class="text-center">${o.item_count}</td>
+      <td class="text-center col-mobile-hide">${o.item_count}</td>
       <td class="text-right" style="font-weight:600">${fmtMoney(o.total)}</td>
-      <td>${fmtDate(o.delivery_date)}</td>
-      <td style="color:var(--text-muted);font-size:.82rem">${fmtDateTime(o.created_at)}</td>
+      <td class="col-mobile-hide">${fmtDate(o.delivery_date)}</td>
+      <td class="col-mobile-hide" style="color:var(--text-muted);font-size:.82rem">${fmtDateTime(o.created_at)}</td>
       <td class="text-center" style="white-space:nowrap">
         <button class="btn-icon btn-edit" data-id="${o.id}" onclick="event.stopPropagation()" title="Editar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -727,9 +740,10 @@ function renderDiscountsPieChart(data) {
   if (!data.length) { wrap.classList.add('hidden'); return; }
   wrap.classList.remove('hidden');
 
-  const labels  = data.map(d => d.range);
-  const values  = data.map(d => parseFloat(d.total_amount.toFixed(2)));
-  const palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6'];
+  const labels = data.map(d => `#${d.order_number} ${d.customer_name}`);
+  const values = data.map(d => parseFloat(d.discount_amount.toFixed(2)));
+  const total  = values.reduce((a, b) => a + b, 0);
+  const palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#6366f1','#84cc16'];
 
   if (_discountsPieChart) { _discountsPieChart.destroy(); _discountsPieChart = null; }
 
@@ -742,10 +756,10 @@ function renderDiscountsPieChart(data) {
     options: {
       responsive: true,
       plugins: {
-        legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 14, padding: 12 } },
+        legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.label}: ${fmtMoney(ctx.parsed)} (${data[ctx.dataIndex].pct_of_total}%)`
+            label: ctx => ` ${ctx.label}: ${fmtMoney(ctx.parsed)} (${total > 0 ? ((ctx.parsed/total)*100).toFixed(1) : 0}%)`
           }
         }
       }
@@ -768,12 +782,8 @@ function renderRanking(key, data) {
   }
   noEl.classList.add('hidden');
   if (moreBtn) {
-    if (key === 'discounts') {
-      moreBtn.classList.add('hidden');
-    } else {
-      moreBtn.classList.remove('hidden');
-      moreBtn.textContent = rankingState.expanded[key] ? 'Ver menos' : 'Ver más';
-    }
+    moreBtn.classList.remove('hidden');
+    moreBtn.textContent = rankingState.expanded[key] ? 'Ver menos' : 'Ver más';
   }
 
   const rows = {
@@ -798,10 +808,11 @@ function renderRanking(key, data) {
       <td>${esc(d.product_name)}</td>
       <td class="text-right" style="font-weight:600">${d.total_ingresado}</td>`,
 
-    discounts: d => `<td style="font-weight:600">${esc(d.range)}</td>
-      <td class="text-center">${d.order_count}</td>
-      <td class="text-right" style="font-weight:600;color:var(--danger)">${fmtMoney(d.total_amount)}</td>
-      <td class="text-right" style="color:var(--text-muted)">${d.pct_of_total}%</td>`
+    discounts: d => `<td><span class="order-num">#${esc(d.order_number)}</span></td>
+      <td>${esc(d.customer_name)}</td>
+      <td class="text-center" style="font-weight:600">${d.discount_pct}%</td>
+      <td class="text-right" style="color:var(--text-muted)">${fmtMoney(d.subtotal)}</td>
+      <td class="text-right" style="font-weight:600;color:var(--danger)">${fmtMoney(d.discount_amount)}</td>`
   };
 
   tbody.innerHTML = data.map((d, i) => `<tr>${rows[key]({ ...d, _i: i + 1 })}</tr>`).join('');
@@ -1035,6 +1046,7 @@ $('btn-settings-save').addEventListener('click', async () => {
   try {
     const cfg = await api('PUT', '/settings', { company_name: $('inp-company-name').value.trim() });
     $('sidebar-company').textContent = cfg.company_name || 'Pedidos';
+    $('mobile-company-name').textContent = cfg.company_name || 'Pedidos';
     $('settings-modal').classList.add('hidden');
     toast('Configuración guardada', 'success');
   } catch (err) { toast(err.message, 'error'); }

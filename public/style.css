@@ -246,3 +246,80 @@ tr.stock-critical td { background:#fff1f2 }
 .ranking-full{grid-column:1/-1}
 .ranking-half{}
 @media(max-width:860px){.rankings-grid{grid-template-columns:1fr}.ranking-half{grid-column:auto}}
+
+/* ============================================================ RESPONSIVE / MOBILE */
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:149}
+.btn-hamburger{display:none;align-items:center;justify-content:center;width:36px;height:36px;border:none;background:transparent;color:var(--text);cursor:pointer;border-radius:var(--radius-sm);flex-shrink:0}
+.btn-hamburger:hover{background:var(--border)}
+.mobile-header{display:none;align-items:center;gap:12px;padding:10px 16px;background:var(--white);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+.mobile-company-name{font-weight:700;font-size:.95rem;color:var(--text);flex:1}
+
+@media(max-width:768px){
+  /* Sidebar */
+  .sidebar{position:fixed;left:0;top:0;height:100vh;z-index:150;transform:translateX(-100%);transition:transform .25s ease}
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-overlay.open{display:block}
+
+  /* Mobile header */
+  .mobile-header{display:flex}
+  .btn-hamburger{display:flex}
+
+  /* Content */
+  .app-content{width:100%}
+  .app-section{padding:14px}
+
+  /* Page header */
+  .page-header{flex-wrap:wrap;gap:8px}
+  .page-header .btn{font-size:.82rem;padding:7px 11px}
+
+  /* Filter bar: scrollable horizontally */
+  .filter-bar{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+  .filter-bar::-webkit-scrollbar{height:3px}
+  .search-orders{min-width:160px;flex-shrink:0;margin-left:6px}
+
+  /* Tables: horizontal scroll */
+  .table-wrap{overflow-x:auto}
+
+  /* Cards */
+  .card-header-flex{flex-wrap:wrap;gap:6px}
+
+  /* Stats */
+  .stats-grid{grid-template-columns:1fr 1fr}
+
+  /* Charts */
+  .charts-row{flex-direction:column}
+
+  /* Rankings */
+  .rankings-grid{grid-template-columns:1fr}
+  .rankings-section-header{flex-direction:column;align-items:flex-start}
+  .rankings-filter{width:100%}
+  .rankings-filter input[type=date]{flex:1;min-width:0}
+
+  /* Modals */
+  .modal-overlay{padding:8px;align-items:flex-end}
+  .modal{max-width:100%!important;border-radius:12px 12px 0 0}
+  @keyframes scaleIn{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+  /* Form grids already have 680px breakpoint - reinforce */
+  .form-grid-3,.form-grid-2{grid-template-columns:1fr}
+
+  /* Totals layout */
+  .totals-layout{flex-direction:column}
+  .totals-box{min-width:unset;width:100%}
+
+  /* Form actions */
+  .form-actions{flex-direction:column-reverse;gap:8px}
+  .form-actions .btn{width:100%;justify-content:center}
+
+  /* Stock alerts */
+  .stock-alerts-banner{flex-direction:column;align-items:flex-start}
+
+  /* Touch-friendly icon buttons */
+  .btn-icon{width:36px;height:36px}
+
+  /* Hide some table columns on mobile */
+  .col-mobile-hide{display:none}
+
+  /* Delivery complete toggle */
+  .delivery-complete-toggle{font-size:.85rem}
+}

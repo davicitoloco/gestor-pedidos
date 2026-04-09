@@ -83,8 +83,19 @@
     </div>
   </aside>
 
+  <!-- Mobile sidebar overlay -->
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
   <!-- Content -->
   <main class="app-content">
+
+    <!-- Mobile top bar -->
+    <div class="mobile-header">
+      <button class="btn-hamburger" id="btn-hamburger" aria-label="Menú">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <span id="mobile-company-name" class="mobile-company-name">Pedidos</span>
+    </div>
 
     <!-- ======================== SECCIÓN: PEDIDOS -->
     <div id="section-pedidos" class="app-section">
@@ -115,10 +126,10 @@
                 <th>Cliente</th>
                 <th style="width:155px">Estado</th>
                 <th class="admin-only-col" style="width:140px">Vendedor</th>
-                <th style="width:75px" class="text-center">Ítems</th>
+                <th style="width:75px" class="text-center col-mobile-hide">Ítems</th>
                 <th style="width:130px" class="text-right">Total</th>
-                <th style="width:105px">Entrega</th>
-                <th style="width:126px">Creado</th>
+                <th style="width:105px" class="col-mobile-hide">Entrega</th>
+                <th style="width:126px" class="col-mobile-hide">Creado</th>
                 <th style="width:88px" class="text-center">Acciones</th>
               </tr>
             </thead>
@@ -635,10 +646,11 @@
               <canvas id="discounts-pie-chart" height="200"></canvas>
             </div>
             <table class="table"><thead><tr>
-              <th>Rango de descuento</th>
-              <th style="width:110px" class="text-center">Pedidos</th>
-              <th style="width:175px" class="text-right">Monto descontado</th>
-              <th style="width:130px" class="text-right">% del total</th>
+              <th style="width:80px">Pedido</th>
+              <th>Cliente</th>
+              <th style="width:90px" class="text-center">Desc. %</th>
+              <th style="width:155px" class="text-right">Subtotal</th>
+              <th style="width:155px" class="text-right">Monto descontado</th>
             </tr></thead><tbody id="rk-discounts-tbody"></tbody></table>
             <div id="no-rk-discounts" class="empty-state hidden"><p>Sin pedidos con descuento en el período</p></div>
           </div>
