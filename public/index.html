@@ -751,16 +751,41 @@
 
       <!-- ── RESUMEN FINANCIERO ── -->
       <div id="compras-tab-resumen" class="compras-pane">
-        <div class="page-header"><h2 class="page-title">Resumen Financiero</h2>
-          <button class="btn btn-ghost" id="btn-refresh-finance">Actualizar</button>
+        <div class="page-header">
+          <h2 class="page-title">Balance General</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btn-refresh-finance">Actualizar</button>
+            <a href="/api/finance/balance-print" target="_blank" class="btn btn-secondary">Imprimir PDF</a>
+          </div>
         </div>
-        <div class="finance-grid" id="finance-summary-grid">
-          <div class="finance-card"><div class="finance-card-label">Saldo Caja</div><div class="finance-card-value" id="fin-cash">—</div></div>
-          <div class="finance-card"><div class="finance-card-label">Saldo Banco (total)</div><div class="finance-card-value" id="fin-bank">—</div></div>
-          <div class="finance-card finance-card-positive"><div class="finance-card-label">Deudores (clientes)</div><div class="finance-card-value" id="fin-clients">—</div></div>
-          <div class="finance-card finance-card-negative"><div class="finance-card-label">Deuda (proveedores)</div><div class="finance-card-value" id="fin-suppliers">—</div></div>
-          <div class="finance-card"><div class="finance-card-label">Cheques a cobrar (30d)</div><div class="finance-card-value" id="fin-ch-cobrar">—</div></div>
-          <div class="finance-card"><div class="finance-card-label">Cheques a pagar (30d)</div><div class="finance-card-value" id="fin-ch-pagar">—</div></div>
+        <div id="balance-view" style="max-width:680px">
+          <!-- DISPONIBLE -->
+          <div class="balance-section">
+            <div class="balance-section-title">DISPONIBLE</div>
+            <div class="balance-row"><span>Caja</span><span id="fin-cash" class="balance-amount">—</span></div>
+            <div id="fin-banks-rows"></div>
+            <div class="balance-row balance-subtotal"><span>Subtotal banco</span><span id="fin-bank" class="balance-amount">—</span></div>
+            <div class="balance-row"><span>Cheques en cartera (<span id="fin-ch-count">0</span>)</span><span id="fin-ch-cartera" class="balance-amount">—</span></div>
+            <div class="balance-row balance-total"><span>TOTAL DISPONIBLE</span><span id="fin-disponible" class="balance-amount">—</span></div>
+          </div>
+          <!-- DEUDAS -->
+          <div class="balance-section" style="margin-top:16px">
+            <div class="balance-section-title">DEUDAS Y ACREENCIAS</div>
+            <div class="balance-row"><span>Deudores — clientes nos deben</span><span id="fin-clients" class="balance-amount" style="color:var(--success)">—</span></div>
+            <div class="balance-row"><span>Proveedores — debemos</span><span id="fin-suppliers" class="balance-amount" style="color:var(--error)">—</span></div>
+          </div>
+          <!-- POSICIÓN NETA -->
+          <div class="balance-section balance-section-net" style="margin-top:16px">
+            <div class="balance-row balance-net"><span>POSICIÓN NETA</span><span id="fin-net" class="balance-amount">—</span></div>
+            <div style="font-size:.78rem;color:var(--text-muted);padding:0 12px 10px">Disponible + Deudores − Proveedores</div>
+          </div>
+          <!-- CHEQUES PRÓXIMOS -->
+          <div class="balance-section" style="margin-top:16px" id="fin-upcoming-section">
+            <div class="balance-section-title">CHEQUES A VENCER (próximos 30 días)</div>
+            <div class="balance-row"><span>A cobrar</span><span id="fin-ch-cobrar" class="balance-amount">—</span></div>
+            <div class="balance-row"><span>A pagar</span><span id="fin-ch-pagar" class="balance-amount">—</span></div>
+            <div id="fin-upcoming-list" style="margin-top:8px"></div>
+          </div>
         </div>
       </div>
 
@@ -1216,7 +1241,7 @@
         <label class="label required">Método de pago</label>
         <select id="inp-payment-method" class="input select">
           <option value="efectivo">Efectivo</option>
-          <option value="cheque">Cheque</option>
+          <option value="cheque">Cheque recibido</option>
           <option value="transferencia">Transferencia bancaria</option>
           <option value="tarjeta">Tarjeta crédito/débito</option>
           <option value="otros">Otros</option>
@@ -1228,16 +1253,37 @@
           <input type="number" id="inp-payment-amount" class="input" min="0.01" step="0.01" placeholder="0.00">
         </div>
         <div class="field">
-          <label class="label" id="lbl-payment-date">Fecha del pago</label>
+          <label class="label">Fecha del pago</label>
           <input type="date" id="inp-payment-date" class="input">
         </div>
       </div>
-      <div id="payment-bank-wrap" class="field hidden" style="margin-top:12px">
-        <label class="label">Banco</label>
-        <input type="text" id="inp-payment-bank" class="input" placeholder="Ej: Santander">
+      <!-- Transferencia / Tarjeta: bank account select -->
+      <div id="payment-bankacct-wrap" class="field hidden" style="margin-top:12px">
+        <label class="label required">Acreditar en cuenta</label>
+        <select id="inp-payment-bank-account" class="input select">
+          <option value="">— Seleccioná cuenta —</option>
+        </select>
       </div>
+      <!-- Cheque fields -->
+      <div id="payment-cheque-wrap" class="hidden" style="margin-top:12px">
+        <div class="form-grid-2">
+          <div class="field">
+            <label class="label required">Banco del cheque</label>
+            <input type="text" id="inp-payment-cheque-bank" class="input" placeholder="Ej: Galicia">
+          </div>
+          <div class="field">
+            <label class="label required">Nº de cheque</label>
+            <input type="text" id="inp-payment-cheque-number" class="input">
+          </div>
+        </div>
+        <div class="field" style="margin-top:8px">
+          <label class="label required">Fecha de vencimiento</label>
+          <input type="date" id="inp-payment-cheque-due" class="input">
+        </div>
+      </div>
+      <!-- Otros: reference field -->
       <div id="payment-reference-wrap" class="field hidden" style="margin-top:12px">
-        <label class="label" id="lbl-payment-reference">Referencia / Nº operación</label>
+        <label class="label">Referencia / Nº operación</label>
         <input type="text" id="inp-payment-reference" class="input" placeholder="">
       </div>
       <div class="field" style="margin-top:12px">
@@ -1270,15 +1316,36 @@
         <label class="label required">Método</label>
         <select id="inp-sup-pay-method" class="input select">
           <option value="efectivo">Efectivo</option>
-          <option value="cheque">Cheque propio</option>
+          <option value="cheque">Cheque propio emitido</option>
           <option value="transferencia">Transferencia</option>
           <option value="otros">Otros</option>
         </select>
       </div>
-      <div id="sup-pay-bank-wrap" class="field hidden" style="margin-top:12px">
-        <label class="label">Banco / Cuenta</label>
-        <input type="text" id="inp-sup-pay-bank" class="input" placeholder="Banco o cuenta de origen">
+      <!-- Transferencia: bank account select -->
+      <div id="sup-pay-bankacct-wrap" class="field hidden" style="margin-top:12px">
+        <label class="label required">Deducir de cuenta</label>
+        <select id="inp-sup-pay-bank-account" class="input select">
+          <option value="">— Seleccioná cuenta —</option>
+        </select>
       </div>
+      <!-- Cheque propio fields -->
+      <div id="sup-pay-cheque-wrap" class="hidden" style="margin-top:12px">
+        <div class="form-grid-2">
+          <div class="field">
+            <label class="label required">Banco emisor</label>
+            <input type="text" id="inp-sup-pay-cheque-bank" class="input" placeholder="Ej: Nación">
+          </div>
+          <div class="field">
+            <label class="label required">Nº de cheque</label>
+            <input type="text" id="inp-sup-pay-cheque-number" class="input">
+          </div>
+        </div>
+        <div class="field" style="margin-top:8px">
+          <label class="label required">Fecha de vencimiento</label>
+          <input type="date" id="inp-sup-pay-cheque-due" class="input">
+        </div>
+      </div>
+      <!-- Otros: reference -->
       <div id="sup-pay-ref-wrap" class="field hidden" style="margin-top:12px">
         <label class="label">Referencia</label>
         <input type="text" id="inp-sup-pay-reference" class="input">
@@ -1408,6 +1475,26 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-cheque-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-cheque-confirm">Registrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Depositar Cheque -->
+<div id="deposit-cheque-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header" id="deposit-cheque-title">Depositar Cheque</div>
+    <div class="modal-form-body">
+      <p id="deposit-cheque-info" style="margin-bottom:12px;color:var(--text-muted);font-size:.9rem"></p>
+      <div class="field">
+        <label class="label required">Acreditar en cuenta</label>
+        <select id="inp-deposit-bank-account" class="input select">
+          <option value="">— Seleccioná cuenta —</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-deposit-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-deposit-confirm">Confirmar</button>
     </div>
   </div>
 </div>

@@ -229,6 +229,11 @@ addColIfMissing('products', 'stock',     'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('products', 'stock_min', 'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('order_items', 'product_id', 'INTEGER REFERENCES products(id)');
 addColIfMissing('customers', 'iva_condition', "TEXT NOT NULL DEFAULT 'Consumidor Final'");
+addColIfMissing('payments',          'bank_account_id', 'INTEGER REFERENCES bank_accounts(id)');
+addColIfMissing('payments',          'cheque_id',       'INTEGER REFERENCES cheques(id)');
+addColIfMissing('supplier_payments', 'bank_account_id', 'INTEGER REFERENCES bank_accounts(id)');
+addColIfMissing('supplier_payments', 'cheque_id',       'INTEGER REFERENCES cheques(id)');
+addColIfMissing('cheques',           'deposited_to',    'INTEGER REFERENCES bank_accounts(id)');
 
 // Settings por defecto
 db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run('company_name', 'Mi Empresa');

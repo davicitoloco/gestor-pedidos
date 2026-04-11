@@ -1095,44 +1095,66 @@ window.deletePayment = async function(id) {
 };
 
 /* ── Payment modal ─────────────────────────────────────────────────────────── */
+
+// Load bank accounts into a select element
+async function populateBankSelect(selectEl) {
+  try {
+    const accounts = await api('GET', '/bank/accounts');
+    selectEl.innerHTML = '<option value="">— Seleccioná cuenta —</option>' +
+      accounts.map(a => `<option value="${a.id}">${esc(a.name)}${a.bank ? ' — ' + a.bank : ''} (${fmtMoney(a.balance)})</option>`).join('');
+  } catch(e) { selectEl.innerHTML = '<option value="">Error al cargar cuentas</option>'; }
+}
+
+function updatePaymentFields() {
+  const method = $('inp-payment-method').value;
+  $('payment-bankacct-wrap').classList.toggle('hidden', !['transferencia','tarjeta'].includes(method));
+  $('payment-cheque-wrap').classList.toggle('hidden', method !== 'cheque');
+  $('payment-reference-wrap').classList.toggle('hidden', method !== 'otros');
+}
+$('inp-payment-method').addEventListener('change', updatePaymentFields);
+
 $('btn-new-payment').addEventListener('click', () => {
   $('inp-payment-method').value    = 'efectivo';
   $('inp-payment-amount').value    = '';
   $('inp-payment-date').value      = '';
-  $('inp-payment-bank').value      = '';
   $('inp-payment-reference').value = '';
   $('inp-payment-notes').value     = '';
+  $('inp-payment-cheque-bank').value   = '';
+  $('inp-payment-cheque-number').value = '';
+  $('inp-payment-cheque-due').value    = '';
   updatePaymentFields();
+  populateBankSelect($('inp-payment-bank-account'));
   $('payment-modal').classList.remove('hidden');
 });
 $('btn-payment-cancel').addEventListener('click', () => $('payment-modal').classList.add('hidden'));
 $('payment-modal').addEventListener('click', e => { if (e.target === $('payment-modal')) $('payment-modal').classList.add('hidden'); });
 
-function updatePaymentFields() {
-  const m = $('inp-payment-method').value;
-  $('payment-bank-wrap').classList.toggle('hidden', m !== 'cheque');
-  $('payment-reference-wrap').classList.toggle('hidden', !['cheque','transferencia','tarjeta'].includes(m));
-  const refLabels = { cheque: 'Nº de cheque', transferencia: 'Referencia / Nº operación', tarjeta: 'Nº de autorización' };
-  if (refLabels[m]) $('lbl-payment-reference').textContent = refLabels[m];
-  $('lbl-payment-date').textContent = m === 'cheque' ? 'Fecha de cobro' : 'Fecha del pago';
-}
-$('inp-payment-method').addEventListener('change', updatePaymentFields);
-
 $('btn-payment-confirm').addEventListener('click', async () => {
-  const amount = parseFloat($('inp-payment-amount').value);
-  if (!amount || amount <= 0) { toast('Ingresá un monto válido', 'error'); $('inp-payment-amount').focus(); return; }
-  const btn = $('btn-payment-confirm');
+  const btn  = $('btn-payment-confirm');
+  const method = $('inp-payment-method').value;
   btn.disabled = true;
   try {
-    await api('POST', '/payments', {
+    const payload = {
       customer_id:  _accountCustomerId,
-      amount,
-      method:       $('inp-payment-method').value,
-      bank:         $('inp-payment-bank').value.trim(),
-      reference:    $('inp-payment-reference').value.trim(),
+      amount:       parseFloat($('inp-payment-amount').value),
+      method,
+      payment_date: $('inp-payment-date').value || null,
       notes:        $('inp-payment-notes').value.trim(),
-      payment_date: $('inp-payment-date').value || null
-    });
+      reference:    $('inp-payment-reference').value.trim(),
+    };
+    if (['transferencia','tarjeta'].includes(method)) {
+      payload.bank_account_id = $('inp-payment-bank-account').value;
+      if (!payload.bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); btn.disabled = false; return; }
+    }
+    if (method === 'cheque') {
+      payload.cheque_bank    = $('inp-payment-cheque-bank').value.trim();
+      payload.cheque_number  = $('inp-payment-cheque-number').value.trim();
+      payload.cheque_due_date= $('inp-payment-cheque-due').value;
+      if (!payload.cheque_bank || !payload.cheque_number || !payload.cheque_due_date) {
+        toast('Completá los datos del cheque', 'error'); btn.disabled = false; return;
+      }
+    }
+    await api('POST', '/payments', payload);
     $('payment-modal').classList.add('hidden');
     toast('Pago registrado', 'success');
     loadAccount();
@@ -1706,16 +1728,39 @@ document.querySelectorAll('.compras-tab').forEach(b => {
 // ── FINANCE SUMMARY ─────────────────────────────────────────────────────────
 async function loadFinanceSummary() {
   try {
-    const d = await api('GET', '/finance/summary');
-    const color = v => v >= 0 ? 'var(--success)' : 'var(--error)';
-    $('fin-cash').textContent     = fmtMoney(d.cash_balance);
-    $('fin-cash').style.color     = color(d.cash_balance);
-    $('fin-bank').textContent     = fmtMoney(d.bank_balance);
-    $('fin-bank').style.color     = color(d.bank_balance);
-    $('fin-clients').textContent  = fmtMoney(d.client_debt);
-    $('fin-suppliers').textContent= fmtMoney(d.supplier_debt);
-    $('fin-ch-cobrar').textContent= fmtMoney(d.cheques_cobrar);
-    $('fin-ch-pagar').textContent = fmtMoney(d.cheques_pagar);
+    const d = await api('GET', '/finance/balance');
+    const fmtColor = (v, el) => {
+      el.textContent = fmtMoney(v);
+      el.style.color = v >= 0 ? 'var(--success)' : 'var(--error)';
+    };
+    fmtColor(d.cash_balance,     $('fin-cash'));
+    fmtColor(d.bank_total,       $('fin-bank'));
+    fmtColor(d.total_disponible, $('fin-disponible'));
+    fmtColor(d.net_position,     $('fin-net'));
+    $('fin-ch-cartera').textContent  = fmtMoney(d.cheques_cartera);
+    $('fin-ch-count').textContent    = d.cheques_count;
+    $('fin-clients').textContent     = fmtMoney(d.client_debt);
+    $('fin-suppliers').textContent   = fmtMoney(d.supplier_debt);
+    $('fin-ch-cobrar').textContent   = fmtMoney(d.cheques_cobrar);
+    $('fin-ch-pagar').textContent    = fmtMoney(d.cheques_pagar);
+    // Per-bank rows
+    $('fin-banks-rows').innerHTML = d.banks.filter(b => b.active).map(b =>
+      `<div class="balance-row balance-indent"><span>${esc(b.name)}${b.bank ? ' — ' + b.bank : ''}</span><span class="balance-amount" style="color:${b.balance>=0?'var(--success)':'var(--error)'}">${fmtMoney(b.balance)}</span></div>`
+    ).join('') || '<div class="balance-row balance-indent" style="color:var(--text-muted)"><span>Sin cuentas bancarias</span><span></span></div>';
+    // Upcoming cheques list
+    if (d.upcoming_cheques.length) {
+      $('fin-upcoming-list').innerHTML = `<div class="table-wrap"><table class="table" style="margin-top:0"><thead><tr><th>Tipo</th><th>Banco / Nro</th><th>A/De</th><th class="text-right">Monto</th><th>Vence</th></tr></thead><tbody>` +
+        d.upcoming_cheques.map(c => `<tr>
+          <td>${c.direction==='recibido' ? '<span class="badge badge-stock-ok">A cobrar</span>' : '<span class="badge badge-stock-out">A pagar</span>'}</td>
+          <td>${esc(c.bank)} ${esc(c.cheque_number)}</td>
+          <td>${esc(c.customer_name || c.supplier_name || '—')}</td>
+          <td class="text-right">${fmtMoney(c.amount)}</td>
+          <td>${fmtDate(c.due_date)}</td>
+        </tr>`).join('') +
+        '</tbody></table></div>';
+    } else {
+      $('fin-upcoming-list').innerHTML = '<p style="color:var(--text-muted);font-size:.85rem;padding:8px 0">No hay cheques a vencer en los próximos 30 días</p>';
+    }
   } catch (err) { toast(err.message, 'error'); }
 }
 $('btn-refresh-finance').addEventListener('click', loadFinanceSummary);
@@ -1838,10 +1883,13 @@ $('btn-new-sup-payment').addEventListener('click', () => {
   $('inp-sup-pay-amount').value = '';
   $('inp-sup-pay-date').value   = '';
   $('inp-sup-pay-method').value = 'efectivo';
-  $('inp-sup-pay-bank').value   = '';
   $('inp-sup-pay-reference').value = '';
   $('inp-sup-pay-notes').value  = '';
+  $('inp-sup-pay-cheque-bank').value   = '';
+  $('inp-sup-pay-cheque-number').value = '';
+  $('inp-sup-pay-cheque-due').value    = '';
   updateSupPayFields();
+  populateBankSelect($('inp-sup-pay-bank-account'));
   $('sup-payment-modal').classList.remove('hidden');
 });
 $('btn-sup-pay-cancel').addEventListener('click', () => $('sup-payment-modal').classList.add('hidden'));
@@ -1849,24 +1897,38 @@ $('sup-payment-modal').addEventListener('click', e => { if (e.target === $('sup-
 
 function updateSupPayFields() {
   const method = $('inp-sup-pay-method').value;
-  $('sup-pay-bank-wrap').classList.toggle('hidden', !['cheque','transferencia'].includes(method));
-  $('sup-pay-ref-wrap').classList.toggle('hidden', !['cheque','transferencia'].includes(method));
+  $('sup-pay-bankacct-wrap').classList.toggle('hidden', method !== 'transferencia');
+  $('sup-pay-cheque-wrap').classList.toggle('hidden', method !== 'cheque');
+  $('sup-pay-ref-wrap').classList.toggle('hidden', method !== 'otros');
 }
 $('inp-sup-pay-method').addEventListener('change', updateSupPayFields);
 
 $('btn-sup-pay-confirm').addEventListener('click', async () => {
   const btn = $('btn-sup-pay-confirm');
   btn.disabled = true;
+  const method = $('inp-sup-pay-method').value;
   try {
-    await api('POST', '/supplier-payments', {
+    const payload = {
       supplier_id:  currentSupplierId,
       amount:       parseFloat($('inp-sup-pay-amount').value),
-      method:       $('inp-sup-pay-method').value,
-      bank:         $('inp-sup-pay-bank').value.trim(),
-      reference:    $('inp-sup-pay-reference').value.trim(),
+      method,
+      payment_date: $('inp-sup-pay-date').value || null,
       notes:        $('inp-sup-pay-notes').value.trim(),
-      payment_date: $('inp-sup-pay-date').value || null
-    });
+      reference:    $('inp-sup-pay-reference').value.trim(),
+    };
+    if (method === 'transferencia') {
+      payload.bank_account_id = $('inp-sup-pay-bank-account').value;
+      if (!payload.bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); btn.disabled = false; return; }
+    }
+    if (method === 'cheque') {
+      payload.cheque_bank    = $('inp-sup-pay-cheque-bank').value.trim();
+      payload.cheque_number  = $('inp-sup-pay-cheque-number').value.trim();
+      payload.cheque_due_date= $('inp-sup-pay-cheque-due').value;
+      if (!payload.cheque_bank || !payload.cheque_number || !payload.cheque_due_date) {
+        toast('Completá los datos del cheque', 'error'); btn.disabled = false; return;
+      }
+    }
+    await api('POST', '/supplier-payments', payload);
     toast('Pago registrado', 'success');
     $('sup-payment-modal').classList.add('hidden');
     openSupplierAccount(currentSupplierId);
@@ -2169,7 +2231,7 @@ async function loadCheques() {
         ? [['depositado','Depositar'],['rechazado','Rechazar']]
         : [['debitado','Marcar debitado']];
       const statusBtns = c.status === 'en_cartera' || c.status === 'emitido'
-        ? nextStatuses.map(([s, l]) => `<button class="btn btn-ghost btn-sm" onclick="updateChequeStatus(${c.id},'${s}')">${l}</button>`).join('')
+        ? nextStatuses.map(([s, l]) => `<button class="btn btn-ghost btn-sm" onclick="updateChequeStatus(${c.id},'${s}','${esc(c.bank)} Nro ${esc(c.cheque_number)} — $${c.amount.toFixed(2)}')">${l}</button>`).join('')
         : '';
       return `<tr>
         <td>${c.direction === 'recibido' ? '<span class="badge badge-stock-ok">Recibido</span>' : '<span class="badge badge-stock-out">Emitido</span>'}</td>
@@ -2245,13 +2307,43 @@ $('btn-cheque-confirm').addEventListener('click', async () => {
   finally { btn.disabled = false; }
 });
 
-window.updateChequeStatus = async function(id, status) {
+let pendingChequeAction = null; // { id, status }
+
+window.updateChequeStatus = async function(id, status, chequeInfo) {
+  if (status === 'depositado' || status === 'debitado') {
+    pendingChequeAction = { id, status };
+    $('deposit-cheque-title').textContent = status === 'depositado' ? 'Depositar Cheque' : 'Registrar Débito Bancario';
+    $('deposit-cheque-info').textContent  = chequeInfo || '';
+    await populateBankSelect($('inp-deposit-bank-account'));
+    $('deposit-cheque-modal').classList.remove('hidden');
+  } else {
+    try {
+      await api('PATCH', `/cheques/${id}/status`, { status });
+      toast('Estado actualizado', 'success');
+      loadCheques();
+    } catch (err) { toast(err.message, 'error'); }
+  }
+};
+
+$('btn-deposit-cancel').addEventListener('click', () => { $('deposit-cheque-modal').classList.add('hidden'); pendingChequeAction = null; });
+$('deposit-cheque-modal').addEventListener('click', e => { if (e.target === $('deposit-cheque-modal')) { $('deposit-cheque-modal').classList.add('hidden'); pendingChequeAction = null; } });
+
+$('btn-deposit-confirm').addEventListener('click', async () => {
+  if (!pendingChequeAction) return;
+  const bank_account_id = $('inp-deposit-bank-account').value;
+  if (!bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); return; }
+  const btn = $('btn-deposit-confirm');
+  btn.disabled = true;
   try {
-    await api('PATCH', `/cheques/${id}/status`, { status });
-    toast('Estado actualizado', 'success');
+    await api('PATCH', `/cheques/${pendingChequeAction.id}/status`, { status: pendingChequeAction.status, bank_account_id });
+    const msg = pendingChequeAction.status === 'depositado' ? 'Cheque depositado y acreditado en banco' : 'Cheque debitado del banco';
+    toast(msg, 'success');
+    $('deposit-cheque-modal').classList.add('hidden');
+    pendingChequeAction = null;
     loadCheques();
   } catch (err) { toast(err.message, 'error'); }
-};
+  finally { btn.disabled = false; }
+});
 
 window.deleteCheque = async function(id) {
   if (!await confirm('¿Eliminar este cheque?')) return;

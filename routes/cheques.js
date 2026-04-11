@@ -1,6 +1,6 @@
 const express = require('express');
 const router  = express.Router();
-const { db } = require('../db');
+const { db, withTransaction } = require('../db');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -85,15 +85,33 @@ router.patch('/:id/status', (req, res) => {
     const id = Number(req.params.id);
     const ch = db.prepare('SELECT * FROM cheques WHERE id=?').get(id);
     if (!ch) return res.status(404).json({ error: 'Cheque no encontrado' });
-    const { status } = req.body;
+    const { status, bank_account_id } = req.body;
     const validStatuses = ch.direction === 'recibido'
-      ? ['en_cartera','depositado','rechazado']
-      : ['emitido','debitado'];
+      ? ['en_cartera', 'depositado', 'rechazado']
+      : ['emitido', 'debitado'];
     if (!validStatuses.includes(status))
       return res.status(400).json({ error: `Estado inválido. Válidos: ${validStatuses.join(', ')}` });
-    db.prepare('UPDATE cheques SET status=? WHERE id=?').run(status, id);
+
+    withTransaction(() => {
+      if (ch.direction === 'recibido' && status === 'depositado') {
+        if (!bank_account_id) throw new Error('Se requiere cuenta bancaria para depositar');
+        const accId = Number(bank_account_id);
+        db.prepare('UPDATE cheques SET status=?, deposited_to=? WHERE id=?').run(status, accId, id);
+        db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by) VALUES (?,?,?,?,?,?,?)`)
+          .run(accId, 'ingreso', ch.amount, `Depósito cheque ${ch.bank} Nro ${ch.cheque_number}`, 'cheque_deposit', id, req.session.userId);
+      } else if (ch.direction === 'emitido' && status === 'debitado') {
+        if (!bank_account_id) throw new Error('Se requiere cuenta bancaria');
+        const accId = Number(bank_account_id);
+        db.prepare('UPDATE cheques SET status=?, deposited_to=? WHERE id=?').run(status, accId, id);
+        db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by) VALUES (?,?,?,?,?,?,?)`)
+          .run(accId, 'egreso', ch.amount, `Débito cheque ${ch.bank} Nro ${ch.cheque_number}`, 'cheque_debit', id, req.session.userId);
+      } else {
+        db.prepare('UPDATE cheques SET status=? WHERE id=?').run(status, id);
+      }
+    });
+
     res.json(db.prepare('SELECT * FROM cheques WHERE id=?').get(id));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(err.message.includes('requier') ? 400 : 500).json({ error: err.message }); }
 });
 
 // DELETE /api/cheques/:id

@@ -283,6 +283,18 @@ tr.stock-critical td { background:#fff1f2 }
 
 .purchase-item-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 
+/* ── Balance view ───────────────────────────────────────────── */
+.balance-section{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--white)}
+.balance-section-title{padding:8px 14px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:#f1f5f9;color:var(--text-muted);border-bottom:1px solid var(--border)}
+.balance-row{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border)}
+.balance-row:last-child{border-bottom:none}
+.balance-indent{padding-left:28px;background:#fafbfc}
+.balance-subtotal{font-style:italic;color:var(--text-muted)}
+.balance-total{font-weight:700;background:#f8fafc;border-top:2px solid var(--border)!important}
+.balance-net{font-weight:700;font-size:1.05rem}
+.balance-section-net{background:var(--primary-light);border-color:var(--primary)}
+.balance-amount{font-weight:600;font-variant-numeric:tabular-nums}
+
 @media(max-width:768px){
   /* Sidebar */
   .sidebar{position:fixed;left:0;top:0;height:100vh;z-index:150;transform:translateX(-100%);transition:transform .25s ease}
