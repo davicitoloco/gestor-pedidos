@@ -1,6 +1,6 @@
 const express = require('express');
 const router  = express.Router();
-const { db }  = require('../db');
+const { db, withTransaction }  = require('../db');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -36,11 +36,20 @@ router.post('/', requireAdmin, (req, res) => {
     if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Monto inválido' });
     if (!VALID_METHODS.includes(method)) return res.status(400).json({ error: 'Método de pago inválido' });
 
-    const r = db.prepare(`
-      INSERT INTO payments (customer_id, amount, method, reference, bank, notes, payment_date, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(Number(customer_id), parseFloat(amount), method, reference || '', bank || '', notes || '', payment_date || null, req.session.userId);
-    res.status(201).json(db.prepare('SELECT * FROM payments WHERE id = ?').get(Number(r.lastInsertRowid)));
+    const result = withTransaction(() => {
+      const r = db.prepare(`
+        INSERT INTO payments (customer_id, amount, method, reference, bank, notes, payment_date, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(Number(customer_id), parseFloat(amount), method, reference || '', bank || '', notes || '', payment_date || null, req.session.userId);
+      const paymentId = Number(r.lastInsertRowid);
+      if (method === 'efectivo') {
+        const cust = db.prepare('SELECT name FROM customers WHERE id=?').get(Number(customer_id));
+        db.prepare(`INSERT INTO cash_movements (type, amount, description, ref_type, ref_id, created_by) VALUES (?,?,?,?,?,?)`)
+          .run('ingreso', parseFloat(amount), `Cobro cliente: ${cust?.name || customer_id}`, 'payment', paymentId, req.session.userId);
+      }
+      return paymentId;
+    });
+    res.status(201).json(db.prepare('SELECT * FROM payments WHERE id = ?').get(result));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -50,6 +59,7 @@ router.delete('/:id', requireAdmin, (req, res) => {
     const id = Number(req.params.id);
     if (!db.prepare('SELECT id FROM payments WHERE id = ?').get(id))
       return res.status(404).json({ error: 'Pago no encontrado' });
+    db.prepare("DELETE FROM cash_movements WHERE ref_type='payment' AND ref_id=?").run(id);
     db.prepare('DELETE FROM payments WHERE id = ?').run(id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }

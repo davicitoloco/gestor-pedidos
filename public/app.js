@@ -165,6 +165,7 @@ function navigate(section) {
   if (section === 'stock')     loadStock();
   if (section === 'usuarios')  { showUsersSubview('list'); loadUsers(); }
   if (section === 'reportes')  loadReports();
+  if (section === 'compras')   { showComprasTab('resumen'); loadFinanceSummary(); }
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -1678,6 +1679,586 @@ window.deleteDelivery = async function(orderId, delivId, num) {
     $('inp-status').value = updated.status;
     $('form-status-badge').innerHTML = statusBadge(updated.status);
     loadDeliveries(orderId);
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+/* ================================================================ COMPRAS */
+
+// ── Tab navigation ──────────────────────────────────────────────────────────
+function showComprasTab(tab) {
+  document.querySelectorAll('.compras-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.compras-pane').forEach(p => p.classList.add('hidden'));
+  $(`compras-tab-${tab}`)?.classList.remove('hidden');
+}
+document.querySelectorAll('.compras-tab').forEach(b => {
+  b.addEventListener('click', () => {
+    const tab = b.dataset.tab;
+    showComprasTab(tab);
+    if (tab === 'resumen')      loadFinanceSummary();
+    if (tab === 'proveedores')  { showProveedoresSubview('list'); loadSuppliers(); }
+    if (tab === 'comprobantes') { showComprobantesSubview('list'); loadPurchases(); }
+    if (tab === 'caja')         loadCash();
+    if (tab === 'banco')        { showBancoSubview('list'); loadBankAccounts(); }
+    if (tab === 'cheques')      loadCheques();
+  });
+});
+
+// ── FINANCE SUMMARY ─────────────────────────────────────────────────────────
+async function loadFinanceSummary() {
+  try {
+    const d = await api('GET', '/finance/summary');
+    const color = v => v >= 0 ? 'var(--success)' : 'var(--error)';
+    $('fin-cash').textContent     = fmtMoney(d.cash_balance);
+    $('fin-cash').style.color     = color(d.cash_balance);
+    $('fin-bank').textContent     = fmtMoney(d.bank_balance);
+    $('fin-bank').style.color     = color(d.bank_balance);
+    $('fin-clients').textContent  = fmtMoney(d.client_debt);
+    $('fin-suppliers').textContent= fmtMoney(d.supplier_debt);
+    $('fin-ch-cobrar').textContent= fmtMoney(d.cheques_cobrar);
+    $('fin-ch-pagar').textContent = fmtMoney(d.cheques_pagar);
+  } catch (err) { toast(err.message, 'error'); }
+}
+$('btn-refresh-finance').addEventListener('click', loadFinanceSummary);
+
+// ── SUPPLIERS ────────────────────────────────────────────────────────────────
+let editingSupplierId = null;
+let currentSupplierId = null;
+
+function showProveedoresSubview(v) {
+  ['proveedores-list-view','supplier-form-view','supplier-account-view'].forEach(id => $(`${id}`)?.classList.add('hidden'));
+  $(`${v === 'list' ? 'proveedores-list-view' : v === 'form' ? 'supplier-form-view' : 'supplier-account-view'}`)?.classList.remove('hidden');
+}
+
+async function loadSuppliers() {
+  try {
+    const rows = await api('GET', '/suppliers');
+    $('suppliers-tbody').innerHTML = rows.length ? rows.map(s => `
+      <tr>
+        <td>${esc(s.name)}</td>
+        <td>${esc(s.cuit || '—')}</td>
+        <td>${esc(s.iva_condition)}</td>
+        <td>${esc(s.phone || '—')}</td>
+        <td class="text-right" style="font-weight:600;color:${s.balance > 0 ? 'var(--error)' : 'var(--success)'}">${fmtMoney(s.balance)}</td>
+        <td class="text-center">
+          <button class="btn btn-ghost btn-sm" onclick="openSupplierAccount(${s.id})">Cuenta</button>
+          <button class="btn btn-ghost btn-sm" onclick="openSupplierForm(${s.id})">Editar</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteSupplier(${s.id},'${esc(s.name)}')">Eliminar</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin proveedores</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-new-supplier').addEventListener('click', () => openSupplierForm(null));
+$('btn-back-suppliers').addEventListener('click', () => { showProveedoresSubview('list'); loadSuppliers(); });
+$('btn-sup-form-cancel').addEventListener('click', () => showProveedoresSubview('list'));
+
+window.openSupplierForm = function(id) {
+  editingSupplierId = id;
+  $('supplier-form-title').textContent = id ? 'Editar Proveedor' : 'Nuevo Proveedor';
+  $('supplier-form').reset();
+  if (id) {
+    api('GET', `/suppliers/${id}`).then(s => {
+      $('inp-sup-name').value    = s.name;
+      $('inp-sup-cuit').value    = s.cuit || '';
+      $('inp-sup-iva').value     = s.iva_condition;
+      $('inp-sup-phone').value   = s.phone || '';
+      $('inp-sup-email').value   = s.email || '';
+      $('inp-sup-address').value = s.address || '';
+      $('inp-sup-notes').value   = s.notes || '';
+    }).catch(err => toast(err.message, 'error'));
+  }
+  showProveedoresSubview('form');
+};
+
+$('supplier-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('btn-sup-form-save');
+  btn.disabled = true;
+  try {
+    const data = {
+      name: $('inp-sup-name').value.trim(),
+      cuit: $('inp-sup-cuit').value.trim(),
+      iva_condition: $('inp-sup-iva').value,
+      phone: $('inp-sup-phone').value.trim(),
+      email: $('inp-sup-email').value.trim(),
+      address: $('inp-sup-address').value.trim(),
+      notes: $('inp-sup-notes').value.trim()
+    };
+    if (editingSupplierId) await api('PUT', `/suppliers/${editingSupplierId}`, data);
+    else await api('POST', '/suppliers', data);
+    toast('Proveedor guardado', 'success');
+    showProveedoresSubview('list');
+    loadSuppliers();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.deleteSupplier = async function(id, name) {
+  if (!await confirm(`¿Eliminar proveedor "${name}"? Se eliminará toda su historia.`)) return;
+  try {
+    await api('DELETE', `/suppliers/${id}`);
+    toast('Proveedor eliminado', 'success');
+    loadSuppliers();
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+window.openSupplierAccount = async function(id) {
+  currentSupplierId = id;
+  showProveedoresSubview('account');
+  try {
+    const d = await api('GET', `/suppliers/${id}/account`);
+    $('sup-account-title').textContent = `Cuenta: ${d.supplier.name}`;
+    $('sup-account-summary').innerHTML = `
+      <div class="account-card account-card-debt"><div class="account-card-label">Total compras</div><div class="account-card-val">${fmtMoney(d.total_debt)}</div></div>
+      <div class="account-card account-card-paid"><div class="account-card-label">Total pagado</div><div class="account-card-val">${fmtMoney(d.total_paid)}</div></div>
+      <div class="account-card ${d.balance > 0 ? 'account-card-debt' : 'account-card-credit'}"><div class="account-card-label">Saldo deuda</div><div class="account-card-val">${fmtMoney(d.balance)}</div></div>`;
+    $('sup-purchases-tbody').innerHTML = d.purchases.length ? d.purchases.map(p => `
+      <tr>
+        <td>${esc(p.purchase_number)}</td>
+        <td>${esc(p.doc_type)}</td>
+        <td>${fmtDate(p.doc_date || p.created_at)}</td>
+        <td class="text-right">${fmtMoney(p.total)}</td>
+        <td class="text-center"><a href="/api/purchases/${p.id}/print" target="_blank" class="btn btn-ghost btn-sm">PDF</a></td>
+      </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">Sin comprobantes</td></tr>';
+    $('sup-payments-tbody').innerHTML = d.payments.length ? d.payments.map(p => `
+      <tr>
+        <td>${fmtDate(p.payment_date || p.created_at)}</td>
+        <td>${esc(p.method)}</td>
+        <td class="text-right">${fmtMoney(p.amount)}</td>
+        <td>${esc(p.notes || '—')}</td>
+        <td class="text-center"><button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteSupplierPayment(${p.id})">Eliminar</button></td>
+      </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">Sin pagos</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+$('btn-back-sup-account').addEventListener('click', () => { showProveedoresSubview('list'); loadSuppliers(); });
+
+// Supplier payment modal
+$('btn-new-sup-payment').addEventListener('click', () => {
+  $('inp-sup-pay-amount').value = '';
+  $('inp-sup-pay-date').value   = '';
+  $('inp-sup-pay-method').value = 'efectivo';
+  $('inp-sup-pay-bank').value   = '';
+  $('inp-sup-pay-reference').value = '';
+  $('inp-sup-pay-notes').value  = '';
+  updateSupPayFields();
+  $('sup-payment-modal').classList.remove('hidden');
+});
+$('btn-sup-pay-cancel').addEventListener('click', () => $('sup-payment-modal').classList.add('hidden'));
+$('sup-payment-modal').addEventListener('click', e => { if (e.target === $('sup-payment-modal')) $('sup-payment-modal').classList.add('hidden'); });
+
+function updateSupPayFields() {
+  const method = $('inp-sup-pay-method').value;
+  $('sup-pay-bank-wrap').classList.toggle('hidden', !['cheque','transferencia'].includes(method));
+  $('sup-pay-ref-wrap').classList.toggle('hidden', !['cheque','transferencia'].includes(method));
+}
+$('inp-sup-pay-method').addEventListener('change', updateSupPayFields);
+
+$('btn-sup-pay-confirm').addEventListener('click', async () => {
+  const btn = $('btn-sup-pay-confirm');
+  btn.disabled = true;
+  try {
+    await api('POST', '/supplier-payments', {
+      supplier_id:  currentSupplierId,
+      amount:       parseFloat($('inp-sup-pay-amount').value),
+      method:       $('inp-sup-pay-method').value,
+      bank:         $('inp-sup-pay-bank').value.trim(),
+      reference:    $('inp-sup-pay-reference').value.trim(),
+      notes:        $('inp-sup-pay-notes').value.trim(),
+      payment_date: $('inp-sup-pay-date').value || null
+    });
+    toast('Pago registrado', 'success');
+    $('sup-payment-modal').classList.add('hidden');
+    openSupplierAccount(currentSupplierId);
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.deleteSupplierPayment = async function(id) {
+  if (!await confirm('¿Eliminar este pago?')) return;
+  try {
+    await api('DELETE', `/supplier-payments/${id}`);
+    toast('Pago eliminado', 'success');
+    openSupplierAccount(currentSupplierId);
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+// ── PURCHASES (Comprobantes) ─────────────────────────────────────────────────
+let purchaseItems = [];
+
+function showComprobantesSubview(v) {
+  $('comprobantes-list-view').classList.toggle('hidden', v !== 'list');
+  $('purchase-form-view').classList.toggle('hidden', v !== 'form');
+}
+
+async function loadPurchases() {
+  try {
+    const rows = await api('GET', '/purchases');
+    $('purchases-tbody').innerHTML = rows.length ? rows.map(p => `
+      <tr>
+        <td>${esc(p.purchase_number)}</td>
+        <td>${esc(p.supplier_name)}</td>
+        <td>${esc(p.doc_type)}</td>
+        <td>${esc(p.doc_number || '—')}</td>
+        <td>${fmtDate(p.doc_date || p.created_at)}</td>
+        <td class="text-right">${fmtMoney(p.total)}</td>
+        <td class="text-center">
+          <a href="/api/purchases/${p.id}/print" target="_blank" class="btn btn-ghost btn-sm">PDF</a>
+          <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deletePurchase(${p.id},'${esc(p.purchase_number)}')">Eliminar</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin comprobantes</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-new-purchase').addEventListener('click', async () => {
+  $('purchase-form').reset();
+  purchaseItems = [];
+  renderPurchaseItems();
+  addPurchaseItemRow();
+  // populate supplier select
+  try {
+    const suppliers = await api('GET', '/suppliers');
+    $('inp-pur-supplier').innerHTML = '<option value="">— Seleccioná —</option>' +
+      suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  } catch(e) {}
+  $('inp-pur-docdate').value = new Date().toISOString().slice(0,10);
+  showComprobantesSubview('form');
+});
+$('btn-back-purchases').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
+$('btn-pur-form-cancel').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
+
+function renderPurchaseItems() {
+  const c = $('purchase-items-container');
+  if (!purchaseItems.length) { c.innerHTML = ''; updatePurchaseTotal(); return; }
+  c.innerHTML = purchaseItems.map((it, i) => `
+    <div class="purchase-item-row" data-i="${i}">
+      <input type="text"   class="input pi-name"  value="${esc(it.name)}"  placeholder="Producto" style="flex:2">
+      <input type="number" class="input pi-qty"   value="${it.qty}"   min="0.001" step="any" placeholder="Cant." style="width:90px">
+      <input type="number" class="input pi-price" value="${it.price}" min="0"     step="any" placeholder="Precio unit." style="width:120px">
+      <span style="width:90px;text-align:right;font-size:.9rem;color:var(--text-muted)">$${((it.qty||0)*(it.price||0)).toFixed(2)}</span>
+      <button type="button" class="btn btn-ghost btn-sm pi-remove" style="color:var(--error);padding:4px 8px">✕</button>
+    </div>`).join('');
+  // events
+  c.querySelectorAll('.pi-name').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].name = el.value; updatePurchaseTotal(); }));
+  c.querySelectorAll('.pi-qty').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].qty = parseFloat(el.value)||0; renderPurchaseItems(); }));
+  c.querySelectorAll('.pi-price').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].price = parseFloat(el.value)||0; renderPurchaseItems(); }));
+  c.querySelectorAll('.pi-remove').forEach((el, i) => el.addEventListener('click', () => { purchaseItems.splice(i,1); renderPurchaseItems(); }));
+  updatePurchaseTotal();
+}
+
+function addPurchaseItemRow() {
+  purchaseItems.push({ name:'', qty:1, price:0 });
+  renderPurchaseItems();
+}
+
+function updatePurchaseTotal() {
+  const total = purchaseItems.reduce((s, it) => s + (it.qty||0)*(it.price||0), 0);
+  $('purchase-total-display').textContent = total.toFixed(2);
+}
+
+$('btn-add-purchase-item').addEventListener('click', addPurchaseItemRow);
+
+$('purchase-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const supplier_id = $('inp-pur-supplier').value;
+  if (!supplier_id) { toast('Seleccioná un proveedor', 'error'); return; }
+  if (!purchaseItems.length || !purchaseItems.some(it => it.name.trim())) { toast('Agregá al menos un ítem', 'error'); return; }
+  const btn = e.submitter;
+  btn.disabled = true;
+  try {
+    await api('POST', '/purchases', {
+      supplier_id,
+      doc_type:   $('inp-pur-doctype').value,
+      doc_number: $('inp-pur-docnum').value.trim(),
+      doc_date:   $('inp-pur-docdate').value || null,
+      notes:      $('inp-pur-notes').value.trim(),
+      items: purchaseItems.filter(it => it.name.trim()).map(it => ({
+        product_name: it.name.trim(),
+        quantity:     it.qty,
+        unit_price:   it.price
+      }))
+    });
+    toast('Comprobante registrado y stock actualizado', 'success');
+    showComprobantesSubview('list');
+    loadPurchases();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.deletePurchase = async function(id, num) {
+  if (!await confirm(`¿Eliminar comprobante ${num}? El stock ingresado se va a descontar.`)) return;
+  try {
+    await api('DELETE', `/purchases/${id}`);
+    toast('Comprobante eliminado', 'success');
+    loadPurchases();
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+// ── CAJA ────────────────────────────────────────────────────────────────────
+async function loadCash() {
+  try {
+    const d = await api('GET', '/cash');
+    $('cash-balance-display').textContent = fmtMoney(d.balance);
+    $('cash-balance-display').style.color = d.balance >= 0 ? 'var(--success)' : 'var(--error)';
+    $('cash-tbody').innerHTML = d.movements.length ? d.movements.map(m => `
+      <tr>
+        <td style="color:var(--text-muted);font-size:.85rem">${fmtDateTime(m.created_at)}</td>
+        <td>${m.type === 'ingreso' ? '<span class="badge badge-stock-ok">Ingreso</span>' : '<span class="badge badge-stock-out">Egreso</span>'}</td>
+        <td>${esc(m.description || '—')}</td>
+        <td class="text-right" style="color:${m.type==='ingreso'?'var(--success)':'var(--error)'};font-weight:600">${fmtMoney(m.amount)}</td>
+        <td class="text-right">${fmtMoney(m.running_balance)}</td>
+        <td class="text-center">${m.ref_type === 'manual'
+          ? `<button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteCashMv(${m.id})">✕</button>`
+          : '<span style="color:var(--text-muted);font-size:.8rem">auto</span>'}</td>
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin movimientos</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-new-cash-movement').addEventListener('click', () => {
+  $('cash-modal-title').textContent = 'Movimiento de Caja';
+  $('inp-cash-type').value = 'ingreso';
+  $('inp-cash-amount').value = '';
+  $('inp-cash-description').value = '';
+  $('cash-movement-modal').dataset.mode = 'cash';
+  $('cash-movement-modal').classList.remove('hidden');
+});
+$('btn-cash-mv-cancel').addEventListener('click', () => $('cash-movement-modal').classList.add('hidden'));
+$('cash-movement-modal').addEventListener('click', e => { if (e.target === $('cash-movement-modal')) $('cash-movement-modal').classList.add('hidden'); });
+
+$('btn-cash-mv-confirm').addEventListener('click', async () => {
+  const btn = $('btn-cash-mv-confirm');
+  btn.disabled = true;
+  const mode = $('cash-movement-modal').dataset.mode;
+  try {
+    if (mode === 'bank') {
+      await api('POST', `/bank/accounts/${currentBankAccountId}/movements`, {
+        type: $('inp-cash-type').value,
+        amount: parseFloat($('inp-cash-amount').value),
+        description: $('inp-cash-description').value.trim()
+      });
+      $('cash-movement-modal').classList.add('hidden');
+      loadBankMovements(currentBankAccountId);
+    } else {
+      await api('POST', '/cash', {
+        type: $('inp-cash-type').value,
+        amount: parseFloat($('inp-cash-amount').value),
+        description: $('inp-cash-description').value.trim()
+      });
+      $('cash-movement-modal').classList.add('hidden');
+      loadCash();
+    }
+    toast('Movimiento registrado', 'success');
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.deleteCashMv = async function(id) {
+  if (!await confirm('¿Eliminar este movimiento manual?')) return;
+  try {
+    await api('DELETE', `/cash/${id}`);
+    toast('Movimiento eliminado', 'success');
+    loadCash();
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+// ── BANCO ────────────────────────────────────────────────────────────────────
+let currentBankAccountId = null;
+
+function showBancoSubview(v) {
+  $('banco-list-view').classList.toggle('hidden', v !== 'list');
+  $('banco-movements-view').classList.toggle('hidden', v !== 'movements');
+}
+
+async function loadBankAccounts() {
+  try {
+    const accounts = await api('GET', '/bank/accounts');
+    $('bank-accounts-grid').innerHTML = accounts.length ? accounts.map(a => `
+      <div class="finance-card" style="cursor:pointer" onclick="openBankAccount(${a.id},'${esc(a.name)}')">
+        <div class="finance-card-label">${esc(a.name)}</div>
+        <div class="finance-card-value" style="color:${a.balance>=0?'var(--success)':'var(--error)'}">${fmtMoney(a.balance)}</div>
+        <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">${esc(a.bank || '')} ${a.account_number ? '– ' + a.account_number : ''}</div>
+      </div>`).join('') : '<p style="color:var(--text-muted);padding:20px">Sin cuentas bancarias</p>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+window.openBankAccount = async function(id, name) {
+  currentBankAccountId = id;
+  $('bank-account-title').textContent = name;
+  showBancoSubview('movements');
+  loadBankMovements(id);
+};
+
+async function loadBankMovements(id) {
+  try {
+    const d = await api('GET', `/bank/accounts/${id}/movements`);
+    $('bank-balance-display').textContent = fmtMoney(d.balance);
+    $('bank-movements-tbody').innerHTML = d.movements.length ? d.movements.map(m => `
+      <tr>
+        <td style="color:var(--text-muted);font-size:.85rem">${fmtDateTime(m.created_at)}</td>
+        <td>${m.type === 'ingreso' ? '<span class="badge badge-stock-ok">Ingreso</span>' : '<span class="badge badge-stock-out">Egreso</span>'}</td>
+        <td>${esc(m.description || '—')}</td>
+        <td class="text-right" style="color:${m.type==='ingreso'?'var(--success)':'var(--error)'};font-weight:600">${fmtMoney(m.amount)}</td>
+        <td class="text-right">${fmtMoney(m.running_balance)}</td>
+        <td class="text-center">${m.ref_type === 'manual'
+          ? `<button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteBankMv(${m.id})">✕</button>`
+          : '<span style="color:var(--text-muted);font-size:.8rem">auto</span>'}</td>
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin movimientos</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-back-banco').addEventListener('click', () => { showBancoSubview('list'); loadBankAccounts(); });
+
+$('btn-new-bank-movement').addEventListener('click', () => {
+  $('cash-modal-title').textContent = 'Movimiento Bancario';
+  $('inp-cash-type').value = 'ingreso';
+  $('inp-cash-amount').value = '';
+  $('inp-cash-description').value = '';
+  $('cash-movement-modal').dataset.mode = 'bank';
+  $('cash-movement-modal').classList.remove('hidden');
+});
+
+window.deleteBankMv = async function(id) {
+  if (!await confirm('¿Eliminar este movimiento manual?')) return;
+  try {
+    await api('DELETE', `/bank/movements/${id}`);
+    toast('Movimiento eliminado', 'success');
+    loadBankMovements(currentBankAccountId);
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+$('btn-new-bank-account').addEventListener('click', () => {
+  $('bank-account-modal-title').textContent = 'Nueva Cuenta Bancaria';
+  $('inp-bank-acc-name').value    = '';
+  $('inp-bank-acc-bank').value    = '';
+  $('inp-bank-acc-number').value  = '';
+  $('inp-bank-acc-initial').value = '0';
+  $('bank-account-modal').classList.remove('hidden');
+});
+$('btn-bank-acc-cancel').addEventListener('click', () => $('bank-account-modal').classList.add('hidden'));
+$('bank-account-modal').addEventListener('click', e => { if (e.target === $('bank-account-modal')) $('bank-account-modal').classList.add('hidden'); });
+
+$('btn-bank-acc-confirm').addEventListener('click', async () => {
+  const btn = $('btn-bank-acc-confirm');
+  btn.disabled = true;
+  try {
+    await api('POST', '/bank/accounts', {
+      name:            $('inp-bank-acc-name').value.trim(),
+      bank:            $('inp-bank-acc-bank').value.trim(),
+      account_number:  $('inp-bank-acc-number').value.trim(),
+      initial_balance: parseFloat($('inp-bank-acc-initial').value) || 0
+    });
+    toast('Cuenta creada', 'success');
+    $('bank-account-modal').classList.add('hidden');
+    loadBankAccounts();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+// ── CHEQUES ──────────────────────────────────────────────────────────────────
+let chequeFilter = 'all';
+
+async function loadCheques() {
+  try {
+    const params = chequeFilter !== 'all' ? `?direction=${chequeFilter}` : '';
+    const rows = await api('GET', `/cheques${params}`);
+    const statusLabel = { en_cartera:'En cartera', depositado:'Depositado', rechazado:'Rechazado', emitido:'Emitido', debitado:'Debitado' };
+    const statusClass = { en_cartera:'info', depositado:'success', rechazado:'default', emitido:'warning', debitado:'default' };
+    $('cheques-tbody').innerHTML = rows.length ? rows.map(c => {
+      const related = c.direction === 'recibido' ? (c.customer_name||'—') : (c.supplier_name||'—');
+      const nextStatuses = c.direction === 'recibido'
+        ? [['depositado','Depositar'],['rechazado','Rechazar']]
+        : [['debitado','Marcar debitado']];
+      const statusBtns = c.status === 'en_cartera' || c.status === 'emitido'
+        ? nextStatuses.map(([s, l]) => `<button class="btn btn-ghost btn-sm" onclick="updateChequeStatus(${c.id},'${s}')">${l}</button>`).join('')
+        : '';
+      return `<tr>
+        <td>${c.direction === 'recibido' ? '<span class="badge badge-stock-ok">Recibido</span>' : '<span class="badge badge-stock-out">Emitido</span>'}</td>
+        <td>${esc(c.bank)}</td><td>${esc(c.cheque_number)}</td>
+        <td>${fmtDate(c.due_date)}</td><td>${esc(related)}</td>
+        <td class="text-right">${fmtMoney(c.amount)}</td>
+        <td><span class="badge badge-${statusClass[c.status]||'default'}">${statusLabel[c.status]||c.status}</span></td>
+        <td class="text-center">${statusBtns}
+          <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteCheque(${c.id})">✕</button>
+        </td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted)">Sin cheques</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+document.querySelectorAll('[data-cheque-filter]').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('[data-cheque-filter]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    chequeFilter = b.dataset.chequeFilter;
+    loadCheques();
+  });
+});
+
+$('btn-new-cheque').addEventListener('click', async () => {
+  $('cheque-modal').querySelectorAll('input,select').forEach(el => { if (el.type !== 'select-one') el.value = ''; });
+  $('inp-cheque-direction').value = 'recibido';
+  updateChequeDirection();
+  // populate customers + suppliers
+  try {
+    const [customers, suppliers] = await Promise.all([
+      api('GET', '/customers'),
+      api('GET', '/suppliers')
+    ]);
+    $('inp-cheque-customer').innerHTML = '<option value="">— ninguno —</option>' +
+      customers.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    $('inp-cheque-supplier').innerHTML = '<option value="">— ninguno —</option>' +
+      suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  } catch(e) {}
+  $('cheque-modal').classList.remove('hidden');
+});
+$('btn-cheque-cancel').addEventListener('click', () => $('cheque-modal').classList.add('hidden'));
+$('cheque-modal').addEventListener('click', e => { if (e.target === $('cheque-modal')) $('cheque-modal').classList.add('hidden'); });
+
+$('inp-cheque-direction').addEventListener('change', updateChequeDirection);
+function updateChequeDirection() {
+  const dir = $('inp-cheque-direction').value;
+  $('cheque-customer-wrap').classList.toggle('hidden', dir !== 'recibido');
+  $('cheque-supplier-wrap').classList.toggle('hidden', dir !== 'emitido');
+  $('lbl-cheque-holder').textContent = dir === 'recibido' ? 'Librador / Titular' : 'Beneficiario';
+}
+
+$('btn-cheque-confirm').addEventListener('click', async () => {
+  const btn = $('btn-cheque-confirm');
+  btn.disabled = true;
+  const dir = $('inp-cheque-direction').value;
+  try {
+    await api('POST', '/cheques', {
+      direction:    dir,
+      bank:         $('inp-cheque-bank').value.trim(),
+      cheque_number:$('inp-cheque-number').value.trim(),
+      due_date:     $('inp-cheque-due').value,
+      amount:       parseFloat($('inp-cheque-amount').value),
+      holder_name:  $('inp-cheque-holder').value.trim(),
+      notes:        $('inp-cheque-notes').value.trim(),
+      customer_id:  dir === 'recibido' ? ($('inp-cheque-customer').value || null) : null,
+      supplier_id:  dir === 'emitido'  ? ($('inp-cheque-supplier').value || null) : null
+    });
+    toast('Cheque registrado', 'success');
+    $('cheque-modal').classList.add('hidden');
+    loadCheques();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.updateChequeStatus = async function(id, status) {
+  try {
+    await api('PATCH', `/cheques/${id}/status`, { status });
+    toast('Estado actualizado', 'success');
+    loadCheques();
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+window.deleteCheque = async function(id) {
+  if (!await confirm('¿Eliminar este cheque?')) return;
+  try {
+    await api('DELETE', `/cheques/${id}`);
+    toast('Cheque eliminado', 'success');
+    loadCheques();
   } catch (err) { toast(err.message, 'error'); }
 };
 

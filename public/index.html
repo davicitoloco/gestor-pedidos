@@ -69,6 +69,10 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         Reportes
       </a>
+      <a class="nav-item admin-only" data-section="compras" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+        Compras
+      </a>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-user">
@@ -1000,6 +1004,411 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-payment-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-payment-confirm">Registrar pago</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== SECCIÓN: COMPRAS -->
+<div id="section-compras" class="app-section hidden">
+
+  <!-- Sub-nav tabs -->
+  <div class="compras-tabs">
+    <button class="compras-tab active" data-tab="resumen">Resumen</button>
+    <button class="compras-tab" data-tab="proveedores">Proveedores</button>
+    <button class="compras-tab" data-tab="comprobantes">Comprobantes</button>
+    <button class="compras-tab" data-tab="caja">Caja</button>
+    <button class="compras-tab" data-tab="banco">Banco</button>
+    <button class="compras-tab" data-tab="cheques">Cheques</button>
+  </div>
+
+  <!-- ── RESUMEN FINANCIERO ── -->
+  <div id="compras-tab-resumen" class="compras-pane">
+    <div class="page-header"><h2 class="page-title">Resumen Financiero</h2>
+      <button class="btn btn-ghost" id="btn-refresh-finance">Actualizar</button>
+    </div>
+    <div class="finance-grid" id="finance-summary-grid">
+      <div class="finance-card"><div class="finance-card-label">Saldo Caja</div><div class="finance-card-value" id="fin-cash">—</div></div>
+      <div class="finance-card"><div class="finance-card-label">Saldo Banco (total)</div><div class="finance-card-value" id="fin-bank">—</div></div>
+      <div class="finance-card finance-card-positive"><div class="finance-card-label">Deudores (clientes)</div><div class="finance-card-value" id="fin-clients">—</div></div>
+      <div class="finance-card finance-card-negative"><div class="finance-card-label">Deuda (proveedores)</div><div class="finance-card-value" id="fin-suppliers">—</div></div>
+      <div class="finance-card"><div class="finance-card-label">Cheques a cobrar (30d)</div><div class="finance-card-value" id="fin-ch-cobrar">—</div></div>
+      <div class="finance-card"><div class="finance-card-label">Cheques a pagar (30d)</div><div class="finance-card-value" id="fin-ch-pagar">—</div></div>
+    </div>
+  </div>
+
+  <!-- ── PROVEEDORES ── -->
+  <div id="compras-tab-proveedores" class="compras-pane hidden">
+    <div id="proveedores-list-view">
+      <div class="page-header">
+        <h2 class="page-title">Proveedores</h2>
+        <button class="btn btn-primary" id="btn-new-supplier">+ Nuevo Proveedor</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th>Nombre</th><th>CUIT</th><th>Cond. IVA</th><th>Teléfono</th>
+            <th class="text-right">Saldo deuda</th><th class="text-center">Acciones</th>
+          </tr></thead>
+          <tbody id="suppliers-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="supplier-form-view" class="hidden">
+      <div class="page-header">
+        <h2 class="page-title" id="supplier-form-title">Nuevo Proveedor</h2>
+        <button class="btn btn-ghost" id="btn-back-suppliers">← Volver</button>
+      </div>
+      <form id="supplier-form" class="modal-form-body" style="max-width:560px">
+        <div class="form-grid-2">
+          <div class="field" style="grid-column:1/-1">
+            <label class="label required">Nombre</label>
+            <input type="text" id="inp-sup-name" class="input" required>
+          </div>
+          <div class="field">
+            <label class="label">CUIT</label>
+            <input type="text" id="inp-sup-cuit" class="input" placeholder="XX-XXXXXXXX-X">
+          </div>
+          <div class="field">
+            <label class="label">Condición IVA</label>
+            <select id="inp-sup-iva" class="input select">
+              <option>Responsable Inscripto</option>
+              <option>Monotributista</option>
+              <option>Exento</option>
+              <option>Consumidor Final</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label">Teléfono</label>
+            <input type="text" id="inp-sup-phone" class="input">
+          </div>
+          <div class="field">
+            <label class="label">Email</label>
+            <input type="email" id="inp-sup-email" class="input">
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label class="label">Dirección</label>
+            <input type="text" id="inp-sup-address" class="input">
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label class="label">Notas</label>
+            <input type="text" id="inp-sup-notes" class="input">
+          </div>
+        </div>
+        <div class="form-actions" style="margin-top:20px">
+          <button type="button" class="btn btn-ghost" id="btn-sup-form-cancel">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btn-sup-form-save">Guardar</button>
+        </div>
+      </form>
+    </div>
+    <div id="supplier-account-view" class="hidden">
+      <div class="page-header">
+        <h2 class="page-title" id="sup-account-title">Cuenta Corriente</h2>
+        <button class="btn btn-ghost" id="btn-back-sup-account">← Volver</button>
+      </div>
+      <div class="account-summary-grid" id="sup-account-summary"></div>
+      <div style="margin:20px 0 8px;font-weight:600">Comprobantes de compra</div>
+      <div class="table-wrap" style="max-height:260px;overflow-y:auto">
+        <table class="table"><thead><tr>
+          <th>Nº</th><th>Tipo</th><th>Fecha</th><th class="text-right">Total</th><th class="text-center">PDF</th>
+        </tr></thead><tbody id="sup-purchases-tbody"></tbody></table>
+      </div>
+      <div style="margin:16px 0 8px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:600">Pagos realizados</span>
+        <button class="btn btn-primary btn-sm" id="btn-new-sup-payment">+ Registrar pago</button>
+      </div>
+      <div class="table-wrap" style="max-height:220px;overflow-y:auto">
+        <table class="table"><thead><tr>
+          <th>Fecha</th><th>Método</th><th class="text-right">Monto</th><th>Notas</th><th class="text-center">Eliminar</th>
+        </tr></thead><tbody id="sup-payments-tbody"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── COMPROBANTES DE COMPRA ── -->
+  <div id="compras-tab-comprobantes" class="compras-pane hidden">
+    <div id="comprobantes-list-view">
+      <div class="page-header">
+        <h2 class="page-title">Comprobantes de Compra</h2>
+        <button class="btn btn-primary" id="btn-new-purchase">+ Nuevo Comprobante</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table"><thead><tr>
+          <th>Nº</th><th>Proveedor</th><th>Tipo</th><th>Nº Doc.</th>
+          <th>Fecha</th><th class="text-right">Total</th><th class="text-center">Acciones</th>
+        </tr></thead><tbody id="purchases-tbody"></tbody></table>
+      </div>
+    </div>
+    <div id="purchase-form-view" class="hidden">
+      <div class="page-header">
+        <h2 class="page-title">Nuevo Comprobante</h2>
+        <button class="btn btn-ghost" id="btn-back-purchases">← Volver</button>
+      </div>
+      <form id="purchase-form" style="max-width:700px">
+        <div class="form-grid-2" style="margin-bottom:16px">
+          <div class="field">
+            <label class="label required">Proveedor</label>
+            <select id="inp-pur-supplier" class="input select" required>
+              <option value="">— Seleccioná —</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label">Tipo de comprobante</label>
+            <select id="inp-pur-doctype" class="input select">
+              <option>Factura A</option><option selected>Factura B</option>
+              <option>Factura C</option><option>Remito</option>
+              <option>Nota de Crédito</option><option>Otros</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label">Nº de documento</label>
+            <input type="text" id="inp-pur-docnum" class="input" placeholder="0001-00001234">
+          </div>
+          <div class="field">
+            <label class="label">Fecha del documento</label>
+            <input type="date" id="inp-pur-docdate" class="input">
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label class="label">Notas</label>
+            <input type="text" id="inp-pur-notes" class="input">
+          </div>
+        </div>
+        <div style="font-weight:600;margin-bottom:8px">Ítems</div>
+        <div id="purchase-items-container"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-add-purchase-item" style="margin-top:8px">+ Agregar ítem</button>
+        <div style="margin-top:16px;text-align:right;font-size:16px;font-weight:700">Total: $<span id="purchase-total-display">0.00</span></div>
+        <div class="form-actions" style="margin-top:20px">
+          <button type="button" class="btn btn-ghost" id="btn-pur-form-cancel">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Confirmar compra</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── CAJA ── -->
+  <div id="compras-tab-caja" class="compras-pane hidden">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Caja</h2>
+        <div id="cash-balance-display" style="font-size:22px;font-weight:700;color:var(--primary)">—</div>
+      </div>
+      <button class="btn btn-primary" id="btn-new-cash-movement">+ Movimiento manual</button>
+    </div>
+    <div class="table-wrap">
+      <table class="table"><thead><tr>
+        <th>Fecha</th><th>Tipo</th><th>Descripción</th>
+        <th class="text-right">Monto</th><th class="text-right">Saldo</th><th class="text-center">Acc.</th>
+      </tr></thead><tbody id="cash-tbody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- ── BANCO ── -->
+  <div id="compras-tab-banco" class="compras-pane hidden">
+    <div id="banco-list-view">
+      <div class="page-header">
+        <h2 class="page-title">Cuentas Bancarias</h2>
+        <button class="btn btn-primary" id="btn-new-bank-account">+ Nueva cuenta</button>
+      </div>
+      <div id="bank-accounts-grid" class="finance-grid"></div>
+    </div>
+    <div id="banco-movements-view" class="hidden">
+      <div class="page-header">
+        <h2 class="page-title" id="bank-account-title">Movimientos</h2>
+        <button class="btn btn-ghost" id="btn-back-banco">← Volver</button>
+      </div>
+      <div style="margin-bottom:12px;display:flex;gap:12px;align-items:center">
+        <span>Saldo: <strong id="bank-balance-display">—</strong></span>
+        <button class="btn btn-primary btn-sm" id="btn-new-bank-movement">+ Movimiento</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table"><thead><tr>
+          <th>Fecha</th><th>Tipo</th><th>Descripción</th>
+          <th class="text-right">Monto</th><th class="text-right">Saldo</th><th class="text-center">Acc.</th>
+        </tr></thead><tbody id="bank-movements-tbody"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CHEQUES ── -->
+  <div id="compras-tab-cheques" class="compras-pane hidden">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Cartera de Cheques</h2>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button class="filter-btn active" data-cheque-filter="all">Todos</button>
+          <button class="filter-btn" data-cheque-filter="recibido">Recibidos</button>
+          <button class="filter-btn" data-cheque-filter="emitido">Emitidos</button>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="btn-new-cheque">+ Nuevo Cheque</button>
+    </div>
+    <div class="table-wrap">
+      <table class="table"><thead><tr>
+        <th>Dirección</th><th>Banco</th><th>Nº Cheque</th><th>Vencimiento</th>
+        <th>Cliente/Proveedor</th><th class="text-right">Monto</th>
+        <th>Estado</th><th class="text-center">Acciones</th>
+      </tr></thead><tbody id="cheques-tbody"></tbody></table>
+    </div>
+  </div>
+
+</div><!-- /section-compras -->
+
+<!-- ===================================================== MODAL: Pago Proveedor -->
+<div id="sup-payment-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">Registrar pago a proveedor</div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="label required">Monto ($)</label>
+          <input type="number" id="inp-sup-pay-amount" class="input" min="0.01" step="0.01">
+        </div>
+        <div class="field">
+          <label class="label">Fecha</label>
+          <input type="date" id="inp-sup-pay-date" class="input">
+        </div>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label class="label required">Método</label>
+        <select id="inp-sup-pay-method" class="input select">
+          <option value="efectivo">Efectivo</option>
+          <option value="cheque">Cheque propio</option>
+          <option value="transferencia">Transferencia</option>
+          <option value="otros">Otros</option>
+        </select>
+      </div>
+      <div id="sup-pay-bank-wrap" class="field hidden" style="margin-top:12px">
+        <label class="label">Banco / Cuenta</label>
+        <input type="text" id="inp-sup-pay-bank" class="input" placeholder="Banco o cuenta de origen">
+      </div>
+      <div id="sup-pay-ref-wrap" class="field hidden" style="margin-top:12px">
+        <label class="label">Referencia</label>
+        <input type="text" id="inp-sup-pay-reference" class="input">
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label class="label">Notas</label>
+        <input type="text" id="inp-sup-pay-notes" class="input">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-sup-pay-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-sup-pay-confirm">Registrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Movimiento Caja/Banco -->
+<div id="cash-movement-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header" id="cash-modal-title">Movimiento de Caja</div>
+    <div class="modal-form-body">
+      <div class="field">
+        <label class="label required">Tipo</label>
+        <select id="inp-cash-type" class="input select">
+          <option value="ingreso">Ingreso</option>
+          <option value="egreso">Egreso</option>
+        </select>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label class="label required">Monto ($)</label>
+        <input type="number" id="inp-cash-amount" class="input" min="0.01" step="0.01">
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label class="label">Descripción</label>
+        <input type="text" id="inp-cash-description" class="input" placeholder="Motivo del movimiento">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-cash-mv-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-cash-mv-confirm">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Cuenta Bancaria -->
+<div id="bank-account-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header" id="bank-account-modal-title">Nueva Cuenta Bancaria</div>
+    <div class="modal-form-body">
+      <div class="field">
+        <label class="label required">Nombre / Alias</label>
+        <input type="text" id="inp-bank-acc-name" class="input" placeholder="Ej: Cuenta Corriente Nación">
+      </div>
+      <div class="form-grid-2" style="margin-top:12px">
+        <div class="field">
+          <label class="label">Banco</label>
+          <input type="text" id="inp-bank-acc-bank" class="input" placeholder="Ej: Banco Nación">
+        </div>
+        <div class="field">
+          <label class="label">Nº de cuenta / CBU</label>
+          <input type="text" id="inp-bank-acc-number" class="input">
+        </div>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label class="label">Saldo inicial ($)</label>
+        <input type="number" id="inp-bank-acc-initial" class="input" value="0" min="0" step="0.01">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-bank-acc-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-bank-acc-confirm">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Nuevo Cheque -->
+<div id="cheque-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">Registrar Cheque</div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="label required">Dirección</label>
+          <select id="inp-cheque-direction" class="input select">
+            <option value="recibido">Recibido (de cliente)</option>
+            <option value="emitido">Emitido (a proveedor)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label required">Banco</label>
+          <input type="text" id="inp-cheque-bank" class="input" placeholder="Ej: Galicia">
+        </div>
+        <div class="field">
+          <label class="label required">Nº Cheque</label>
+          <input type="text" id="inp-cheque-number" class="input">
+        </div>
+        <div class="field">
+          <label class="label required">Vencimiento</label>
+          <input type="date" id="inp-cheque-due" class="input">
+        </div>
+        <div class="field">
+          <label class="label required">Monto ($)</label>
+          <input type="number" id="inp-cheque-amount" class="input" min="0.01" step="0.01">
+        </div>
+        <div class="field">
+          <label class="label" id="lbl-cheque-holder">Librador / Titular</label>
+          <input type="text" id="inp-cheque-holder" class="input">
+        </div>
+        <div class="field" id="cheque-customer-wrap">
+          <label class="label">Cliente</label>
+          <select id="inp-cheque-customer" class="input select">
+            <option value="">— ninguno —</option>
+          </select>
+        </div>
+        <div class="field hidden" id="cheque-supplier-wrap">
+          <label class="label">Proveedor</label>
+          <select id="inp-cheque-supplier" class="input select">
+            <option value="">— ninguno —</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label class="label">Notas</label>
+        <input type="text" id="inp-cheque-notes" class="input">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-cheque-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-cheque-confirm">Registrar</button>
     </div>
   </div>
 </div>

@@ -39,7 +39,14 @@ app.use('/api/settings',   require('./routes/settings'));
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/stock',     require('./routes/stock'));
 app.use('/api/remitos',   require('./routes/remitos'));
-app.use('/api/payments',  require('./routes/payments'));
+app.use('/api/payments',          require('./routes/payments'));
+app.use('/api/suppliers',         require('./routes/suppliers'));
+app.use('/api/purchases',         require('./routes/purchases'));
+app.use('/api/supplier-payments', require('./routes/supplier-payments'));
+app.use('/api/cash',              require('./routes/cash'));
+app.use('/api/bank',              require('./routes/bank'));
+app.use('/api/cheques',           require('./routes/cheques'));
+app.use('/api/finance',           require('./routes/finance'));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

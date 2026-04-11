@@ -125,6 +125,95 @@ db.exec(`
     created_by INTEGER REFERENCES users(id),
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
   );
+  CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    cuit TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    address TEXT DEFAULT '',
+    iva_condition TEXT NOT NULL DEFAULT 'Responsable Inscripto',
+    notes TEXT DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_sequence INTEGER UNIQUE NOT NULL,
+    supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+    doc_type TEXT NOT NULL DEFAULT 'Factura B',
+    doc_number TEXT DEFAULT '',
+    doc_date TEXT,
+    total REAL NOT NULL DEFAULT 0,
+    notes TEXT DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS purchase_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    product_id INTEGER REFERENCES products(id),
+    product_name TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 0,
+    unit_price REAL NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS supplier_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    amount REAL NOT NULL,
+    method TEXT NOT NULL DEFAULT 'efectivo',
+    reference TEXT DEFAULT '',
+    bank TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    payment_date TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS cash_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT DEFAULT '',
+    ref_type TEXT DEFAULT '',
+    ref_id INTEGER,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS bank_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    bank TEXT NOT NULL DEFAULT '',
+    account_number TEXT DEFAULT '',
+    initial_balance REAL NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS bank_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT DEFAULT '',
+    ref_type TEXT DEFAULT '',
+    ref_id INTEGER,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS cheques (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    direction TEXT NOT NULL,
+    bank TEXT NOT NULL,
+    cheque_number TEXT NOT NULL,
+    amount REAL NOT NULL,
+    due_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'en_cartera',
+    holder_name TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    customer_id INTEGER REFERENCES customers(id),
+    supplier_id INTEGER REFERENCES suppliers(id),
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
