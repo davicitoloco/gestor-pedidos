@@ -38,6 +38,8 @@ app.use('/api/reports',  require('./routes/reports'));
 app.use('/api/settings',   require('./routes/settings'));
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/stock',     require('./routes/stock'));
+app.use('/api/remitos',   require('./routes/remitos'));
+app.use('/api/payments',  require('./routes/payments'));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

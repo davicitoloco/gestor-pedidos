@@ -15,7 +15,10 @@ router.get('/', (req, res) => {
   try {
     const vc = isVendor(req) ? `AND c.created_by = ${req.session.userId}` : '';
     const rows = db.prepare(`
-      SELECT c.*, COALESCE(u.full_name, u.username) AS vendor_name
+      SELECT c.*,
+        COALESCE(u.full_name, u.username) AS vendor_name,
+        COALESCE((SELECT SUM(r.total)  FROM remitos  r WHERE r.customer_id = c.id), 0)
+        - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.customer_id = c.id), 0) AS balance
       FROM customers c
       LEFT JOIN users u ON c.created_by = u.id
       WHERE 1=1 ${vc}
@@ -25,15 +28,47 @@ router.get('/', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/customers/:id/account
+router.get('/:id/account', (req, res) => {
+  try {
+    const cid      = Number(req.params.id);
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(cid);
+    if (!customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+    const remitos = db.prepare(`
+      SELECT r.*, printf('R-%03d', r.remito_sequence) AS remito_number,
+             printf('%03d', o.order_sequence) AS order_number
+      FROM remitos r
+      JOIN orders o ON r.order_id = o.id
+      WHERE r.customer_id = ?
+      ORDER BY r.remito_sequence DESC
+    `).all(cid);
+
+    const payments = db.prepare(`
+      SELECT p.*, COALESCE(u.full_name, u.username) AS created_by_name
+      FROM payments p
+      LEFT JOIN users u ON p.created_by = u.id
+      WHERE p.customer_id = ?
+      ORDER BY p.created_at DESC
+    `).all(cid);
+
+    const total_debt = remitos.reduce((s, r) => s + r.total, 0);
+    const total_paid = payments.reduce((s, p) => s + p.amount, 0);
+    const balance    = total_debt - total_paid;
+
+    res.json({ customer, remitos, payments, total_debt, total_paid, balance });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/customers
 router.post('/', (req, res) => {
   try {
-    const { name, phone, email, address, notes } = req.body;
+    const { name, phone, email, address, notes, iva_condition } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'El nombre es requerido' });
     const result = db.prepare(`
-      INSERT INTO customers (name, phone, email, address, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(name.trim(), phone||'', email||'', address||'', notes||'', req.session.userId);
+      INSERT INTO customers (name, phone, email, address, notes, iva_condition, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(name.trim(), phone||'', email||'', address||'', notes||'', iva_condition||'Consumidor Final', req.session.userId);
     res.status(201).json(db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(result.lastInsertRowid)));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -46,13 +81,14 @@ router.put('/:id', (req, res) => {
     if (!ex) return res.status(404).json({ error: 'Cliente no encontrado' });
     if (isVendor(req) && ex.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar clientes de otros vendedores' });
-    const { name, phone, email, address, notes } = req.body;
-    db.prepare(`UPDATE customers SET name=?, phone=?, email=?, address=?, notes=? WHERE id=?`).run(
-      name !== undefined ? name.trim() : ex.name,
-      phone !== undefined ? phone : ex.phone,
-      email !== undefined ? email : ex.email,
-      address !== undefined ? address : ex.address,
-      notes !== undefined ? notes : ex.notes,
+    const { name, phone, email, address, notes, iva_condition } = req.body;
+    db.prepare(`UPDATE customers SET name=?, phone=?, email=?, address=?, notes=?, iva_condition=? WHERE id=?`).run(
+      name          !== undefined ? name.trim()    : ex.name,
+      phone         !== undefined ? phone          : ex.phone,
+      email         !== undefined ? email          : ex.email,
+      address       !== undefined ? address        : ex.address,
+      notes         !== undefined ? notes          : ex.notes,
+      iva_condition !== undefined ? iva_condition  : ex.iva_condition,
       id
     );
     res.json(db.prepare('SELECT * FROM customers WHERE id = ?').get(id));

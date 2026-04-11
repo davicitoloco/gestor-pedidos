@@ -235,6 +235,19 @@ tr.stock-critical td { background:#fff1f2 }
   padding:1px 10px;font-size:.82rem;color:#92400e
 }
 
+/* ============================================================ ACCOUNT CURRENT */
+.account-summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:4px}
+@media(max-width:600px){.account-summary-grid{grid-template-columns:1fr}}
+.account-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;box-shadow:var(--shadow)}
+.account-card-label{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:6px}
+.account-card-value{font-size:1.5rem;font-weight:700;color:var(--text)}
+.account-card-debt{border-left:4px solid var(--danger)}
+.account-card-debt .account-card-value{color:var(--danger)}
+.account-card-paid{border-left:4px solid var(--success-txt)}
+.account-card-paid .account-card-value{color:var(--success-txt)}
+.account-card-credit{border-left:4px solid var(--primary)}
+.account-card-credit .account-card-value{color:var(--primary)}
+
 /* ============================================================ RANKINGS */
 .rankings-section-header{
   display:flex;align-items:center;justify-content:space-between;

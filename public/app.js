@@ -928,6 +928,7 @@ $('btn-report-excel').addEventListener('click', () => { window.location.href = '
 function showClientsSubview(view) {
   $('clients-list-view').classList.toggle('hidden', view !== 'list');
   $('clients-form-view').classList.toggle('hidden', view !== 'form');
+  $('clients-account-view').classList.toggle('hidden', view !== 'account');
 }
 
 async function loadClients() {
@@ -945,15 +946,25 @@ function renderClients(clients) {
   if (!clients.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
   noEl.classList.add('hidden');
 
-  tbody.innerHTML = clients.map(c => `
-    <tr>
+  tbody.innerHTML = clients.map(c => {
+    const bal = c.balance || 0;
+    const balFmt = bal > 0.005
+      ? `<span style="color:var(--danger);font-weight:600">${fmtMoney(bal)}</span>`
+      : bal < -0.005
+        ? `<span style="color:var(--success-txt);font-weight:600">A favor ${fmtMoney(-bal)}</span>`
+        : `<span style="color:var(--text-muted)">Sin deuda</span>`;
+    return `<tr>
       <td style="font-weight:500">${esc(c.name)}</td>
       <td style="color:var(--text-muted)">${esc(c.phone || '—')}</td>
       <td style="color:var(--text-muted);font-size:.85rem">${esc(c.email || '—')}</td>
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(c.vendor_name || '—')}</td>` : ''}
       <td style="color:var(--text-muted);font-size:.85rem">${esc(c.address || '—')}</td>
+      <td class="text-right">${balFmt}</td>
       <td class="text-center" style="white-space:nowrap">
-        <button class="btn-icon" onclick="newOrderForClient('${esc(c.name)}')" title="Crear pedido para este cliente">
+        <button class="btn-icon" onclick="openAccountView(${c.id})" title="Cuenta corriente">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </button>
+        <button class="btn-icon" onclick="newOrderForClient('${esc(c.name)}')" title="Crear pedido">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
         </button>
         <button class="btn-icon" onclick="openClientForm(${c.id})" title="Editar">
@@ -963,8 +974,8 @@ function renderClients(clients) {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
         </button>
       </td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 $('btn-new-client').addEventListener('click', () => openClientForm(null));
@@ -979,6 +990,7 @@ window.openClientForm = function(id) {
   $('inp-client-email').value   = '';
   $('inp-client-address').value = '';
   $('inp-client-notes').value   = '';
+  $('inp-client-iva').value     = 'Consumidor Final';
 
   if (id) {
     api('GET', '/customers').then(list => {
@@ -989,12 +1001,143 @@ window.openClientForm = function(id) {
         $('inp-client-email').value   = c.email || '';
         $('inp-client-address').value = c.address || '';
         $('inp-client-notes').value   = c.notes || '';
+        $('inp-client-iva').value     = c.iva_condition || 'Consumidor Final';
       }
     });
   }
   showClientsSubview('form');
   setTimeout(() => $('inp-client-name').focus(), 50);
 };
+
+/* ================================================================ CUENTA CORRIENTE */
+let _accountCustomerId = null;
+
+window.openAccountView = async function(customerId) {
+  _accountCustomerId = customerId;
+  showClientsSubview('account');
+  await loadAccount();
+};
+
+$('btn-account-back').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
+
+async function loadAccount() {
+  if (!_accountCustomerId) return;
+  try {
+    const data = await api('GET', `/customers/${_accountCustomerId}/account`);
+    $('account-client-name').textContent = data.customer.name;
+    $('account-client-iva').textContent  = data.customer.iva_condition || 'Consumidor Final';
+
+    $('account-total-debt').textContent = fmtMoney(data.total_debt);
+    $('account-total-paid').textContent = fmtMoney(data.total_paid);
+    const bal = data.balance;
+    $('account-balance').textContent = fmtMoney(Math.abs(bal));
+    const bc = $('account-balance-card');
+    bc.className = 'account-card ' + (bal > 0.005 ? 'account-card-debt' : bal < -0.005 ? 'account-card-credit' : 'account-card-paid');
+    $('account-balance-card').querySelector('.account-card-label').textContent =
+      bal > 0.005 ? 'Saldo deudor' : bal < -0.005 ? 'Saldo a favor' : 'Sin deuda';
+
+    // Remitos
+    const rtbody = $('account-remitos-tbody');
+    if (!data.remitos.length) {
+      rtbody.innerHTML = '';
+      $('no-account-remitos').classList.remove('hidden');
+    } else {
+      $('no-account-remitos').classList.add('hidden');
+      rtbody.innerHTML = data.remitos.map(r => `<tr>
+        <td><span class="order-num">${esc(r.remito_number)}</span></td>
+        <td style="color:var(--text-muted)">#${esc(r.order_number)}</td>
+        <td style="color:var(--text-muted);font-size:.83rem">${fmtDateTime(r.created_at)}</td>
+        <td class="text-right" style="font-weight:600">${fmtMoney(r.total)}</td>
+        <td class="text-center">
+          <a href="/api/remitos/${r.id}/print" target="_blank" class="btn-icon" title="Ver PDF">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </a>
+        </td>
+      </tr>`).join('');
+    }
+
+    // Pagos
+    const ptbody = $('account-payments-tbody');
+    const methodLabel = { efectivo:'Efectivo', cheque:'Cheque', transferencia:'Transferencia', tarjeta:'Tarjeta', otros:'Otros' };
+    if (!data.payments.length) {
+      ptbody.innerHTML = '';
+      $('no-account-payments').classList.remove('hidden');
+    } else {
+      $('no-account-payments').classList.add('hidden');
+      ptbody.innerHTML = data.payments.map(p => {
+        const detail = [p.bank, p.reference, p.notes].filter(Boolean).join(' · ');
+        return `<tr>
+          <td style="color:var(--text-muted);font-size:.83rem">${fmtDateTime(p.created_at)}</td>
+          <td><span class="badge badge-info">${methodLabel[p.method] || p.method}</span></td>
+          <td style="color:var(--text-muted);font-size:.85rem">${esc(detail || '—')}</td>
+          <td class="text-right" style="font-weight:600;color:var(--success-txt)">${fmtMoney(p.amount)}</td>
+          <td class="text-center admin-only">
+            <button class="btn-icon btn-delete" onclick="deletePayment(${p.id})" title="Eliminar pago">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+            </button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+    // Reapply admin-only visibility
+    document.querySelectorAll('#clients-account-view .admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+window.deletePayment = async function(id) {
+  if (!await confirm('¿Eliminar este pago? El saldo se ajustará automáticamente.')) return;
+  try {
+    await api('DELETE', `/payments/${id}`);
+    toast('Pago eliminado', 'success');
+    loadAccount();
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+/* ── Payment modal ─────────────────────────────────────────────────────────── */
+$('btn-new-payment').addEventListener('click', () => {
+  $('inp-payment-method').value    = 'efectivo';
+  $('inp-payment-amount').value    = '';
+  $('inp-payment-date').value      = '';
+  $('inp-payment-bank').value      = '';
+  $('inp-payment-reference').value = '';
+  $('inp-payment-notes').value     = '';
+  updatePaymentFields();
+  $('payment-modal').classList.remove('hidden');
+});
+$('btn-payment-cancel').addEventListener('click', () => $('payment-modal').classList.add('hidden'));
+$('payment-modal').addEventListener('click', e => { if (e.target === $('payment-modal')) $('payment-modal').classList.add('hidden'); });
+
+function updatePaymentFields() {
+  const m = $('inp-payment-method').value;
+  $('payment-bank-wrap').classList.toggle('hidden', m !== 'cheque');
+  $('payment-reference-wrap').classList.toggle('hidden', !['cheque','transferencia','tarjeta'].includes(m));
+  const refLabels = { cheque: 'Nº de cheque', transferencia: 'Referencia / Nº operación', tarjeta: 'Nº de autorización' };
+  if (refLabels[m]) $('lbl-payment-reference').textContent = refLabels[m];
+  $('lbl-payment-date').textContent = m === 'cheque' ? 'Fecha de cobro' : 'Fecha del pago';
+}
+$('inp-payment-method').addEventListener('change', updatePaymentFields);
+
+$('btn-payment-confirm').addEventListener('click', async () => {
+  const amount = parseFloat($('inp-payment-amount').value);
+  if (!amount || amount <= 0) { toast('Ingresá un monto válido', 'error'); $('inp-payment-amount').focus(); return; }
+  const btn = $('btn-payment-confirm');
+  btn.disabled = true;
+  try {
+    await api('POST', '/payments', {
+      customer_id:  _accountCustomerId,
+      amount,
+      method:       $('inp-payment-method').value,
+      bank:         $('inp-payment-bank').value.trim(),
+      reference:    $('inp-payment-reference').value.trim(),
+      notes:        $('inp-payment-notes').value.trim(),
+      payment_date: $('inp-payment-date').value || null
+    });
+    $('payment-modal').classList.add('hidden');
+    toast('Pago registrado', 'success');
+    loadAccount();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
 
 window.deleteClient = async function(id, name) {
   if (!await confirm(`¿Eliminar al cliente "${name}"?`)) return;
@@ -1016,10 +1159,11 @@ $('client-form').addEventListener('submit', async e => {
   if (!name) { toast('El nombre es requerido', 'error'); $('inp-client-name').focus(); return; }
   const data = {
     name,
-    phone:   $('inp-client-phone').value.trim(),
-    email:   $('inp-client-email').value.trim(),
-    address: $('inp-client-address').value.trim(),
-    notes:   $('inp-client-notes').value.trim()
+    phone:         $('inp-client-phone').value.trim(),
+    email:         $('inp-client-email').value.trim(),
+    address:       $('inp-client-address').value.trim(),
+    notes:         $('inp-client-notes').value.trim(),
+    iva_condition: $('inp-client-iva').value
   };
   const btn = $('btn-client-save');
   btn.disabled = true;
@@ -1074,6 +1218,7 @@ function renderDeliveries(deliveries) {
       <div class="delivery-entry-header">
         <span class="delivery-num">Entrega #${i + 1}</span>
         <span class="delivery-date">${fmtDateTime(d.created_at)}</span>
+        ${d.remito ? `<a href="/api/remitos/${d.remito.id}/print" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:8px;padding:3px 9px;font-size:.78rem">${esc(d.remito.number)}</a>` : ''}
         ${isAdmin() ? `<button class="btn-icon btn-delete" style="margin-left:auto"
           onclick="deleteDelivery(${state.editingOrderId},${d.id},${i+1})" title="Cancelar esta entrega">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>

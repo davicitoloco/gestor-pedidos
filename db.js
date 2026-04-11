@@ -93,6 +93,38 @@ db.exec(`
     created_by INTEGER REFERENCES users(id),
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
   );
+  CREATE TABLE IF NOT EXISTS remitos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    remito_sequence INTEGER UNIQUE NOT NULL,
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    delivery_id INTEGER UNIQUE NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+    customer_id INTEGER REFERENCES customers(id),
+    customer_name TEXT NOT NULL,
+    customer_iva TEXT NOT NULL DEFAULT 'Consumidor Final',
+    total REAL NOT NULL DEFAULT 0,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS remito_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    remito_id INTEGER NOT NULL REFERENCES remitos(id) ON DELETE CASCADE,
+    product_name TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 0,
+    unit_price REAL NOT NULL DEFAULT 0,
+    discount REAL NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    amount REAL NOT NULL,
+    method TEXT NOT NULL DEFAULT 'efectivo',
+    reference TEXT DEFAULT '',
+    bank TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    payment_date TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
@@ -107,6 +139,7 @@ addColIfMissing('orders', 'created_by', "INTEGER REFERENCES users(id)");
 addColIfMissing('products', 'stock',     'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('products', 'stock_min', 'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('order_items', 'product_id', 'INTEGER REFERENCES products(id)');
+addColIfMissing('customers', 'iva_condition', "TEXT NOT NULL DEFAULT 'Consumidor Final'");
 
 // Settings por defecto
 db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run('company_name', 'Mi Empresa');

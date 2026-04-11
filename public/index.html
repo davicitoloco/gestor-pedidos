@@ -298,7 +298,8 @@
               <th style="width:190px">Email</th>
               <th class="admin-only-col" style="width:140px">Vendedor</th>
               <th>Dirección</th>
-              <th style="width:116px" class="text-center">Acciones</th>
+              <th style="width:120px" class="text-right">Saldo</th>
+              <th style="width:140px" class="text-center">Acciones</th>
             </tr></thead>
             <tbody id="clients-tbody"></tbody>
           </table>
@@ -341,7 +342,16 @@
                   <input type="text" id="inp-client-address" class="input" placeholder="Calle y número, ciudad">
                 </div>
               </div>
-              <div class="field" style="margin-top:16px">
+              <div class="field">
+                <label class="label">Condición IVA</label>
+                <select id="inp-client-iva" class="input select">
+                  <option value="Consumidor Final">Consumidor Final</option>
+                  <option value="Responsable Inscripto">Responsable Inscripto</option>
+                  <option value="Monotributista">Monotributista</option>
+                  <option value="Exento">Exento</option>
+                </select>
+              </div>
+              <div class="field" style="margin-top:4px">
                 <label class="label">Notas</label>
                 <textarea id="inp-client-notes" class="input textarea" rows="2" placeholder="Observaciones sobre el cliente..."></textarea>
               </div>
@@ -352,6 +362,69 @@
             <button type="submit" class="btn btn-primary" id="btn-client-save">Guardar cliente</button>
           </div>
         </form>
+      </div>
+
+      <!-- Cuenta Corriente -->
+      <div id="clients-account-view" class="hidden">
+        <div class="page-header">
+          <div class="page-header-left">
+            <button class="btn btn-ghost btn-sm" id="btn-account-back">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+              Volver
+            </button>
+            <div>
+              <h2 class="page-title" id="account-client-name">Cuenta Corriente</h2>
+              <p class="page-subtitle" id="account-client-iva"></p>
+            </div>
+          </div>
+          <button class="btn btn-primary admin-only" id="btn-new-payment">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Registrar pago
+          </button>
+        </div>
+        <!-- Resumen -->
+        <div class="account-summary-grid">
+          <div class="account-card">
+            <div class="account-card-label">Total facturado (remitos)</div>
+            <div class="account-card-value" id="account-total-debt">$0</div>
+          </div>
+          <div class="account-card account-card-paid">
+            <div class="account-card-label">Total pagado</div>
+            <div class="account-card-value" id="account-total-paid">$0</div>
+          </div>
+          <div class="account-card" id="account-balance-card">
+            <div class="account-card-label">Saldo actual</div>
+            <div class="account-card-value" id="account-balance">$0</div>
+          </div>
+        </div>
+        <!-- Remitos -->
+        <div class="card" style="margin-top:18px">
+          <div class="card-header">Remitos emitidos</div>
+          <div class="card-body" style="padding:0">
+            <table class="table"><thead><tr>
+              <th style="width:110px">Remito</th>
+              <th style="width:100px">Pedido</th>
+              <th style="width:150px">Fecha</th>
+              <th class="text-right" style="width:140px">Monto</th>
+              <th style="width:70px" class="text-center">PDF</th>
+            </tr></thead><tbody id="account-remitos-tbody"></tbody></table>
+            <div id="no-account-remitos" class="empty-state hidden"><p>Sin remitos para este cliente</p></div>
+          </div>
+        </div>
+        <!-- Pagos -->
+        <div class="card" style="margin-top:18px">
+          <div class="card-header">Pagos recibidos</div>
+          <div class="card-body" style="padding:0">
+            <table class="table"><thead><tr>
+              <th style="width:150px">Fecha</th>
+              <th style="width:140px">Método</th>
+              <th>Detalle</th>
+              <th class="text-right" style="width:140px">Monto</th>
+              <th style="width:50px" class="text-center admin-only"></th>
+            </tr></thead><tbody id="account-payments-tbody"></tbody></table>
+            <div id="no-account-payments" class="empty-state hidden"><p>Sin pagos registrados</p></div>
+          </div>
+        </div>
       </div>
 
     </div><!-- /section-clientes -->
@@ -882,6 +955,51 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-delivery-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-delivery-confirm">Confirmar entrega</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Registrar Pago -->
+<div id="payment-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">Registrar pago</div>
+    <div class="modal-form-body">
+      <div class="field">
+        <label class="label required">Método de pago</label>
+        <select id="inp-payment-method" class="input select">
+          <option value="efectivo">Efectivo</option>
+          <option value="cheque">Cheque</option>
+          <option value="transferencia">Transferencia bancaria</option>
+          <option value="tarjeta">Tarjeta crédito/débito</option>
+          <option value="otros">Otros</option>
+        </select>
+      </div>
+      <div class="form-grid-2" style="margin-top:12px">
+        <div class="field">
+          <label class="label required">Monto ($)</label>
+          <input type="number" id="inp-payment-amount" class="input" min="0.01" step="0.01" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label class="label" id="lbl-payment-date">Fecha del pago</label>
+          <input type="date" id="inp-payment-date" class="input">
+        </div>
+      </div>
+      <div id="payment-bank-wrap" class="field hidden" style="margin-top:12px">
+        <label class="label">Banco</label>
+        <input type="text" id="inp-payment-bank" class="input" placeholder="Ej: Santander">
+      </div>
+      <div id="payment-reference-wrap" class="field hidden" style="margin-top:12px">
+        <label class="label" id="lbl-payment-reference">Referencia / Nº operación</label>
+        <input type="text" id="inp-payment-reference" class="input" placeholder="">
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label class="label">Notas (opcional)</label>
+        <input type="text" id="inp-payment-notes" class="input" placeholder="Observaciones...">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-payment-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-payment-confirm">Registrar pago</button>
     </div>
   </div>
 </div>

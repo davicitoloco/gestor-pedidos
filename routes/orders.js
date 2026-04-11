@@ -388,7 +388,9 @@ router.get('/:id/deliveries', (req, res) => {
         JOIN order_items oi ON di.order_item_id = oi.id
         WHERE di.delivery_id = ?
       `).all(d.id);
-      return { ...d, items };
+      const rem = db.prepare('SELECT id, remito_sequence FROM remitos WHERE delivery_id = ?').get(d.id);
+      const remito = rem ? { id: rem.id, number: `R-${String(rem.remito_sequence).padStart(3,'0')}` } : null;
+      return { ...d, items, remito };
     });
     res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -451,6 +453,22 @@ router.post('/:id/deliveries', (req, res) => {
       const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
       db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
         .run(newStatus, id);
+
+      // Auto-crear remito
+      const remitoItems = validItems.map(item => {
+        const oi = db.prepare('SELECT product_name, unit_price, discount FROM order_items WHERE id = ?').get(item.order_item_id);
+        return { product_name: oi.product_name, quantity: parseFloat(item.quantity_delivered), unit_price: oi.unit_price, discount: oi.discount };
+      });
+      const rSubtotal = remitoItems.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+      const rTotal    = rSubtotal * (1 - (order.discount || 0) / 100);
+      const cust      = db.prepare("SELECT id, iva_condition FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
+      const { nextR } = db.prepare('SELECT COALESCE(MAX(remito_sequence), 0) + 1 AS nextR FROM remitos').get();
+      const rr = db.prepare(
+        'INSERT INTO remitos (remito_sequence, order_id, delivery_id, customer_id, customer_name, customer_iva, total, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(nextR, id, delivId, cust ? cust.id : null, order.customer_name, cust ? (cust.iva_condition || 'Consumidor Final') : 'Consumidor Final', rTotal, req.session.userId);
+      const remitoId = Number(rr.lastInsertRowid);
+      const insRI = db.prepare('INSERT INTO remito_items (remito_id, product_name, quantity, unit_price, discount) VALUES (?, ?, ?, ?, ?)');
+      for (const it of remitoItems) insRI.run(remitoId, it.product_name, it.quantity, it.unit_price, it.discount);
     });
 
     res.json({ success: true });
