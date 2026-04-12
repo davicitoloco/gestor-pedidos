@@ -951,6 +951,7 @@
         <button class="contable-tab" data-tab="diario">Libro diario</button>
         <button class="contable-tab" data-tab="balance">Balance</button>
         <button class="contable-tab" data-tab="resultados">Resultados</button>
+        <button class="contable-tab" data-tab="asientos">Asientos manuales</button>
       </div>
 
       <!-- ── RESUMEN FINANCIERO ── -->
@@ -1206,6 +1207,101 @@
             <div class="balance-row balance-net"><span>RESULTADO DEL PERÍODO</span><span id="results-resultado" class="balance-amount">—</span></div>
           </div>
         </div>
+      </div>
+
+      <!-- ── ASIENTOS MANUALES ── -->
+      <div id="contable-tab-asientos" class="contable-pane hidden">
+
+        <!-- Header -->
+        <div class="page-header">
+          <h2 class="page-title">Asientos manuales</h2>
+          <button class="btn btn-primary" id="am-new-btn">+ Nuevo asiento</button>
+        </div>
+
+        <!-- Form (hidden by default) -->
+        <div id="am-form-section" class="hidden" style="border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:24px;max-width:800px;background:var(--surface)">
+          <h3 style="margin:0 0 16px;font-size:1rem">Nuevo asiento manual</h3>
+          <div class="form-grid-2" style="margin-bottom:16px">
+            <div class="field">
+              <label class="label required">Fecha</label>
+              <input type="date" id="am-date" class="input">
+            </div>
+            <div class="field">
+              <label class="label">Referencia (opcional)</label>
+              <input type="text" id="am-ref" class="input" placeholder="Ej: Gastos enero, Ajuste stock...">
+            </div>
+            <div class="field" style="grid-column:1/-1">
+              <label class="label required">Descripción / Concepto</label>
+              <input type="text" id="am-desc" class="input" placeholder="Concepto del asiento contable">
+            </div>
+          </div>
+
+          <!-- Lines -->
+          <div style="font-weight:600;margin-bottom:8px;font-size:.9rem">Líneas del asiento</div>
+          <div class="table-wrap" style="margin-bottom:8px">
+            <table class="table">
+              <thead><tr>
+                <th style="min-width:200px">Cuenta</th>
+                <th style="min-width:150px">Descripción línea</th>
+                <th class="text-right" style="width:130px">Debe</th>
+                <th class="text-right" style="width:130px">Haber</th>
+                <th style="width:40px"></th>
+              </tr></thead>
+              <tbody id="am-lines-tbody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="am-add-line">+ Agregar línea</button>
+
+          <!-- Totals + balance indicator -->
+          <div style="margin-top:14px;padding:12px 16px;border-radius:8px;border:1px solid var(--border);display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+            <div>
+              <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Total Debe</div>
+              <div id="am-total-debit" style="font-size:1.15rem;font-weight:700;font-family:monospace">0.00</div>
+            </div>
+            <div>
+              <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Total Haber</div>
+              <div id="am-total-credit" style="font-size:1.15rem;font-weight:700;font-family:monospace">0.00</div>
+            </div>
+            <div>
+              <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Diferencia</div>
+              <div id="am-diff" style="font-size:1.15rem;font-weight:700;font-family:monospace;color:var(--error)">0.00</div>
+            </div>
+            <div id="am-balanced-ok" class="hidden" style="color:var(--success);font-weight:600;font-size:.9rem">✓ Balanceado</div>
+          </div>
+          <div id="am-error-msg" class="hidden" style="color:var(--error);font-size:.85rem;margin-top:8px;padding:8px 12px;background:#fef2f2;border-radius:6px"></div>
+
+          <div class="form-actions" style="margin-top:18px">
+            <button class="btn btn-ghost" id="am-cancel">Cancelar</button>
+            <button class="btn btn-primary" id="am-save" disabled>Guardar asiento</button>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="am-filter-from" class="input" style="width:150px"></div>
+          <div class="field" style="margin:0"><label class="label">Hasta</label><input type="date" id="am-filter-to" class="input" style="width:150px"></div>
+          <button class="btn btn-secondary" id="am-filter-btn" style="margin-top:20px">Filtrar</button>
+          <button class="btn btn-ghost" id="am-filter-clear" style="margin-top:20px">Limpiar</button>
+        </div>
+
+        <!-- List -->
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:36px"></th>
+              <th style="width:56px">#</th>
+              <th style="width:98px">Fecha</th>
+              <th>Descripción</th>
+              <th style="width:160px">Referencia</th>
+              <th class="text-right" style="width:120px">Total</th>
+              <th style="width:110px">Usuario</th>
+              <th style="width:80px" class="text-center">Estado</th>
+              <th style="width:80px" class="text-center">Acc.</th>
+            </tr></thead>
+            <tbody id="am-list-tbody"></tbody>
+          </table>
+        </div>
+        <div id="am-pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center"></div>
       </div>
 
     </div><!-- /section-contable -->

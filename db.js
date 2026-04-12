@@ -264,6 +264,8 @@ addColIfMissing('supplier_payments', 'bank_account_id', 'INTEGER REFERENCES bank
 addColIfMissing('supplier_payments', 'cheque_id',       'INTEGER REFERENCES cheques(id)');
 addColIfMissing('cheques',           'deposited_to',    'INTEGER REFERENCES bank_accounts(id)');
 addColIfMissing('supplier_payments', 'purchase_id',     'INTEGER REFERENCES purchases(id)');
+addColIfMissing('journal_entries',    'reference',        "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('journal_entry_lines','line_description', "TEXT NOT NULL DEFAULT ''");
 
 // Seed plan de cuentas
 {

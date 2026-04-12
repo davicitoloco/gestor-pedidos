@@ -76,7 +76,8 @@ router.get('/journal', (req, res) => {
     const total = db.prepare(`SELECT COUNT(*) AS c FROM journal_entries e WHERE ${where}`).get(...params).c;
     const offset = (Number(page) - 1) * Number(per_page);
     const entries = db.prepare(`
-      SELECT e.*, COALESCE(u.full_name, u.username) AS created_by_name
+      SELECT e.*, COALESCE(u.full_name, u.username) AS created_by_name,
+        (SELECT COALESCE(SUM(debit),0) FROM journal_entry_lines WHERE entry_id=e.id) AS total_debit
       FROM journal_entries e
       LEFT JOIN users u ON e.created_by = u.id
       WHERE ${where}
@@ -109,16 +110,17 @@ router.get('/journal/:id', (req, res) => {
 // POST /api/accounting/journal — manual entry
 router.post('/journal', (req, res) => {
   try {
-    const { date, description, lines } = req.body;
+    const { date, description, reference, lines } = req.body;
     if (!description?.trim()) return res.status(400).json({ error: 'Descripción requerida' });
     if (!Array.isArray(lines) || lines.length < 2) return res.status(400).json({ error: 'Se requieren al menos 2 líneas' });
     const parsedLines = lines.map(l => ({
-      account_id: Number(l.account_id),
-      debit:  parseFloat(l.debit)  || 0,
-      credit: parseFloat(l.credit) || 0
+      account_id:  Number(l.account_id),
+      debit:       parseFloat(l.debit)  || 0,
+      credit:      parseFloat(l.credit) || 0,
+      description: l.description || ''
     }));
     const id = withTransaction(() => recordJournal({
-      date, desc: description.trim(), ref_type: 'manual', ref_id: null,
+      date, desc: description.trim(), reference: reference || '', ref_type: 'manual', ref_id: null,
       lines: parsedLines, userId: req.session.userId
     }));
     const entry = db.prepare('SELECT * FROM journal_entries WHERE id=?').get(id);

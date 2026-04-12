@@ -1738,6 +1738,7 @@ document.querySelectorAll('.contable-tab').forEach(b => {
     if (tab === 'cheques') loadCheques();
     if (tab === 'cuentas')    loadAccounts();
     if (tab === 'diario')     loadJournal();
+    if (tab === 'asientos')   loadManualEntries();
     if (tab === 'balance')    {}
     if (tab === 'resultados') {}
   });
@@ -2692,6 +2693,235 @@ async function loadIncomeStatement() {
     resEl.style.color = d.resultado >= 0 ? 'var(--success)' : 'var(--error)';
   } catch (err) { toast(err.message, 'error'); }
 }
+
+/* ================================================================ ASIENTOS MANUALES */
+
+let amLines         = [];
+let amAccountsList  = [];
+let amPage          = 1;
+let amFilters       = {};
+
+// ── List ─────────────────────────────────────────────────────────────────────
+async function loadManualEntries(page = 1) {
+  amPage = page;
+  try {
+    const params = new URLSearchParams({ page, per_page: 30, ref_type: 'manual', ...amFilters });
+    const data = await api('GET', `/accounting/journal?${params}`);
+    $('am-list-tbody').innerHTML = data.entries.length ? data.entries.map(e => `
+      <tr>
+        <td class="text-center">
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px" onclick="amToggleDetail(${e.id},this)">▸</button>
+        </td>
+        <td style="font-family:monospace;font-size:.82rem;color:var(--text-muted)">${e.id}</td>
+        <td>${fmtDate(e.date)}</td>
+        <td style="font-weight:500">${esc(e.description)}</td>
+        <td style="font-size:.85rem;color:var(--text-muted)">${esc(e.reference || '—')}</td>
+        <td class="text-right">${fmtMoney(e.total_debit || 0)}</td>
+        <td style="font-size:.82rem">${esc(e.created_by_name || '—')}</td>
+        <td class="text-center">${e.is_reversed
+          ? '<span class="badge badge-default">Anulado</span>'
+          : '<span class="badge badge-success">Activo</span>'}</td>
+        <td class="text-center">${!e.is_reversed
+          ? `<button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="amReverse(${e.id})">Anular</button>`
+          : ''}</td>
+      </tr>
+      <tr id="am-det-${e.id}" class="hidden" style="background:var(--surface-2,#f9f9f9)">
+        <td colspan="9" style="padding:0 16px 12px 52px">
+          <div id="am-det-inner-${e.id}" style="padding-top:8px">Cargando…</div>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">Sin asientos manuales</td></tr>';
+
+    const pages = Math.ceil(data.total / data.per_page);
+    $('am-pagination').innerHTML = pages <= 1 ? '' : `
+      <button class="btn btn-ghost btn-sm" ${page<=1?'disabled':''} onclick="loadManualEntries(${page-1})">← Ant.</button>
+      <span style="font-size:.85rem;color:var(--text-muted)">Pág. ${page} / ${pages} · ${data.total} asientos</span>
+      <button class="btn btn-ghost btn-sm" ${page>=pages?'disabled':''} onclick="loadManualEntries(${page+1})">Sig. →</button>`;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+window.amToggleDetail = async function(id, btn) {
+  const row = $(`am-det-${id}`);
+  const wasHidden = row.classList.contains('hidden');
+  row.classList.toggle('hidden', !wasHidden);
+  btn.textContent = wasHidden ? '▾' : '▸';
+  if (!wasHidden) return;
+  try {
+    const e = await api('GET', `/accounting/journal/${id}`);
+    $(`am-det-inner-${id}`).innerHTML =
+      (e.reference ? `<div style="font-size:.83rem;color:var(--text-muted);margin-bottom:6px"><b>Referencia:</b> ${esc(e.reference)}</div>` : '') +
+      `<table class="table" style="max-width:640px;margin:0">
+        <thead><tr>
+          <th style="width:110px">Código</th><th>Cuenta</th>
+          <th>Descripción línea</th>
+          <th class="text-right" style="width:120px">Debe</th>
+          <th class="text-right" style="width:120px">Haber</th>
+        </tr></thead>
+        <tbody>${e.lines.map(l => `
+          <tr>
+            <td style="font-family:monospace;font-size:.82rem">${esc(l.account_code)}</td>
+            <td>${esc(l.account_name)}</td>
+            <td style="font-size:.83rem;color:var(--text-muted)">${esc(l.line_description || '')}</td>
+            <td class="text-right">${l.debit  > 0 ? fmtMoney(l.debit)  : ''}</td>
+            <td class="text-right">${l.credit > 0 ? fmtMoney(l.credit) : ''}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr style="font-weight:700">
+          <td colspan="3" class="text-right">Totales</td>
+          <td class="text-right">${fmtMoney(e.lines.reduce((s,l)=>s+l.debit,0))}</td>
+          <td class="text-right">${fmtMoney(e.lines.reduce((s,l)=>s+l.credit,0))}</td>
+        </tr></tfoot>
+      </table>`;
+  } catch(e) { $(`am-det-inner-${id}`).textContent = 'Error al cargar'; }
+};
+
+window.amReverse = async function(id) {
+  if (!await confirm('¿Anular este asiento?\nSe generará un contra-asiento automáticamente. El asiento original queda como registro histórico.')) return;
+  try {
+    await api('POST', `/accounting/journal/${id}/reverse`);
+    toast('Asiento anulado — se creó el contra-asiento', 'success');
+    loadManualEntries(amPage);
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+$('am-filter-btn').addEventListener('click', () => {
+  amFilters = {};
+  const df = $('am-filter-from').value, dt = $('am-filter-to').value;
+  if (df) amFilters.date_from = df;
+  if (dt) amFilters.date_to   = dt;
+  loadManualEntries(1);
+});
+$('am-filter-clear').addEventListener('click', () => {
+  amFilters = {};
+  $('am-filter-from').value = '';
+  $('am-filter-to').value   = '';
+  loadManualEntries(1);
+});
+
+// ── Form ──────────────────────────────────────────────────────────────────────
+async function amOpenForm() {
+  if (!amAccountsList.length) {
+    try { amAccountsList = (await api('GET', '/accounting/accounts')).filter(a => a.accepts_movements); }
+    catch(e) { toast('Error al cargar cuentas', 'error'); return; }
+  }
+  amLines = [
+    { account_id: '', description: '', debit: 0, credit: 0 },
+    { account_id: '', description: '', debit: 0, credit: 0 }
+  ];
+  $('am-date').value = new Date().toISOString().slice(0,10);
+  $('am-desc').value = '';
+  $('am-ref').value  = '';
+  $('am-error-msg').classList.add('hidden');
+  amRenderLines();
+  $('am-form-section').classList.remove('hidden');
+  $('am-desc').focus();
+}
+
+function amRenderLines() {
+  const opts = amAccountsList.map(a =>
+    `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`).join('');
+  $('am-lines-tbody').innerHTML = amLines.map((l, i) => `
+    <tr>
+      <td>
+        <select class="input select" style="min-width:190px" data-am-acct="${i}">
+          <option value="">— Cuenta —</option>${opts}
+        </select>
+      </td>
+      <td>
+        <input type="text" class="input" placeholder="Opcional" style="min-width:130px"
+               value="${esc(l.description || '')}" data-am-desc="${i}">
+      </td>
+      <td>
+        <input type="number" class="input text-right" min="0" step="0.01"
+               placeholder="0.00" style="width:120px"
+               value="${l.debit || ''}" data-am-debe="${i}">
+      </td>
+      <td>
+        <input type="number" class="input text-right" min="0" step="0.01"
+               placeholder="0.00" style="width:120px"
+               value="${l.credit || ''}" data-am-haber="${i}">
+      </td>
+      <td>
+        <button type="button" class="btn btn-ghost btn-sm" style="color:var(--error)"
+                onclick="amLines.splice(${i},1);amRenderLines()">✕</button>
+      </td>
+    </tr>`).join('');
+
+  // Restore selected values + wire events
+  $('am-lines-tbody').querySelectorAll('[data-am-acct]').forEach(el => {
+    const i = Number(el.dataset.amAcct);
+    if (amLines[i].account_id) el.value = amLines[i].account_id;
+    el.addEventListener('change', () => { amLines[i].account_id = el.value; amUpdateTotals(); });
+  });
+  $('am-lines-tbody').querySelectorAll('[data-am-desc]').forEach(el => {
+    const i = Number(el.dataset.amDesc);
+    el.addEventListener('input', () => { amLines[i].description = el.value; });
+  });
+  $('am-lines-tbody').querySelectorAll('[data-am-debe]').forEach(el => {
+    const i = Number(el.dataset.amDebe);
+    el.addEventListener('input', () => { amLines[i].debit = parseFloat(el.value) || 0; amUpdateTotals(); });
+  });
+  $('am-lines-tbody').querySelectorAll('[data-am-haber]').forEach(el => {
+    const i = Number(el.dataset.amHaber);
+    el.addEventListener('input', () => { amLines[i].credit = parseFloat(el.value) || 0; amUpdateTotals(); });
+  });
+  amUpdateTotals();
+}
+
+function amUpdateTotals() {
+  const totalD  = amLines.reduce((s, l) => s + (l.debit  || 0), 0);
+  const totalC  = amLines.reduce((s, l) => s + (l.credit || 0), 0);
+  const diff    = Math.abs(totalD - totalC);
+  const validLines = amLines.filter(l => l.account_id && (l.debit > 0 || l.credit > 0));
+  const balanced   = diff < 0.005 && validLines.length >= 2;
+
+  $('am-total-debit').textContent  = totalD.toFixed(2);
+  $('am-total-credit').textContent = totalC.toFixed(2);
+  $('am-diff').textContent         = diff.toFixed(2);
+  $('am-diff').style.color         = diff < 0.005 ? 'var(--success)' : 'var(--error)';
+  $('am-balanced-ok').classList.toggle('hidden', !balanced);
+
+  const hasAnyAmount = totalD > 0 || totalC > 0;
+  if (!balanced && hasAnyAmount) {
+    $('am-error-msg').classList.remove('hidden');
+    $('am-error-msg').textContent = diff >= 0.005
+      ? `La diferencia de ${diff.toFixed(2)} entre Debe y Haber debe ser cero para poder guardar.`
+      : 'Se requieren al menos 2 líneas con cuenta y monto para guardar el asiento.';
+  } else {
+    $('am-error-msg').classList.add('hidden');
+  }
+  $('am-save').disabled = !balanced;
+}
+
+$('am-new-btn').addEventListener('click', amOpenForm);
+$('am-cancel').addEventListener('click', () => $('am-form-section').classList.add('hidden'));
+$('am-add-line').addEventListener('click', () => {
+  amLines.push({ account_id: '', description: '', debit: 0, credit: 0 });
+  amRenderLines();
+});
+
+$('am-save').addEventListener('click', async () => {
+  const desc = $('am-desc').value.trim();
+  const date = $('am-date').value;
+  const ref  = $('am-ref').value.trim();
+  if (!desc) { toast('Ingresá una descripción', 'error'); return; }
+  if (!date) { toast('Ingresá una fecha', 'error'); return; }
+  const lines = amLines.filter(l => l.account_id && (l.debit > 0 || l.credit > 0));
+  if (lines.length < 2) { toast('Mínimo 2 líneas con cuenta y monto', 'error'); return; }
+  const btn = $('am-save');
+  btn.disabled = true;
+  try {
+    await api('POST', '/accounting/journal', { date, description: desc, reference: ref, lines });
+    toast('Asiento guardado correctamente', 'success');
+    $('am-form-section').classList.add('hidden');
+    amAccountsList = []; // Force refresh next open
+    loadManualEntries(1);
+  } catch (err) {
+    toast(err.message, 'error');
+    btn.disabled = false;
+  }
+});
 
 /* ================================================================ INIT */
 checkAuth();
