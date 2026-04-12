@@ -214,6 +214,35 @@ db.exec(`
     created_by INTEGER REFERENCES users(id),
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
   );
+  CREATE TABLE IF NOT EXISTS accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    subtype TEXT NOT NULL DEFAULT '',
+    accepts_movements INTEGER NOT NULL DEFAULT 1,
+    parent_code TEXT DEFAULT NULL,
+    bank_account_id INTEGER REFERENCES bank_accounts(id),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS journal_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    description TEXT NOT NULL,
+    ref_type TEXT NOT NULL DEFAULT '',
+    ref_id INTEGER DEFAULT NULL,
+    is_reversed INTEGER NOT NULL DEFAULT 0,
+    reversal_of INTEGER REFERENCES journal_entries(id),
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS journal_entry_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    debit REAL NOT NULL DEFAULT 0,
+    credit REAL NOT NULL DEFAULT 0
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
@@ -234,6 +263,53 @@ addColIfMissing('payments',          'cheque_id',       'INTEGER REFERENCES cheq
 addColIfMissing('supplier_payments', 'bank_account_id', 'INTEGER REFERENCES bank_accounts(id)');
 addColIfMissing('supplier_payments', 'cheque_id',       'INTEGER REFERENCES cheques(id)');
 addColIfMissing('cheques',           'deposited_to',    'INTEGER REFERENCES bank_accounts(id)');
+addColIfMissing('supplier_payments', 'purchase_id',     'INTEGER REFERENCES purchases(id)');
+
+// Seed plan de cuentas
+{
+  const cnt = db.prepare('SELECT COUNT(*) AS c FROM accounts').get().c;
+  if (cnt === 0) {
+    const ins = db.prepare('INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code) VALUES (?,?,?,?,?,?)');
+    // Groups
+    ins.run('1',    'ACTIVO',                     'Activo',    '',            0, null);
+    ins.run('1.1',  'Activo Corriente',            'Activo',    '',            0, '1');
+    ins.run('2',    'PASIVO',                      'Pasivo',    '',            0, null);
+    ins.run('2.1',  'Pasivo Corriente',            'Pasivo',    '',            0, '2');
+    ins.run('3',    'PATRIMONIO NETO',             'Patrimonio','',            0, null);
+    ins.run('3.1',  'Patrimonio Neto',             'Patrimonio','',            0, '3');
+    ins.run('4',    'INGRESOS',                    'Ingreso',   '',            0, null);
+    ins.run('4.1',  'Ingresos operativos',         'Ingreso',   '',            0, '4');
+    ins.run('5',    'COSTOS',                      'Costo',     '',            0, null);
+    ins.run('5.1',  'Costo de ventas',             'Costo',     '',            0, '5');
+    ins.run('6',    'GASTOS',                      'Gasto',     '',            0, null);
+    ins.run('6.1',  'Gastos operativos',           'Gasto',     '',            0, '6');
+    // Leaf accounts
+    ins.run('1.1.01','Caja',                       'Activo','Caja',        1,'1.1');
+    ins.run('1.1.02','Banco',                      'Activo','BancoGrupo',  0,'1.1');
+    ins.run('1.1.03','Cheques en cartera',         'Activo','Cheques',     1,'1.1');
+    ins.run('1.1.04','Deudores por ventas',        'Activo','Clientes',    1,'1.1');
+    ins.run('1.1.05','Mercaderías',                'Activo','Stock',       1,'1.1');
+    ins.run('2.1.01','Proveedores',                'Pasivo','Proveedores', 1,'2.1');
+    ins.run('2.1.02','Otras deudas',               'Pasivo','',            1,'2.1');
+    ins.run('3.1.01','Capital',                    'Patrimonio','',        1,'3.1');
+    ins.run('3.1.02','Resultados acumulados',      'Patrimonio','',        1,'3.1');
+    ins.run('4.1.01','Ventas',                     'Ingreso','',           1,'4.1');
+    ins.run('5.1.01','Costo de mercadería vendida','Costo',  '',           1,'5.1');
+    ins.run('6.1.01','Gastos administrativos',     'Gasto',  '',           1,'6.1');
+    ins.run('6.1.02','Gastos financieros',         'Gasto',  '',           1,'6.1');
+  }
+  // Create accounting accounts for existing bank_accounts
+  try {
+    const bankAccts = db.prepare('SELECT * FROM bank_accounts').all();
+    for (const ba of bankAccts) {
+      const exists = db.prepare('SELECT id FROM accounts WHERE bank_account_id=?').get(ba.id);
+      if (!exists) {
+        db.prepare('INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code,bank_account_id) VALUES (?,?,?,?,?,?,?)')
+          .run(`1.1.02.${ba.id}`, `Banco: ${ba.name}`, 'Activo', 'Banco', 1, '1.1.02', ba.id);
+      }
+    }
+  } catch(e) {}
+}
 
 // Settings por defecto
 db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run('company_name', 'Mi Empresa');

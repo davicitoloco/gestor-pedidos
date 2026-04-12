@@ -273,6 +273,11 @@ tr.stock-critical td { background:#fff1f2 }
 .compras-tab:hover{color:var(--text)}
 .compras-tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
 .compras-pane{animation:fadeIn .15s ease}
+.contable-tabs{display:flex;gap:4px;border-bottom:2px solid var(--border);margin-bottom:20px;flex-wrap:wrap}
+.contable-tab{background:none;border:none;padding:8px 16px;font-size:.9rem;cursor:pointer;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .15s,border-color .15s}
+.contable-tab:hover{color:var(--text)}
+.contable-tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.contable-pane{animation:fadeIn .15s ease}
 
 .finance-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:8px}
 .finance-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;cursor:default}
@@ -365,7 +370,7 @@ tr.stock-critical td { background:#fff1f2 }
   .delivery-complete-toggle{font-size:.85rem}
 
   /* Compras tabs */
-  .compras-tabs{flex-wrap:wrap}
+  .compras-tabs,.contable-tabs{flex-wrap:wrap}
   .purchase-item-row{flex-wrap:wrap;gap:4px}
   .purchase-item-row .input{min-width:0}
   .finance-grid{grid-template-columns:1fr 1fr}

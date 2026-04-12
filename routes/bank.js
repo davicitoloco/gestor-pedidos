@@ -47,6 +47,13 @@ router.post('/accounts', (req, res) => {
       INSERT INTO bank_accounts (name, bank, account_number, initial_balance)
       VALUES (?, ?, ?, ?)
     `).run(name.trim(), bank||'', account_number||'', parseFloat(initial_balance)||0);
+    // Create corresponding accounting account
+    try {
+      const newAccId = Number(r.lastInsertRowid);
+      const newAcc = db.prepare('SELECT * FROM bank_accounts WHERE id=?').get(newAccId);
+      db.prepare('INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code,bank_account_id) VALUES (?,?,?,?,?,?,?)')
+        .run(`1.1.02.${newAccId}`, `Banco: ${newAcc.name}`, 'Activo', 'Banco', 1, '1.1.02', newAccId);
+    } catch(e) {}
     res.status(201).json(db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(Number(r.lastInsertRowid)));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

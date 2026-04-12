@@ -165,7 +165,8 @@ function navigate(section) {
   if (section === 'stock')     loadStock();
   if (section === 'usuarios')  { showUsersSubview('list'); loadUsers(); }
   if (section === 'reportes')  loadReports();
-  if (section === 'compras')   { showComprasTab('resumen'); loadFinanceSummary(); }
+  if (section === 'compras')   { showComprasTab('proveedores'); showProveedoresSubview('list'); loadSuppliers(); }
+  if (section === 'contable')  { showContableTab('resumen'); loadFinanceSummary(); }
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -1716,12 +1717,29 @@ document.querySelectorAll('.compras-tab').forEach(b => {
   b.addEventListener('click', () => {
     const tab = b.dataset.tab;
     showComprasTab(tab);
-    if (tab === 'resumen')      loadFinanceSummary();
     if (tab === 'proveedores')  { showProveedoresSubview('list'); loadSuppliers(); }
-    if (tab === 'comprobantes') { showComprobantesSubview('list'); loadPurchases(); }
-    if (tab === 'caja')         loadCash();
-    if (tab === 'banco')        { showBancoSubview('list'); loadBankAccounts(); }
-    if (tab === 'cheques')      loadCheques();
+    if (tab === 'comprobantes') { currentPurchaseId = null; showComprobantesSubview('list'); loadPurchases(); }
+  });
+});
+
+// ── CONTABLE Tab navigation ──────────────────────────────────────────────────
+function showContableTab(tab) {
+  document.querySelectorAll('.contable-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.contable-pane').forEach(p => p.classList.add('hidden'));
+  $(`contable-tab-${tab}`)?.classList.remove('hidden');
+}
+document.querySelectorAll('.contable-tab').forEach(b => {
+  b.addEventListener('click', () => {
+    const tab = b.dataset.tab;
+    showContableTab(tab);
+    if (tab === 'resumen') loadFinanceSummary();
+    if (tab === 'caja')    loadCash();
+    if (tab === 'banco')   { showBancoSubview('list'); loadBankAccounts(); }
+    if (tab === 'cheques') loadCheques();
+    if (tab === 'cuentas')    loadAccounts();
+    if (tab === 'diario')     loadJournal();
+    if (tab === 'balance')    {}
+    if (tab === 'resultados') {}
   });
 });
 
@@ -1910,6 +1928,7 @@ $('btn-sup-pay-confirm').addEventListener('click', async () => {
   try {
     const payload = {
       supplier_id:  currentSupplierId,
+      purchase_id:  currentPurchaseId || null,
       amount:       parseFloat($('inp-sup-pay-amount').value),
       method,
       payment_date: $('inp-sup-pay-date').value || null,
@@ -1931,7 +1950,11 @@ $('btn-sup-pay-confirm').addEventListener('click', async () => {
     await api('POST', '/supplier-payments', payload);
     toast('Pago registrado', 'success');
     $('sup-payment-modal').classList.add('hidden');
-    openSupplierAccount(currentSupplierId);
+    if (currentPurchaseId) {
+      openPurchaseDetail(currentPurchaseId);
+    } else {
+      openSupplierAccount(currentSupplierId);
+    }
   } catch (err) { toast(err.message, 'error'); }
   finally { btn.disabled = false; }
 });
@@ -1941,16 +1964,19 @@ window.deleteSupplierPayment = async function(id) {
   try {
     await api('DELETE', `/supplier-payments/${id}`);
     toast('Pago eliminado', 'success');
-    openSupplierAccount(currentSupplierId);
+    if (currentPurchaseId) openPurchaseDetail(currentPurchaseId);
+    else openSupplierAccount(currentSupplierId);
   } catch (err) { toast(err.message, 'error'); }
 };
 
 // ── PURCHASES (Comprobantes) ─────────────────────────────────────────────────
 let purchaseItems = [];
+let currentPurchaseId = null;
 
 function showComprobantesSubview(v) {
   $('comprobantes-list-view').classList.toggle('hidden', v !== 'list');
   $('purchase-form-view').classList.toggle('hidden', v !== 'form');
+  $('purchase-detail-view').classList.toggle('hidden', v !== 'detail');
 }
 
 async function loadPurchases() {
@@ -1958,19 +1984,71 @@ async function loadPurchases() {
     const rows = await api('GET', '/purchases');
     $('purchases-tbody').innerHTML = rows.length ? rows.map(p => `
       <tr>
-        <td>${esc(p.purchase_number)}</td>
+        <td><a href="#" onclick="openPurchaseDetail(${p.id});return false;" style="font-weight:600">${esc(p.purchase_number)}</a></td>
         <td>${esc(p.supplier_name)}</td>
         <td>${esc(p.doc_type)}</td>
         <td>${esc(p.doc_number || '—')}</td>
         <td>${fmtDate(p.doc_date || p.created_at)}</td>
         <td class="text-right">${fmtMoney(p.total)}</td>
         <td class="text-center">
+          <button class="btn btn-ghost btn-sm" onclick="openPurchaseDetail(${p.id})">Ver</button>
           <a href="/api/purchases/${p.id}/print" target="_blank" class="btn btn-ghost btn-sm">PDF</a>
           <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deletePurchase(${p.id},'${esc(p.purchase_number)}')">Eliminar</button>
         </td>
       </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin comprobantes</td></tr>';
   } catch (err) { toast(err.message, 'error'); }
 }
+
+window.openPurchaseDetail = async function(id) {
+  currentPurchaseId = id;
+  try {
+    const p = await api('GET', `/purchases/${id}`);
+    $('pur-detail-title').textContent = p.purchase_number;
+    $('pur-detail-subtitle').textContent = `${p.supplier_name} — ${p.doc_type}${p.doc_number ? ' ' + p.doc_number : ''} ${p.doc_date ? '| ' + fmtDate(p.doc_date) : ''}`;
+    $('pur-detail-print-link').href = `/api/purchases/${id}/print`;
+    $('pur-detail-total').textContent = fmtMoney(p.total);
+
+    $('pur-detail-items-tbody').innerHTML = (p.items || []).map(it => `
+      <tr>
+        <td>${esc(it.product_name)}</td>
+        <td class="text-right">${it.quantity}</td>
+        <td class="text-right">${fmtMoney(it.unit_price)}</td>
+        <td class="text-right">${fmtMoney(it.quantity * it.unit_price)}</td>
+      </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Sin ítems</td></tr>';
+
+    renderPurchaseDetailPayments(p);
+    showComprobantesSubview('detail');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+function renderPurchaseDetailPayments(p) {
+  const payments = p.payments || [];
+  $('pur-detail-payments-tbody').innerHTML = payments.length ? payments.map(pay => `
+    <tr>
+      <td>${fmtDate(pay.payment_date || pay.created_at)}</td>
+      <td>${esc(pay.method)}</td>
+      <td class="text-right">${fmtMoney(pay.amount)}</td>
+      <td>${esc(pay.notes || '—')}</td>
+      <td class="text-center"><button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deletePurchasePayment(${pay.id})">✕</button></td>
+    </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:12px;color:var(--text-muted)">Sin pagos registrados</td></tr>';
+
+  const totalPaid = payments.reduce((s, x) => s + x.amount, 0);
+  const balance   = p.total - totalPaid;
+  $('pur-detail-balance-total').textContent = fmtMoney(p.total);
+  $('pur-detail-paid').textContent          = fmtMoney(totalPaid);
+  const balEl = $('pur-detail-balance');
+  balEl.textContent  = fmtMoney(balance);
+  balEl.style.color  = balance <= 0 ? 'var(--success)' : 'var(--error)';
+}
+
+window.deletePurchasePayment = async function(id) {
+  if (!await confirm('¿Eliminar este pago del comprobante?')) return;
+  try {
+    await api('DELETE', `/supplier-payments/${id}`);
+    toast('Pago eliminado', 'success');
+    openPurchaseDetail(currentPurchaseId);
+  } catch (err) { toast(err.message, 'error'); }
+};
 
 $('btn-new-purchase').addEventListener('click', async () => {
   $('purchase-form').reset();
@@ -1988,6 +2066,26 @@ $('btn-new-purchase').addEventListener('click', async () => {
 });
 $('btn-back-purchases').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
 $('btn-pur-form-cancel').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
+$('btn-back-purchase-detail').addEventListener('click', () => { currentPurchaseId = null; showComprobantesSubview('list'); loadPurchases(); });
+
+$('btn-new-purchase-payment').addEventListener('click', async () => {
+  if (!currentPurchaseId) return;
+  try {
+    const pur = await api('GET', `/purchases/${currentPurchaseId}`);
+    currentSupplierId = pur.supplier_id;
+    $('inp-sup-pay-amount').value       = '';
+    $('inp-sup-pay-date').value         = new Date().toISOString().slice(0,10);
+    $('inp-sup-pay-method').value       = 'efectivo';
+    $('inp-sup-pay-reference').value    = '';
+    $('inp-sup-pay-notes').value        = '';
+    $('inp-sup-pay-cheque-bank').value  = '';
+    $('inp-sup-pay-cheque-number').value= '';
+    $('inp-sup-pay-cheque-due').value   = '';
+    updateSupPayFields();
+    await populateBankSelect($('inp-sup-pay-bank-account'));
+    $('sup-payment-modal').classList.remove('hidden');
+  } catch (err) { toast(err.message, 'error'); }
+});
 
 function renderPurchaseItems() {
   const c = $('purchase-items-container');
@@ -2353,6 +2451,247 @@ window.deleteCheque = async function(id) {
     loadCheques();
   } catch (err) { toast(err.message, 'error'); }
 };
+
+/* ================================================================ ACCOUNTING */
+
+// ── Plan de cuentas ─────────────────────────────────────────────────────────
+let editingAccountId = null;
+
+async function loadAccounts() {
+  try {
+    const rows = await api('GET', '/accounting/accounts');
+    const tbody = $('accounts-tbody');
+    tbody.innerHTML = rows.map(a => {
+      const indent = (a.code.match(/\./g)||[]).length;
+      const isGroup = !a.accepts_movements;
+      return `<tr style="${isGroup ? 'background:var(--surface-2,#f8f8f8);font-weight:600' : ''}">
+        <td style="padding-left:${8 + indent*14}px;font-family:monospace;font-size:.85rem">${esc(a.code)}</td>
+        <td>${esc(a.name)}</td>
+        <td style="font-size:.82rem">${esc(a.type)}</td>
+        <td style="font-size:.82rem;color:var(--text-muted)">${esc(a.subtype||'')}</td>
+        <td class="text-center">${a.accepts_movements ? '✓' : ''}</td>
+        <td class="text-right" style="${a.balance < 0 ? 'color:var(--error)' : ''}">${a.accepts_movements ? fmtMoney(a.balance) : ''}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Sin cuentas</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-new-account').addEventListener('click', () => {
+  editingAccountId = null;
+  $('account-form-title').textContent = 'Nueva Cuenta';
+  $('inp-acct-code').value = '';
+  $('inp-acct-name').value = '';
+  $('inp-acct-type').value = 'Activo';
+  $('inp-acct-subtype').value = '';
+  $('inp-acct-parent').value = '';
+  $('inp-acct-moves').checked = true;
+  $('account-form-wrap').classList.remove('hidden');
+  $('inp-acct-code').focus();
+});
+$('btn-acct-cancel').addEventListener('click', () => $('account-form-wrap').classList.add('hidden'));
+$('btn-acct-save').addEventListener('click', async () => {
+  const code = $('inp-acct-code').value.trim();
+  const name = $('inp-acct-name').value.trim();
+  if (!code || !name) { toast('Código y nombre requeridos', 'error'); return; }
+  try {
+    const payload = { code, name, type: $('inp-acct-type').value, subtype: $('inp-acct-subtype').value.trim(),
+      accepts_movements: $('inp-acct-moves').checked, parent_code: $('inp-acct-parent').value.trim() || null };
+    if (editingAccountId) await api('PUT', `/accounting/accounts/${editingAccountId}`, payload);
+    else await api('POST', '/accounting/accounts', payload);
+    toast('Cuenta guardada', 'success');
+    $('account-form-wrap').classList.add('hidden');
+    loadAccounts();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Libro diario ─────────────────────────────────────────────────────────────
+let journalPage = 1;
+let journalFilters = {};
+let journalAccountsList = [];
+
+async function loadJournal(page = 1) {
+  journalPage = page;
+  try {
+    const params = new URLSearchParams({ page, per_page: 30, ...journalFilters });
+    const data = await api('GET', `/accounting/journal?${params}`);
+    const tbody = $('journal-tbody');
+    tbody.innerHTML = data.entries.map(e => `
+      <tr>
+        <td class="text-center"><button class="btn btn-ghost btn-sm" onclick="toggleJournalDetail(${e.id},this)" title="Ver líneas">▸</button></td>
+        <td>${fmtDate(e.date)}</td>
+        <td>${esc(e.description)}</td>
+        <td style="font-size:.8rem;color:var(--text-muted)">${esc(e.ref_type||'')}</td>
+        <td class="text-center">${e.is_reversed ? '<span class="badge badge-default">Anulado</span>' : '<span class="badge badge-success">Vigente</span>'}</td>
+        <td class="text-center">${!e.is_reversed ? `<button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="reverseEntry(${e.id})">Anular</button>` : ''}</td>
+      </tr>
+      <tr id="jrn-detail-${e.id}" class="hidden" style="background:var(--surface-2,#f9f9f9)">
+        <td colspan="6" style="padding:0 12px 10px 36px"><div id="jrn-detail-inner-${e.id}">Cargando...</div></td>
+      </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin asientos en el período</td></tr>';
+
+    // Pagination
+    const pages = Math.ceil(data.total / data.per_page);
+    $('journal-pagination').innerHTML = pages <= 1 ? '' : `
+      <button class="btn btn-ghost btn-sm" ${page <= 1 ? 'disabled' : ''} onclick="loadJournal(${page-1})">← Ant.</button>
+      <span style="font-size:.85rem;color:var(--text-muted)">Pág. ${page} / ${pages} (${data.total} asientos)</span>
+      <button class="btn btn-ghost btn-sm" ${page >= pages ? 'disabled' : ''} onclick="loadJournal(${page+1})">Sig. →</button>`;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+window.toggleJournalDetail = async function(id, btn) {
+  const row = $(`jrn-detail-${id}`);
+  const isHidden = row.classList.contains('hidden');
+  row.classList.toggle('hidden', !isHidden);
+  btn.textContent = isHidden ? '▾' : '▸';
+  if (isHidden) {
+    try {
+      const entry = await api('GET', `/accounting/journal/${id}`);
+      $(`jrn-detail-inner-${id}`).innerHTML = `
+        <table class="table" style="margin:4px 0">
+          <thead><tr><th>Cuenta</th><th class="text-right">Debe</th><th class="text-right">Haber</th></tr></thead>
+          <tbody>${entry.lines.map(l => `
+            <tr>
+              <td><span style="font-family:monospace;font-size:.82rem;color:var(--text-muted)">${esc(l.account_code)}</span> ${esc(l.account_name)}</td>
+              <td class="text-right">${l.debit  > 0 ? fmtMoney(l.debit)  : ''}</td>
+              <td class="text-right">${l.credit > 0 ? fmtMoney(l.credit) : ''}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    } catch(e) { $(`jrn-detail-inner-${id}`).textContent = 'Error al cargar'; }
+  }
+};
+
+window.reverseEntry = async function(id) {
+  if (!await confirm('¿Anular este asiento? Se creará un contra-asiento automáticamente.')) return;
+  try {
+    await api('POST', `/accounting/journal/${id}/reverse`);
+    toast('Asiento anulado', 'success');
+    loadJournal(journalPage);
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+$('btn-journal-filter').addEventListener('click', () => {
+  journalFilters = {};
+  const df = $('journal-date-from').value;
+  const dt = $('journal-date-to').value;
+  if (df) journalFilters.date_from = df;
+  if (dt) journalFilters.date_to   = dt;
+  loadJournal(1);
+});
+$('btn-journal-clear').addEventListener('click', () => {
+  journalFilters = {};
+  $('journal-date-from').value = '';
+  $('journal-date-to').value   = '';
+  loadJournal(1);
+});
+
+// Manual journal entry form
+let jrnLines = [];
+
+async function openJournalForm() {
+  // Load account list for selects
+  try { journalAccountsList = (await api('GET', '/accounting/accounts')).filter(a => a.accepts_movements); } catch(e) {}
+  jrnLines = [{ account_id: '', debit: 0, credit: 0 }, { account_id: '', debit: 0, credit: 0 }];
+  $('inp-jrn-date').value = new Date().toISOString().slice(0,10);
+  $('inp-jrn-desc').value = '';
+  renderJrnLines();
+  $('journal-form-wrap').classList.remove('hidden');
+}
+
+function renderJrnLines() {
+  const opts = journalAccountsList.map(a => `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`).join('');
+  $('jrn-lines-container').innerHTML = jrnLines.map((l, i) => `
+    <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+      <select class="input select" style="flex:2" onchange="jrnLines[${i}].account_id=this.value">
+        <option value="">— Cuenta —</option>${opts}
+      </select>
+      <input type="number" class="input" style="width:110px" placeholder="Debe" min="0" step="0.01" value="${l.debit||''}" onchange="jrnLines[${i}].debit=parseFloat(this.value)||0;updateJrnTotals()">
+      <input type="number" class="input" style="width:110px" placeholder="Haber" min="0" step="0.01" value="${l.credit||''}" onchange="jrnLines[${i}].credit=parseFloat(this.value)||0;updateJrnTotals()">
+      <button type="button" class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="jrnLines.splice(${i},1);renderJrnLines()">✕</button>
+    </div>`).join('');
+  // Restore selected values
+  const selects = $('jrn-lines-container').querySelectorAll('select');
+  selects.forEach((s, i) => { if (jrnLines[i]?.account_id) s.value = jrnLines[i].account_id; });
+  updateJrnTotals();
+}
+
+function updateJrnTotals() {
+  $('jrn-total-debit').textContent  = jrnLines.reduce((s,l)=>s+(l.debit||0),0).toFixed(2);
+  $('jrn-total-credit').textContent = jrnLines.reduce((s,l)=>s+(l.credit||0),0).toFixed(2);
+}
+
+$('btn-add-jrn-line').addEventListener('click', () => { jrnLines.push({account_id:'',debit:0,credit:0}); renderJrnLines(); });
+$('btn-new-journal').addEventListener('click', openJournalForm);
+$('btn-jrn-cancel').addEventListener('click', () => $('journal-form-wrap').classList.add('hidden'));
+$('btn-jrn-save').addEventListener('click', async () => {
+  const desc = $('inp-jrn-desc').value.trim();
+  const date = $('inp-jrn-date').value;
+  if (!desc) { toast('Descripción requerida', 'error'); return; }
+  const lines = jrnLines.filter(l => l.account_id && (l.debit > 0 || l.credit > 0));
+  if (lines.length < 2) { toast('Mínimo 2 líneas con monto', 'error'); return; }
+  try {
+    await api('POST', '/accounting/journal', { date, description: desc, lines });
+    toast('Asiento guardado', 'success');
+    $('journal-form-wrap').classList.add('hidden');
+    loadJournal(journalPage);
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Trial Balance ─────────────────────────────────────────────────────────────
+$('btn-load-balance').addEventListener('click', loadTrialBalance);
+
+async function loadTrialBalance() {
+  try {
+    const df = $('balance-date-from').value;
+    const dt = $('balance-date-to').value;
+    const params = new URLSearchParams();
+    if (df) params.set('date_from', df);
+    if (dt) params.set('date_to',   dt);
+    const rows = await api('GET', `/accounting/trial-balance?${params}`);
+    const tbody = $('trial-balance-tbody');
+    tbody.innerHTML = rows.map(r => {
+      const isGroup = !r.accepts_movements;
+      const indent = (r.code.match(/\./g)||[]).length;
+      if (isGroup && r.opening_balance === 0 && r.period_debit === 0 && r.period_credit === 0) return '';
+      return `<tr style="${isGroup ? 'font-weight:700;background:var(--surface-2,#f8f8f8)' : ''}">
+        <td style="padding-left:${4+indent*10}px;font-family:monospace;font-size:.82rem">${esc(r.code)}</td>
+        <td style="padding-left:${indent*8}px">${esc(r.name)}</td>
+        <td style="font-size:.8rem">${esc(r.type)}</td>
+        <td class="text-right">${r.opening_balance !== 0 ? fmtMoney(r.opening_balance) : ''}</td>
+        <td class="text-right">${r.period_debit   !== 0 ? fmtMoney(r.period_debit)    : ''}</td>
+        <td class="text-right">${r.period_credit  !== 0 ? fmtMoney(r.period_credit)   : ''}</td>
+        <td class="text-right" style="${r.closing_balance < 0 ? 'color:var(--error)' : ''}">${r.closing_balance !== 0 || r.accepts_movements ? fmtMoney(r.closing_balance) : ''}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin movimientos contables</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// ── Income Statement ──────────────────────────────────────────────────────────
+$('btn-load-results').addEventListener('click', loadIncomeStatement);
+
+async function loadIncomeStatement() {
+  try {
+    const df = $('results-date-from').value;
+    const dt = $('results-date-to').value;
+    const params = new URLSearchParams();
+    if (df) params.set('date_from', df);
+    if (dt) params.set('date_to',   dt);
+    const d = await api('GET', `/accounting/income-statement?${params}`);
+
+    const renderRows = (type) => d.rows.filter(r => r.type === type && r.amount !== 0).map(r =>
+      `<div class="balance-row"><span>${esc(r.code)} ${esc(r.name)}</span><span class="balance-amount">${fmtMoney(r.amount)}</span></div>`
+    ).join('') || `<div class="balance-row" style="color:var(--text-muted)"><span>Sin movimientos</span><span>—</span></div>`;
+
+    $('results-ingresos-rows').innerHTML = renderRows('Ingreso');
+    $('results-costos-rows').innerHTML   = renderRows('Costo');
+    $('results-gastos-rows').innerHTML   = renderRows('Gasto');
+    $('results-total-ingresos').textContent = fmtMoney(d.ingresos);
+    $('results-total-costos').textContent   = fmtMoney(d.costos);
+    $('results-total-gastos').textContent   = fmtMoney(d.gastos);
+    const resEl = $('results-resultado');
+    resEl.textContent = fmtMoney(d.resultado);
+    resEl.style.color = d.resultado >= 0 ? 'var(--success)' : 'var(--error)';
+  } catch (err) { toast(err.message, 'error'); }
+}
 
 /* ================================================================ INIT */
 checkAuth();

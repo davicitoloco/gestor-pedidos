@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
+const { acctBySubtype, recordJournal } = require('../lib/accounting');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -46,7 +47,16 @@ router.get('/:id', (req, res) => {
     `).get(id);
     if (!purchase) return res.status(404).json({ error: 'Comprobante no encontrado' });
     const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all(id);
-    res.json({ ...purchase, items });
+    const payments = db.prepare(`
+      SELECT sp.*, COALESCE(ba.name,'') AS bank_account_name
+      FROM supplier_payments sp
+      LEFT JOIN bank_accounts ba ON sp.bank_account_id = ba.id
+      WHERE sp.purchase_id = ?
+      ORDER BY sp.created_at ASC
+    `).all(id);
+    const total_paid = payments.reduce((s, p) => s + p.amount, 0);
+    const balance    = purchase.total - total_paid;
+    res.json({ ...purchase, items, payments, total_paid, balance });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -99,6 +109,19 @@ router.post('/', (req, res) => {
           }
         }
       }
+      // Journal entry: Mercaderías / Proveedores
+      try {
+        const mercs = acctBySubtype('Stock');
+        const provs = acctBySubtype('Proveedores');
+        if (mercs && provs && total > 0) {
+          recordJournal({ date: doc_date || new Date().toISOString().slice(0,10),
+            desc: `Compra C-${String(nextSeq).padStart(4,'0')}`,
+            ref_type: 'purchase', ref_id: purchaseId,
+            lines: [{ account_id: mercs.id, debit: total, credit: 0 }, { account_id: provs.id, debit: 0, credit: total }],
+            userId: req.session.userId });
+        }
+      } catch(e) { console.error('Journal purchase error:', e.message); }
+
       return purchaseId;
     });
 

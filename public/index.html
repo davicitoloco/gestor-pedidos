@@ -73,6 +73,10 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
         Compras
       </a>
+      <a class="nav-item admin-only" data-section="contable" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        Contable
+      </a>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-user">
@@ -741,56 +745,12 @@
 
       <!-- Sub-nav tabs -->
       <div class="compras-tabs">
-        <button class="compras-tab active" data-tab="resumen">Resumen</button>
-        <button class="compras-tab" data-tab="proveedores">Proveedores</button>
+        <button class="compras-tab active" data-tab="proveedores">Proveedores</button>
         <button class="compras-tab" data-tab="comprobantes">Comprobantes</button>
-        <button class="compras-tab" data-tab="caja">Caja</button>
-        <button class="compras-tab" data-tab="banco">Banco</button>
-        <button class="compras-tab" data-tab="cheques">Cheques</button>
-      </div>
-
-      <!-- ── RESUMEN FINANCIERO ── -->
-      <div id="compras-tab-resumen" class="compras-pane">
-        <div class="page-header">
-          <h2 class="page-title">Balance General</h2>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-ghost" id="btn-refresh-finance">Actualizar</button>
-            <a href="/api/finance/balance-print" target="_blank" class="btn btn-secondary">Imprimir PDF</a>
-          </div>
-        </div>
-        <div id="balance-view" style="max-width:680px">
-          <!-- DISPONIBLE -->
-          <div class="balance-section">
-            <div class="balance-section-title">DISPONIBLE</div>
-            <div class="balance-row"><span>Caja</span><span id="fin-cash" class="balance-amount">—</span></div>
-            <div id="fin-banks-rows"></div>
-            <div class="balance-row balance-subtotal"><span>Subtotal banco</span><span id="fin-bank" class="balance-amount">—</span></div>
-            <div class="balance-row"><span>Cheques en cartera (<span id="fin-ch-count">0</span>)</span><span id="fin-ch-cartera" class="balance-amount">—</span></div>
-            <div class="balance-row balance-total"><span>TOTAL DISPONIBLE</span><span id="fin-disponible" class="balance-amount">—</span></div>
-          </div>
-          <!-- DEUDAS -->
-          <div class="balance-section" style="margin-top:16px">
-            <div class="balance-section-title">DEUDAS Y ACREENCIAS</div>
-            <div class="balance-row"><span>Deudores — clientes nos deben</span><span id="fin-clients" class="balance-amount" style="color:var(--success)">—</span></div>
-            <div class="balance-row"><span>Proveedores — debemos</span><span id="fin-suppliers" class="balance-amount" style="color:var(--error)">—</span></div>
-          </div>
-          <!-- POSICIÓN NETA -->
-          <div class="balance-section balance-section-net" style="margin-top:16px">
-            <div class="balance-row balance-net"><span>POSICIÓN NETA</span><span id="fin-net" class="balance-amount">—</span></div>
-            <div style="font-size:.78rem;color:var(--text-muted);padding:0 12px 10px">Disponible + Deudores − Proveedores</div>
-          </div>
-          <!-- CHEQUES PRÓXIMOS -->
-          <div class="balance-section" style="margin-top:16px" id="fin-upcoming-section">
-            <div class="balance-section-title">CHEQUES A VENCER (próximos 30 días)</div>
-            <div class="balance-row"><span>A cobrar</span><span id="fin-ch-cobrar" class="balance-amount">—</span></div>
-            <div class="balance-row"><span>A pagar</span><span id="fin-ch-pagar" class="balance-amount">—</span></div>
-            <div id="fin-upcoming-list" style="margin-top:8px"></div>
-          </div>
-        </div>
       </div>
 
       <!-- ── PROVEEDORES ── -->
-      <div id="compras-tab-proveedores" class="compras-pane hidden">
+      <div id="compras-tab-proveedores" class="compras-pane">
         <div id="proveedores-list-view">
           <div class="page-header">
             <h2 class="page-title">Proveedores</h2>
@@ -935,10 +895,106 @@
             </div>
           </form>
         </div>
+        <!-- Purchase detail sub-view -->
+        <div id="purchase-detail-view" class="hidden">
+          <div class="page-header">
+            <div>
+              <h2 class="page-title" id="pur-detail-title">Comprobante</h2>
+              <div id="pur-detail-subtitle" style="color:var(--text-muted);font-size:.9rem;margin-top:2px"></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost" id="btn-back-purchase-detail">← Volver</button>
+              <a id="pur-detail-print-link" href="#" target="_blank" class="btn btn-secondary">PDF</a>
+            </div>
+          </div>
+          <!-- Items table -->
+          <div style="font-weight:600;margin-bottom:6px">Ítems</div>
+          <div class="table-wrap" style="margin-bottom:16px">
+            <table class="table"><thead><tr>
+              <th>Producto</th><th class="text-right">Cantidad</th>
+              <th class="text-right">Precio unit.</th><th class="text-right">Subtotal</th>
+            </tr></thead><tbody id="pur-detail-items-tbody"></tbody></table>
+          </div>
+          <div style="text-align:right;font-size:15px;margin-bottom:20px">
+            <strong>Total: <span id="pur-detail-total">—</span></strong>
+          </div>
+          <!-- Payments section -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-weight:600">Pagos aplicados a este comprobante</span>
+            <button class="btn btn-primary btn-sm" id="btn-new-purchase-payment">+ Registrar pago</button>
+          </div>
+          <div class="table-wrap" style="margin-bottom:12px">
+            <table class="table"><thead><tr>
+              <th>Fecha</th><th>Método</th><th class="text-right">Monto</th><th>Notas</th><th class="text-center">Eliminar</th>
+            </tr></thead><tbody id="pur-detail-payments-tbody"></tbody></table>
+          </div>
+          <div class="balance-section" style="max-width:340px">
+            <div class="balance-row"><span>Total comprobante</span><span id="pur-detail-balance-total" class="balance-amount">—</span></div>
+            <div class="balance-row"><span>Total pagado</span><span id="pur-detail-paid" class="balance-amount">—</span></div>
+            <div class="balance-row balance-total"><span>SALDO PENDIENTE</span><span id="pur-detail-balance" class="balance-amount">—</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /section-compras -->
+
+    <!-- ======================== SECCIÓN: CONTABLE -->
+    <div id="section-contable" class="app-section hidden">
+
+      <!-- Sub-nav tabs -->
+      <div class="contable-tabs">
+        <button class="contable-tab active" data-tab="resumen">Resumen</button>
+        <button class="contable-tab" data-tab="caja">Caja</button>
+        <button class="contable-tab" data-tab="banco">Banco</button>
+        <button class="contable-tab" data-tab="cheques">Cheques</button>
+        <button class="contable-tab" data-tab="cuentas">Plan de cuentas</button>
+        <button class="contable-tab" data-tab="diario">Libro diario</button>
+        <button class="contable-tab" data-tab="balance">Balance</button>
+        <button class="contable-tab" data-tab="resultados">Resultados</button>
+      </div>
+
+      <!-- ── RESUMEN FINANCIERO ── -->
+      <div id="contable-tab-resumen" class="contable-pane">
+        <div class="page-header">
+          <h2 class="page-title">Balance General</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btn-refresh-finance">Actualizar</button>
+            <a href="/api/finance/balance-print" target="_blank" class="btn btn-secondary">Imprimir PDF</a>
+          </div>
+        </div>
+        <div id="balance-view" style="max-width:680px">
+          <!-- DISPONIBLE -->
+          <div class="balance-section">
+            <div class="balance-section-title">DISPONIBLE</div>
+            <div class="balance-row"><span>Caja</span><span id="fin-cash" class="balance-amount">—</span></div>
+            <div id="fin-banks-rows"></div>
+            <div class="balance-row balance-subtotal"><span>Subtotal banco</span><span id="fin-bank" class="balance-amount">—</span></div>
+            <div class="balance-row"><span>Cheques en cartera (<span id="fin-ch-count">0</span>)</span><span id="fin-ch-cartera" class="balance-amount">—</span></div>
+            <div class="balance-row balance-total"><span>TOTAL DISPONIBLE</span><span id="fin-disponible" class="balance-amount">—</span></div>
+          </div>
+          <!-- DEUDAS -->
+          <div class="balance-section" style="margin-top:16px">
+            <div class="balance-section-title">DEUDAS Y ACREENCIAS</div>
+            <div class="balance-row"><span>Deudores — clientes nos deben</span><span id="fin-clients" class="balance-amount" style="color:var(--success)">—</span></div>
+            <div class="balance-row"><span>Proveedores — debemos</span><span id="fin-suppliers" class="balance-amount" style="color:var(--error)">—</span></div>
+          </div>
+          <!-- POSICIÓN NETA -->
+          <div class="balance-section balance-section-net" style="margin-top:16px">
+            <div class="balance-row balance-net"><span>POSICIÓN NETA</span><span id="fin-net" class="balance-amount">—</span></div>
+            <div style="font-size:.78rem;color:var(--text-muted);padding:0 12px 10px">Disponible + Deudores − Proveedores</div>
+          </div>
+          <!-- CHEQUES PRÓXIMOS -->
+          <div class="balance-section" style="margin-top:16px" id="fin-upcoming-section">
+            <div class="balance-section-title">CHEQUES A VENCER (próximos 30 días)</div>
+            <div class="balance-row"><span>A cobrar</span><span id="fin-ch-cobrar" class="balance-amount">—</span></div>
+            <div class="balance-row"><span>A pagar</span><span id="fin-ch-pagar" class="balance-amount">—</span></div>
+            <div id="fin-upcoming-list" style="margin-top:8px"></div>
+          </div>
+        </div>
       </div>
 
       <!-- ── CAJA ── -->
-      <div id="compras-tab-caja" class="compras-pane hidden">
+      <div id="contable-tab-caja" class="contable-pane hidden">
         <div class="page-header">
           <div>
             <h2 class="page-title">Caja</h2>
@@ -955,7 +1011,7 @@
       </div>
 
       <!-- ── BANCO ── -->
-      <div id="compras-tab-banco" class="compras-pane hidden">
+      <div id="contable-tab-banco" class="contable-pane hidden">
         <div id="banco-list-view">
           <div class="page-header">
             <h2 class="page-title">Cuentas Bancarias</h2>
@@ -982,7 +1038,7 @@
       </div>
 
       <!-- ── CHEQUES ── -->
-      <div id="compras-tab-cheques" class="compras-pane hidden">
+      <div id="contable-tab-cheques" class="contable-pane hidden">
         <div class="page-header">
           <div>
             <h2 class="page-title">Cartera de Cheques</h2>
@@ -1003,7 +1059,156 @@
         </div>
       </div>
 
-    </div><!-- /section-compras -->
+      <!-- ── PLAN DE CUENTAS ── -->
+      <div id="contable-tab-cuentas" class="contable-pane hidden">
+        <div class="page-header">
+          <h2 class="page-title">Plan de Cuentas</h2>
+          <button class="btn btn-primary" id="btn-new-account">+ Nueva cuenta</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="accounts-table">
+            <thead><tr>
+              <th style="width:110px">Código</th>
+              <th>Nombre</th>
+              <th style="width:110px">Tipo</th>
+              <th style="width:110px">Subtipo</th>
+              <th style="width:80px" class="text-center">Mov.</th>
+              <th class="text-right" style="width:130px">Saldo</th>
+            </tr></thead>
+            <tbody id="accounts-tbody"></tbody>
+          </table>
+        </div>
+        <!-- New account form -->
+        <div id="account-form-wrap" class="hidden" style="margin-top:20px;max-width:520px">
+          <h3 style="margin-bottom:12px" id="account-form-title">Nueva Cuenta</h3>
+          <div class="form-grid-2">
+            <div class="field"><label class="label required">Código</label><input type="text" id="inp-acct-code" class="input" placeholder="ej: 6.1.03"></div>
+            <div class="field"><label class="label required">Nombre</label><input type="text" id="inp-acct-name" class="input"></div>
+            <div class="field">
+              <label class="label required">Tipo</label>
+              <select id="inp-acct-type" class="input select">
+                <option>Activo</option><option>Pasivo</option><option>Patrimonio</option>
+                <option>Ingreso</option><option>Costo</option><option>Gasto</option>
+              </select>
+            </div>
+            <div class="field"><label class="label">Subtipo</label><input type="text" id="inp-acct-subtype" class="input" placeholder="opcional"></div>
+            <div class="field"><label class="label">Cuenta padre</label><input type="text" id="inp-acct-parent" class="input" placeholder="ej: 6.1"></div>
+            <div class="field" style="display:flex;align-items:center;gap:8px;padding-top:22px">
+              <input type="checkbox" id="inp-acct-moves" checked>
+              <label for="inp-acct-moves" class="label" style="margin:0">Acepta movimientos</label>
+            </div>
+          </div>
+          <div class="form-actions" style="margin-top:16px">
+            <button class="btn btn-ghost" id="btn-acct-cancel">Cancelar</button>
+            <button class="btn btn-primary" id="btn-acct-save">Guardar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── LIBRO DIARIO ── -->
+      <div id="contable-tab-diario" class="contable-pane hidden">
+        <div class="page-header">
+          <h2 class="page-title">Libro Diario</h2>
+          <button class="btn btn-primary" id="btn-new-journal">+ Asiento manual</button>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="journal-date-from" class="input" style="width:150px"></div>
+          <div class="field" style="margin:0"><label class="label">Hasta</label><input type="date" id="journal-date-to" class="input" style="width:150px"></div>
+          <button class="btn btn-secondary" id="btn-journal-filter" style="margin-top:20px">Filtrar</button>
+          <button class="btn btn-ghost" id="btn-journal-clear" style="margin-top:20px">Limpiar</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:40px"></th>
+              <th style="width:100px">Fecha</th>
+              <th>Descripción</th>
+              <th style="width:90px">Tipo ref.</th>
+              <th style="width:80px" class="text-center">Estado</th>
+              <th style="width:100px" class="text-center">Acciones</th>
+            </tr></thead>
+            <tbody id="journal-tbody"></tbody>
+          </table>
+        </div>
+        <div id="journal-pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center"></div>
+        <!-- Manual journal entry form -->
+        <div id="journal-form-wrap" class="hidden" style="margin-top:20px;max-width:680px">
+          <h3 style="margin-bottom:12px">Asiento Manual</h3>
+          <div class="field"><label class="label required">Fecha</label><input type="date" id="inp-jrn-date" class="input" style="max-width:200px"></div>
+          <div class="field" style="margin-top:10px"><label class="label required">Descripción</label><input type="text" id="inp-jrn-desc" class="input"></div>
+          <div style="margin:14px 0 6px;font-weight:600">Líneas (debe = haber)</div>
+          <div id="jrn-lines-container"></div>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-add-jrn-line" style="margin-top:6px">+ Agregar línea</button>
+          <div style="margin-top:8px;font-size:.85rem;color:var(--text-muted)">
+            Debe: <strong id="jrn-total-debit">0.00</strong> | Haber: <strong id="jrn-total-credit">0.00</strong>
+          </div>
+          <div class="form-actions" style="margin-top:16px">
+            <button class="btn btn-ghost" id="btn-jrn-cancel">Cancelar</button>
+            <button class="btn btn-primary" id="btn-jrn-save">Guardar asiento</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── BALANCE DE SUMAS Y SALDOS ── -->
+      <div id="contable-tab-balance" class="contable-pane hidden">
+        <div class="page-header">
+          <h2 class="page-title">Balance de Sumas y Saldos</h2>
+          <a id="btn-balance-print" href="#" target="_blank" class="btn btn-secondary">Imprimir</a>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="balance-date-from" class="input" style="width:150px"></div>
+          <div class="field" style="margin:0"><label class="label">Hasta</label><input type="date" id="balance-date-to" class="input" style="width:150px"></div>
+          <button class="btn btn-secondary" id="btn-load-balance">Generar</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:100px">Código</th>
+              <th>Cuenta</th>
+              <th style="width:90px">Tipo</th>
+              <th class="text-right" style="width:120px">Saldo anterior</th>
+              <th class="text-right" style="width:110px">Débitos</th>
+              <th class="text-right" style="width:110px">Créditos</th>
+              <th class="text-right" style="width:120px">Saldo actual</th>
+            </tr></thead>
+            <tbody id="trial-balance-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── ESTADO DE RESULTADOS ── -->
+      <div id="contable-tab-resultados" class="contable-pane hidden">
+        <div class="page-header">
+          <h2 class="page-title">Estado de Resultados</h2>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="results-date-from" class="input" style="width:150px"></div>
+          <div class="field" style="margin:0"><label class="label">Hasta</label><input type="date" id="results-date-to" class="input" style="width:150px"></div>
+          <button class="btn btn-secondary" id="btn-load-results">Generar</button>
+        </div>
+        <div id="results-view" style="max-width:560px">
+          <div class="balance-section">
+            <div class="balance-section-title">INGRESOS</div>
+            <div id="results-ingresos-rows"></div>
+            <div class="balance-row balance-subtotal"><span>Total ingresos</span><span id="results-total-ingresos" class="balance-amount">—</span></div>
+          </div>
+          <div class="balance-section" style="margin-top:12px">
+            <div class="balance-section-title">COSTOS</div>
+            <div id="results-costos-rows"></div>
+            <div class="balance-row balance-subtotal"><span>Total costos</span><span id="results-total-costos" class="balance-amount">—</span></div>
+          </div>
+          <div class="balance-section" style="margin-top:12px">
+            <div class="balance-section-title">GASTOS</div>
+            <div id="results-gastos-rows"></div>
+            <div class="balance-row balance-subtotal"><span>Total gastos</span><span id="results-total-gastos" class="balance-amount">—</span></div>
+          </div>
+          <div class="balance-section balance-section-net" style="margin-top:12px">
+            <div class="balance-row balance-net"><span>RESULTADO DEL PERÍODO</span><span id="results-resultado" class="balance-amount">—</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /section-contable -->
 
   </main><!-- /app-content -->
 </div><!-- /app -->

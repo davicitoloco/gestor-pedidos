@@ -47,6 +47,7 @@ app.use('/api/cash',              require('./routes/cash'));
 app.use('/api/bank',              require('./routes/bank'));
 app.use('/api/cheques',           require('./routes/cheques'));
 app.use('/api/finance',           require('./routes/finance'));
+app.use('/api/accounting',        require('./routes/accounting'));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

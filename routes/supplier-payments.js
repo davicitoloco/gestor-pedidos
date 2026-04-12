@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
+const { acctBySubtype, acctByBankId, recordJournal } = require('../lib/accounting');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -35,7 +36,7 @@ router.post('/', (req, res) => {
   try {
     const {
       supplier_id, amount, method, reference, bank, bank_account_id, notes, payment_date,
-      cheque_bank, cheque_number, cheque_due_date
+      cheque_bank, cheque_number, cheque_due_date, purchase_id
     } = req.body;
     if (!supplier_id)                       return res.status(400).json({ error: 'Proveedor requerido' });
     if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Monto inválido' });
@@ -66,10 +67,12 @@ router.post('/', (req, res) => {
       }
 
       const r = db.prepare(`
-        INSERT INTO supplier_payments (supplier_id, amount, method, reference, bank, bank_account_id, cheque_id, notes, payment_date, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, reference, bank, bank_account_id, cheque_id, notes, payment_date, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        sid, amt, method,
+        sid,
+        purchase_id ? Number(purchase_id) : null,
+        amt, method,
         reference || '',
         bank || '',
         bank_account_id ? Number(bank_account_id) : null,
@@ -89,6 +92,25 @@ router.post('/', (req, res) => {
           .run(Number(bank_account_id), 'egreso', amt, desc, 'supplier_payment', paymentId, req.session.userId);
       }
       // cheque emitido → bank movement happens when status → debitado
+
+      // Journal entry
+      try {
+        const today = payment_date || new Date().toISOString().slice(0,10);
+        const proveedores = acctBySubtype('Proveedores');
+        let creditAcct = null;
+        if (method === 'efectivo') {
+          creditAcct = acctBySubtype('Caja');
+        } else if (method === 'transferencia' && bank_account_id) {
+          creditAcct = acctByBankId(Number(bank_account_id));
+        } else if (method === 'cheque') {
+          creditAcct = db.prepare("SELECT id FROM accounts WHERE code='2.1.02'").get();
+        }
+        if (proveedores && creditAcct) {
+          recordJournal({ date: today, desc: desc, ref_type: 'supplier_payment', ref_id: paymentId,
+            lines: [{ account_id: proveedores.id, debit: amt, credit: 0 }, { account_id: creditAcct.id, debit: 0, credit: amt }],
+            userId: req.session.userId });
+        }
+      } catch(e) { console.error('Journal sup-payment error:', e.message); }
 
       return paymentId;
     });

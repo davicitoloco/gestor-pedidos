@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
+const { acctBySubtype, acctByBankId, recordJournal } = require('../lib/accounting');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -99,14 +100,52 @@ router.patch('/:id/status', (req, res) => {
         db.prepare('UPDATE cheques SET status=?, deposited_to=? WHERE id=?').run(status, accId, id);
         db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by) VALUES (?,?,?,?,?,?,?)`)
           .run(accId, 'ingreso', ch.amount, `Depósito cheque ${ch.bank} Nro ${ch.cheque_number}`, 'cheque_deposit', id, req.session.userId);
+        // Journal: Banco / Cheques en cartera
+        try {
+          const bancoAcct  = acctByBankId(accId);
+          const chequesAcct = acctBySubtype('Cheques');
+          if (bancoAcct && chequesAcct) {
+            recordJournal({ date: new Date().toISOString().slice(0,10),
+              desc: `Depósito cheque ${ch.bank} Nro ${ch.cheque_number}`,
+              ref_type: 'cheque_deposit', ref_id: id,
+              lines: [{ account_id: bancoAcct.id, debit: ch.amount, credit: 0 }, { account_id: chequesAcct.id, debit: 0, credit: ch.amount }],
+              userId: req.session.userId });
+          }
+        } catch(e) { console.error('Journal cheque deposit error:', e.message); }
       } else if (ch.direction === 'emitido' && status === 'debitado') {
         if (!bank_account_id) throw new Error('Se requiere cuenta bancaria');
         const accId = Number(bank_account_id);
         db.prepare('UPDATE cheques SET status=?, deposited_to=? WHERE id=?').run(status, accId, id);
         db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by) VALUES (?,?,?,?,?,?,?)`)
           .run(accId, 'egreso', ch.amount, `Débito cheque ${ch.bank} Nro ${ch.cheque_number}`, 'cheque_debit', id, req.session.userId);
+        // Journal: Otras deudas / Banco
+        try {
+          const otrasDeudasAcct = db.prepare("SELECT id FROM accounts WHERE code='2.1.02'").get();
+          const bancoAcct = acctByBankId(accId);
+          if (otrasDeudasAcct && bancoAcct) {
+            recordJournal({ date: new Date().toISOString().slice(0,10),
+              desc: `Débito cheque ${ch.bank} Nro ${ch.cheque_number}`,
+              ref_type: 'cheque_debit', ref_id: id,
+              lines: [{ account_id: otrasDeudasAcct.id, debit: ch.amount, credit: 0 }, { account_id: bancoAcct.id, debit: 0, credit: ch.amount }],
+              userId: req.session.userId });
+          }
+        } catch(e) { console.error('Journal cheque debit error:', e.message); }
       } else {
         db.prepare('UPDATE cheques SET status=? WHERE id=?').run(status, id);
+        // Journal recibido rechazado: Deudores / Cheques en cartera
+        if (ch.direction === 'recibido' && status === 'rechazado') {
+          try {
+            const deudores = acctBySubtype('Clientes');
+            const cheques  = acctBySubtype('Cheques');
+            if (deudores && cheques) {
+              recordJournal({ date: new Date().toISOString().slice(0,10),
+                desc: `Cheque rechazado ${ch.bank} Nro ${ch.cheque_number}`,
+                ref_type: 'cheque_rechazado', ref_id: id,
+                lines: [{ account_id: deudores.id, debit: ch.amount, credit: 0 }, { account_id: cheques.id, debit: 0, credit: ch.amount }],
+                userId: req.session.userId });
+            }
+          } catch(e) { console.error('Journal cheque rechazado error:', e.message); }
+        }
       }
     });
 
