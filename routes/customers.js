@@ -18,7 +18,8 @@ router.get('/', (req, res) => {
       SELECT c.*,
         COALESCE(u.full_name, u.username) AS vendor_name,
         COALESCE((SELECT SUM(r.total)  FROM remitos  r WHERE r.customer_id = c.id), 0)
-        - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.customer_id = c.id), 0) AS balance
+        - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.customer_id = c.id), 0)
+        + COALESCE((SELECT SUM(CASE WHEN n.note_type='debito' THEN n.amount ELSE -n.amount END) FROM credit_debit_notes n WHERE n.entity_type='customer' AND n.entity_id = c.id), 0) AS balance
       FROM customers c
       LEFT JOIN users u ON c.created_by = u.id
       WHERE 1=1 ${vc}
@@ -52,11 +53,20 @@ router.get('/:id/account', (req, res) => {
       ORDER BY p.created_at DESC
     `).all(cid);
 
+    const notes = db.prepare(`
+      SELECT n.*, COALESCE(u.full_name, u.username) AS created_by_name
+      FROM credit_debit_notes n LEFT JOIN users u ON n.created_by = u.id
+      WHERE n.entity_type='customer' AND n.entity_id=?
+      ORDER BY n.date DESC, n.id DESC
+    `).all(cid);
+
     const total_debt = remitos.reduce((s, r) => s + r.total, 0);
     const total_paid = payments.reduce((s, p) => s + p.amount, 0);
-    const balance    = total_debt - total_paid;
+    // Notes: debito increases what the customer owes, credito decreases it
+    const notes_delta = notes.reduce((s, n) => s + (n.note_type === 'debito' ? n.amount : -n.amount), 0);
+    const balance    = total_debt - total_paid + notes_delta;
 
-    res.json({ customer, remitos, payments, total_debt, total_paid, balance });
+    res.json({ customer, remitos, payments, notes, total_debt, total_paid, balance });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -385,10 +385,13 @@
               <p class="page-subtitle" id="account-client-iva"></p>
             </div>
           </div>
-          <button class="btn btn-primary admin-only" id="btn-new-payment">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Registrar pago
-          </button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost admin-only" id="btn-new-client-note">Nota Déb/Cré</button>
+            <button class="btn btn-primary admin-only" id="btn-new-payment">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Registrar pago
+            </button>
+          </div>
         </div>
         <!-- Resumen -->
         <div class="account-summary-grid">
@@ -431,6 +434,21 @@
               <th style="width:50px" class="text-center admin-only"></th>
             </tr></thead><tbody id="account-payments-tbody"></tbody></table>
             <div id="no-account-payments" class="empty-state hidden"><p>Sin pagos registrados</p></div>
+          </div>
+        </div>
+        <!-- Notas de débito/crédito -->
+        <div class="card admin-only" style="margin-top:18px" id="account-notes-card">
+          <div class="card-header">Notas de débito / crédito</div>
+          <div class="card-body" style="padding:0">
+            <table class="table"><thead><tr>
+              <th style="width:100px">Fecha</th>
+              <th style="width:120px">Tipo</th>
+              <th>Descripción</th>
+              <th style="width:120px">Referencia</th>
+              <th class="text-right" style="width:130px">Monto</th>
+              <th style="width:50px" class="text-center"></th>
+            </tr></thead><tbody id="account-notes-tbody"></tbody></table>
+            <div id="no-account-notes" class="empty-state hidden"><p>Sin notas registradas</p></div>
           </div>
         </div>
       </div>
@@ -476,30 +494,79 @@
       <!-- Panel de alertas -->
       <div id="stock-alerts-banner" class="stock-alerts-banner hidden"></div>
 
-      <div class="page-header">
-        <div><h2 class="page-title">Gestión de Stock</h2><p class="page-subtitle" id="stock-count"></p></div>
-        <button class="btn btn-primary" id="btn-new-ingreso">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Registrar ingreso
-        </button>
+      <!-- Sub-nav tabs -->
+      <div class="contable-tabs">
+        <button class="stock-tab active" data-stock-tab="lista">Stock actual</button>
+        <button class="stock-tab" data-stock-tab="historial">Historial</button>
       </div>
 
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr>
-            <th>Producto</th>
-            <th style="width:110px" class="text-center">Stock actual</th>
-            <th style="width:100px" class="text-center">Mínimo</th>
-            <th style="width:120px" class="text-center">Estado stock</th>
-            <th style="width:120px" class="text-center">Acciones</th>
-          </tr></thead>
-          <tbody id="stock-tbody"></tbody>
-        </table>
-        <div id="no-stock" class="empty-state hidden">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/></svg>
-          <p>No hay productos en el catálogo</p>
+      <!-- ── STOCK ACTUAL ── -->
+      <div id="stock-tab-lista">
+        <div class="page-header">
+          <div><h2 class="page-title">Gestión de Stock</h2><p class="page-subtitle" id="stock-count"></p></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btn-refresh-stock">Actualizar</button>
+            <button class="btn btn-primary" id="btn-new-ingreso">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Registrar ingreso
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Artículo</th>
+              <th class="text-center" style="width:120px">Stock actual</th>
+              <th class="text-center" style="width:150px">Pedidos pendientes</th>
+              <th class="text-center" style="width:120px">Diferencia</th>
+              <th style="width:150px">Última actualiz.</th>
+              <th class="text-center" style="width:90px">Editar</th>
+            </tr></thead>
+            <tbody id="stock-tbody"></tbody>
+          </table>
+          <div id="no-stock" class="empty-state hidden">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/></svg>
+            <p>No hay productos en el catálogo</p>
+          </div>
         </div>
       </div>
+
+      <!-- ── HISTORIAL ── -->
+      <div id="stock-tab-historial" class="hidden">
+        <div class="page-header">
+          <h2 class="page-title">Historial de movimientos</h2>
+          <button class="btn btn-ghost" id="btn-refresh-stock-hist">Actualizar</button>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="margin:0">
+            <label class="label">Artículo</label>
+            <select id="hist-product-filter" class="input select" style="min-width:180px">
+              <option value="">Todos los artículos</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="hist-date-from" class="input" style="width:145px"></div>
+          <div class="field" style="margin:0"><label class="label">Hasta</label><input type="date" id="hist-date-to" class="input" style="width:145px"></div>
+          <button class="btn btn-secondary" id="btn-hist-filter" style="margin-top:20px">Filtrar</button>
+          <button class="btn btn-ghost" id="btn-hist-clear" style="margin-top:20px">Limpiar</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:145px">Fecha</th>
+              <th>Artículo</th>
+              <th class="text-center" style="width:120px">Tipo</th>
+              <th class="text-right" style="width:90px">Cant.</th>
+              <th class="text-right" style="width:90px">Ant.</th>
+              <th class="text-right" style="width:90px">Nuevo</th>
+              <th>Nota</th>
+              <th style="width:120px">Usuario</th>
+            </tr></thead>
+            <tbody id="hist-tbody"></tbody>
+          </table>
+        </div>
+        <div id="hist-pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center"></div>
+      </div>
+
     </div><!-- /section-stock -->
 
     <!-- ======================== SECCIÓN: USUARIOS -->
@@ -827,12 +894,22 @@
           </div>
           <div style="margin:16px 0 8px;display:flex;justify-content:space-between;align-items:center">
             <span style="font-weight:600">Pagos realizados</span>
-            <button class="btn btn-primary btn-sm" id="btn-new-sup-payment">+ Registrar pago</button>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" id="btn-new-sup-note">Nota Déb/Cré</button>
+              <button class="btn btn-primary btn-sm" id="btn-new-sup-payment">+ Registrar pago</button>
+            </div>
           </div>
           <div class="table-wrap" style="max-height:220px;overflow-y:auto">
             <table class="table"><thead><tr>
               <th>Fecha</th><th>Método</th><th class="text-right">Monto</th><th>Notas</th><th class="text-center">Eliminar</th>
             </tr></thead><tbody id="sup-payments-tbody"></tbody></table>
+          </div>
+          <div style="margin:14px 0 6px;font-weight:600">Notas de débito / crédito</div>
+          <div class="table-wrap" style="max-height:200px;overflow-y:auto">
+            <table class="table"><thead><tr>
+              <th style="width:90px">Fecha</th><th style="width:110px">Tipo</th><th>Descripción</th>
+              <th class="text-right" style="width:110px">Monto</th><th style="width:50px" class="text-center">Elim.</th>
+            </tr></thead><tbody id="sup-notes-tbody"></tbody></table>
           </div>
         </div>
       </div>
@@ -952,6 +1029,10 @@
         <button class="contable-tab" data-tab="balance">Balance</button>
         <button class="contable-tab" data-tab="resultados">Resultados</button>
         <button class="contable-tab" data-tab="asientos">Asientos manuales</button>
+        <button class="contable-tab" data-tab="libro-mayor">Libro Mayor</button>
+        <button class="contable-tab" data-tab="cierres">Cierres</button>
+        <button class="contable-tab" data-tab="conciliacion">Conciliación</button>
+        <button class="contable-tab" data-tab="calendario">Calendario</button>
       </div>
 
       <!-- ── RESUMEN FINANCIERO ── -->
@@ -1304,6 +1385,197 @@
         <div id="am-pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center"></div>
       </div>
 
+      <!-- ── LIBRO MAYOR ── -->
+      <div id="contable-tab-libro-mayor" class="contable-pane hidden">
+        <div class="page-header">
+          <h2 class="page-title">Libro Mayor</h2>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="margin:0;min-width:220px">
+            <label class="label">Cuenta</label>
+            <select id="lm-account-select" class="input select">
+              <option value="">— Seleccioná una cuenta —</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="lm-date-from" class="input" style="width:150px"></div>
+          <div class="field" style="margin:0"><label class="label">Hasta</label><input type="date" id="lm-date-to" class="input" style="width:150px"></div>
+          <button class="btn btn-secondary" id="btn-load-lm" style="margin-top:20px">Generar</button>
+        </div>
+        <div id="lm-summary" class="hidden" style="display:flex;gap:20px;margin-bottom:16px;flex-wrap:wrap">
+          <div style="padding:12px 18px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">
+            <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Saldo inicial</div>
+            <div id="lm-opening" style="font-size:1.2rem;font-weight:700;font-family:monospace">—</div>
+          </div>
+          <div style="padding:12px 18px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">
+            <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Total Debe</div>
+            <div id="lm-total-debit" style="font-size:1.2rem;font-weight:700;font-family:monospace">—</div>
+          </div>
+          <div style="padding:12px 18px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">
+            <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Total Haber</div>
+            <div id="lm-total-credit" style="font-size:1.2rem;font-weight:700;font-family:monospace">—</div>
+          </div>
+          <div style="padding:12px 18px;border-radius:8px;border:2px solid var(--primary);background:var(--surface)">
+            <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Saldo final</div>
+            <div id="lm-closing" style="font-size:1.2rem;font-weight:700;font-family:monospace;color:var(--primary)">—</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:100px">Fecha</th>
+              <th>Descripción</th>
+              <th style="width:80px">Ref.</th>
+              <th class="text-right" style="width:120px">Debe</th>
+              <th class="text-right" style="width:120px">Haber</th>
+              <th class="text-right" style="width:130px">Saldo acum.</th>
+            </tr></thead>
+            <tbody id="lm-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── CIERRES CONTABLES ── -->
+      <div id="contable-tab-cierres" class="contable-pane hidden">
+        <div class="page-header">
+          <h2 class="page-title">Cierres Contables</h2>
+          <button class="btn btn-primary" id="btn-new-close">+ Cerrar período</button>
+        </div>
+        <div id="close-form-wrap" class="hidden" style="border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:24px;max-width:440px;background:var(--surface)">
+          <h3 style="margin:0 0 14px;font-size:1rem">Cerrar período contable</h3>
+          <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:14px">Una vez cerrado un período, no se podrán crear ni modificar asientos en ese mes.</p>
+          <div class="field">
+            <label class="label required">Período (año-mes)</label>
+            <input type="month" id="inp-close-period" class="input" style="max-width:200px">
+          </div>
+          <div class="form-actions" style="margin-top:16px">
+            <button class="btn btn-ghost" id="btn-close-cancel">Cancelar</button>
+            <button class="btn btn-danger" id="btn-close-confirm">Cerrar período</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Período</th>
+              <th>Cerrado el</th>
+              <th>Cerrado por</th>
+              <th style="width:100px" class="text-center">Acciones</th>
+            </tr></thead>
+            <tbody id="closes-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── CONCILIACIÓN BANCARIA ── -->
+      <div id="contable-tab-conciliacion" class="contable-pane hidden">
+        <div class="page-header">
+          <h2 class="page-title">Conciliación Bancaria</h2>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px">
+          <div class="field" style="margin:0;min-width:200px">
+            <label class="label">Cuenta bancaria</label>
+            <select id="rec-bank-select" class="input select">
+              <option value="">— Seleccioná —</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <label class="label">Período</label>
+            <input type="month" id="rec-period" class="input" style="width:160px">
+          </div>
+          <button class="btn btn-secondary" id="btn-load-rec" style="margin-top:20px">Cargar</button>
+        </div>
+        <div id="rec-content" class="hidden">
+          <!-- Summary cards -->
+          <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap">
+            <div style="padding:14px 20px;border-radius:8px;border:1px solid var(--border);background:var(--surface);min-width:180px">
+              <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Saldo según sistema</div>
+              <div id="rec-system-balance" style="font-size:1.3rem;font-weight:700;font-family:monospace;color:var(--primary)">—</div>
+            </div>
+            <div style="padding:14px 20px;border-radius:8px;border:1px solid var(--border);background:var(--surface);min-width:180px">
+              <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Saldo según banco</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <input type="number" id="rec-bank-balance-inp" class="input" style="width:130px;font-weight:700;font-family:monospace" step="0.01" placeholder="0.00">
+                <button class="btn btn-ghost btn-sm" id="btn-rec-save-balance">Guardar</button>
+              </div>
+            </div>
+            <div style="padding:14px 20px;border-radius:8px;border:2px solid var(--border);background:var(--surface);min-width:180px">
+              <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Diferencia</div>
+              <div id="rec-diff" style="font-size:1.3rem;font-weight:700;font-family:monospace">—</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+            <!-- System side -->
+            <div>
+              <div style="font-weight:600;margin-bottom:8px;font-size:.9rem">Movimientos del sistema</div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr>
+                    <th style="width:90px">Fecha</th>
+                    <th>Descripción</th>
+                    <th class="text-right" style="width:110px">Monto</th>
+                    <th style="width:60px" class="text-center">✓</th>
+                  </tr></thead>
+                  <tbody id="rec-system-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+            <!-- Bank statement side -->
+            <div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span style="font-weight:600;font-size:.9rem">Extracto bancario</span>
+                <button class="btn btn-ghost btn-sm" id="btn-rec-add-line">+ Agregar línea</button>
+              </div>
+              <div id="rec-add-line-form" class="hidden" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--surface)">
+                <div class="form-grid-2" style="gap:8px">
+                  <div class="field" style="margin:0"><label class="label" style="font-size:.8rem">Fecha</label><input type="date" id="rec-line-date" class="input"></div>
+                  <div class="field" style="margin:0"><label class="label" style="font-size:.8rem">Monto (+ingreso / -egreso)</label><input type="number" id="rec-line-amount" class="input" step="0.01" placeholder="0.00"></div>
+                  <div class="field" style="margin:0;grid-column:1/-1"><label class="label" style="font-size:.8rem">Descripción</label><input type="text" id="rec-line-desc" class="input" placeholder="Descripción del movimiento"></div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <button class="btn btn-ghost btn-sm" id="btn-rec-line-cancel">Cancelar</button>
+                  <button class="btn btn-primary btn-sm" id="btn-rec-line-save">Agregar</button>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr>
+                    <th style="width:90px">Fecha</th>
+                    <th>Descripción</th>
+                    <th class="text-right" style="width:110px">Monto</th>
+                    <th style="width:60px" class="text-center">✓</th>
+                    <th style="width:40px"></th>
+                  </tr></thead>
+                  <tbody id="rec-bank-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── CALENDARIO DE PAGOS Y COBROS ── -->
+      <div id="contable-tab-calendario" class="contable-pane hidden">
+        <div class="page-header">
+          <h2 class="page-title">Calendario de Pagos y Cobros</h2>
+          <div style="display:flex;gap:8px">
+            <button class="filter-btn active" data-cal-filter="all">Todos</button>
+            <button class="filter-btn" data-cal-filter="cobros">Cobros</button>
+            <button class="filter-btn" data-cal-filter="pagos">Pagos</button>
+            <button class="btn btn-ghost" id="btn-refresh-calendar">Actualizar</button>
+          </div>
+        </div>
+        <div id="cal-summary" style="display:flex;gap:20px;margin-bottom:20px;flex-wrap:wrap">
+          <div style="padding:12px 18px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">
+            <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Total a cobrar (90 días)</div>
+            <div id="cal-total-cobrar" style="font-size:1.2rem;font-weight:700;color:var(--success)">—</div>
+          </div>
+          <div style="padding:12px 18px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">
+            <div style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Total a pagar (90 días)</div>
+            <div id="cal-total-pagar" style="font-size:1.2rem;font-weight:700;color:var(--error)">—</div>
+          </div>
+        </div>
+        <div id="cal-content"></div>
+      </div>
+
     </div><!-- /section-contable -->
 
   </main><!-- /app-content -->
@@ -1372,6 +1644,29 @@
 
 <!-- Toast -->
 <div id="toast" class="toast hidden"></div>
+
+<!-- ===================================================== MODAL: Ajustar stock -->
+<div id="stock-edit-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header"><h3>Ajustar stock</h3></div>
+    <div class="modal-form-body">
+      <p id="stock-edit-product-name" style="font-weight:600;font-size:1rem;margin-bottom:6px"></p>
+      <p id="stock-edit-prev" style="font-size:.85rem;color:var(--text-muted);margin-bottom:16px"></p>
+      <div class="field">
+        <label class="label required">Nuevo stock</label>
+        <input type="number" id="inp-stock-edit-qty" class="input" min="0" step="0.01" placeholder="0">
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label class="label">Nota (opcional)</label>
+        <input type="text" id="inp-stock-edit-note" class="input" placeholder="Ej: Conteo físico, ajuste por merma…">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-stock-edit-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-stock-edit-save">Guardar</button>
+    </div>
+  </div>
+</div>
 
 <!-- ===================================================== MODAL: Registrar ingreso -->
 <div id="ingreso-modal" class="modal-overlay hidden">
@@ -1796,6 +2091,45 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-deposit-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-deposit-confirm">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Nota Débito/Crédito -->
+<div id="note-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header"><h3 id="note-modal-title">Nueva Nota</h3></div>
+    <div class="modal-form-body">
+      <div class="form-grid-2" style="gap:12px">
+        <div class="field" style="margin:0">
+          <label class="label required">Tipo</label>
+          <select id="inp-note-type" class="input select">
+            <option value="debito">Nota de Débito (suma al saldo)</option>
+            <option value="credito">Nota de Crédito (resta al saldo)</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0">
+          <label class="label required">Fecha</label>
+          <input type="date" id="inp-note-date" class="input">
+        </div>
+        <div class="field" style="margin:0;grid-column:1/-1">
+          <label class="label required">Descripción</label>
+          <input type="text" id="inp-note-desc" class="input" placeholder="Concepto de la nota">
+        </div>
+        <div class="field" style="margin:0">
+          <label class="label required">Monto</label>
+          <input type="number" id="inp-note-amount" class="input" min="0.01" step="0.01" placeholder="0.00">
+        </div>
+        <div class="field" style="margin:0">
+          <label class="label">Referencia</label>
+          <input type="text" id="inp-note-ref" class="input" placeholder="Opcional">
+        </div>
+      </div>
+      <p id="note-modal-hint" style="margin-top:12px;font-size:.82rem;color:var(--text-muted)"></p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-note-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-note-save">Guardar nota</button>
     </div>
   </div>
 </div>

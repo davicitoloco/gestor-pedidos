@@ -1081,6 +1081,26 @@ async function loadAccount() {
         </tr>`;
       }).join('');
     }
+    // Notas de débito/crédito
+    const ntbody = $('account-notes-tbody');
+    if (!data.notes || !data.notes.length) {
+      ntbody.innerHTML = '';
+      $('no-account-notes').classList.remove('hidden');
+    } else {
+      $('no-account-notes').classList.add('hidden');
+      ntbody.innerHTML = data.notes.map(n => `<tr>
+        <td>${fmtDate(n.date)}</td>
+        <td><span class="badge ${n.note_type==='debito'?'badge-warning':'badge-success'}">${n.note_type==='debito'?'Débito':'Crédito'}</span></td>
+        <td>${esc(n.description)}</td>
+        <td style="color:var(--text-muted);font-size:.82rem">${esc(n.reference||'—')}</td>
+        <td class="text-right" style="font-weight:600;color:${n.note_type==='debito'?'var(--error)':'var(--success)'}">${fmtMoney(n.amount)}</td>
+        <td class="text-center">
+          <button class="btn-icon btn-delete" onclick="deleteNote(${n.id},'customer',${n.entity_id})" title="Eliminar">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+          </button>
+        </td>
+      </tr>`).join('');
+    }
     // Reapply admin-only visibility
     document.querySelectorAll('#clients-account-view .admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
   } catch (err) { toast(err.message, 'error'); }
@@ -1565,14 +1585,35 @@ $('btn-import-clients-confirm').addEventListener('click', async () => {
 
 /* ================================================================ STOCK */
 
-function stockBadge(stock, stock_min) {
-  if (stock === 0)
-    return `<span class="badge badge-stock-out">Sin stock</span>`;
-  if (stock_min > 0 && stock <= stock_min)
-    return `<span class="badge badge-stock-low">${stock}</span>`;
-  return `<span class="badge badge-stock-ok">${stock}</span>`;
+// ── Tab navigation ─────────────────────────────────────────────────────────────
+function showStockTab(tab) {
+  document.querySelectorAll('.stock-tab').forEach(b => b.classList.toggle('active', b.dataset.stockTab === tab));
+  $('stock-tab-lista').classList.toggle('hidden', tab !== 'lista');
+  $('stock-tab-historial').classList.toggle('hidden', tab !== 'historial');
+}
+document.querySelectorAll('.stock-tab').forEach(b => {
+  b.addEventListener('click', () => {
+    showStockTab(b.dataset.stockTab);
+    if (b.dataset.stockTab === 'historial') loadStockHistory(1);
+  });
+});
+$('btn-refresh-stock').addEventListener('click', loadStock);
+$('btn-refresh-stock-hist').addEventListener('click', () => loadStockHistory(1));
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const TYPE_LABEL = {
+  ingreso:        { label: 'Ingreso',   cls: 'badge-stock-ok'  },
+  ajuste_entrada: { label: 'Ajuste +',  cls: 'badge-info'      },
+  ajuste_salida:  { label: 'Ajuste −',  cls: 'badge-stock-low' },
+  egreso:         { label: 'Egreso',    cls: 'badge-stock-out' },
+  venta:          { label: 'Venta',     cls: 'badge-stock-out' },
+};
+function movTypeBadge(type) {
+  const t = TYPE_LABEL[type] || { label: type, cls: 'badge-default' };
+  return `<span class="badge ${t.cls}">${t.label}</span>`;
 }
 
+// ── Main list ─────────────────────────────────────────────────────────────────
 async function loadStock() {
   try {
     const [products, alerts] = await Promise.all([
@@ -1599,32 +1640,36 @@ function renderStockAlertsBanner(alerts) {
 function renderStock(products) {
   const tbody = $('stock-tbody');
   const noEl  = $('no-stock');
-  $('stock-count').textContent = `${products.length} producto${products.length !== 1 ? 's' : ''}`;
+  $('stock-count').textContent = `${products.length} artículo${products.length !== 1 ? 's' : ''}`;
 
   if (!products.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
   noEl.classList.add('hidden');
 
   tbody.innerHTML = products.map(p => {
-    const isLow  = p.stock_min > 0 && p.stock <= p.stock_min && p.stock > 0;
-    const isOut  = p.stock === 0;
-    const rowCls = isOut ? 'stock-critical' : isLow ? 'stock-low' : '';
+    const diff    = p.difference;
+    const diffFmt = diff < 0
+      ? `<span style="color:var(--error);font-weight:700">${diff}</span>`
+      : `<span style="color:var(--success);font-weight:700">${diff >= 0 ? '+' : ''}${diff}</span>`;
+    const lastUpd = p.last_updated
+      ? `<span style="font-size:.8rem">${fmtDate(p.last_updated)}</span>${p.last_updated_by ? `<br><span style="font-size:.75rem;color:var(--text-muted)">${esc(p.last_updated_by)}</span>` : ''}`
+      : '<span style="color:var(--text-muted);font-size:.8rem">—</span>';
+    const rowCls = diff < 0 ? 'stock-critical' : (p.stock_min > 0 && p.stock <= p.stock_min && p.stock > 0 ? 'stock-low' : '');
     return `<tr class="${rowCls}">
       <td style="font-weight:500">${esc(p.name)}</td>
       <td class="text-center" style="font-weight:700;font-size:1.05rem">${p.stock}</td>
-      <td class="text-center" style="color:var(--text-muted)">${p.stock_min || '—'}</td>
-      <td class="text-center">${stockBadge(p.stock, p.stock_min)}</td>
-      <td class="text-center" style="white-space:nowrap">
-        <button class="btn-icon" onclick="openIngresoModal(${p.id})" title="Registrar ingreso">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-        <button class="btn-icon" onclick="openMovementsModal(${p.id},'${esc(p.name)}')" title="Ver historial">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
+      <td class="text-center" style="color:var(--text-muted)">${p.pending_orders > 0 ? `<strong>${p.pending_orders}</strong>` : '—'}</td>
+      <td class="text-center">${diffFmt}</td>
+      <td>${lastUpd}</td>
+      <td class="text-center">
+        <button class="btn-icon" onclick="openStockEditModal(${p.id},'${esc(p.name)}',${p.stock})" title="Ajustar stock">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
       </td>
     </tr>`;
   }).join('');
 }
 
+// ── Ingreso modal (kept as-is) ────────────────────────────────────────────────
 $('btn-new-ingreso').addEventListener('click', () => openIngresoModal(null));
 
 window.openIngresoModal = async function(productId) {
@@ -1662,6 +1707,40 @@ $('btn-ingreso-confirm').addEventListener('click', async () => {
   finally { btn.disabled = false; }
 });
 
+// ── Edit (ajuste manual) modal ────────────────────────────────────────────────
+let _stockEditId = null;
+
+window.openStockEditModal = function(id, name, currentStock) {
+  _stockEditId = id;
+  $('stock-edit-product-name').textContent = name;
+  $('stock-edit-prev').textContent = `Stock actual: ${currentStock}`;
+  $('inp-stock-edit-qty').value  = currentStock;
+  $('inp-stock-edit-note').value = '';
+  $('stock-edit-modal').classList.remove('hidden');
+  setTimeout(() => { $('inp-stock-edit-qty').focus(); $('inp-stock-edit-qty').select(); }, 50);
+};
+
+$('btn-stock-edit-cancel').addEventListener('click', () => $('stock-edit-modal').classList.add('hidden'));
+$('stock-edit-modal').addEventListener('click', e => { if (e.target === $('stock-edit-modal')) $('stock-edit-modal').classList.add('hidden'); });
+
+$('btn-stock-edit-save').addEventListener('click', async () => {
+  if (!_stockEditId) return;
+  const quantity = parseFloat($('inp-stock-edit-qty').value);
+  const note     = $('inp-stock-edit-note').value.trim();
+  if (isNaN(quantity) || quantity < 0) { toast('Ingresá una cantidad válida (≥ 0)', 'error'); return; }
+  const btn = $('btn-stock-edit-save');
+  btn.disabled = true;
+  try {
+    await api('PUT', `/stock/${_stockEditId}`, { quantity, note });
+    $('stock-edit-modal').classList.add('hidden');
+    toast('Stock actualizado', 'success');
+    loadStock();
+    await loadProductCatalog();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+// ── Per-product movements modal (kept for catalog use) ────────────────────────
 window.openMovementsModal = async function(productId, productName) {
   $('movements-modal-title').textContent = `Historial — ${productName}`;
   $('movements-modal').classList.remove('hidden');
@@ -1677,13 +1756,9 @@ window.openMovementsModal = async function(productId, productName) {
     $('movements-tbody').innerHTML = data.movements.map(m => `
       <tr>
         <td style="color:var(--text-muted)">${fmtDateTime(m.created_at)}</td>
-        <td class="text-center">
-          ${m.type === 'ingreso'
-            ? '<span class="badge badge-stock-ok">Ingreso</span>'
-            : '<span class="badge badge-stock-out">Egreso</span>'}
-        </td>
+        <td class="text-center">${movTypeBadge(m.type)}</td>
         <td class="text-center" style="font-weight:600">${m.quantity}</td>
-        <td style="font-size:.85rem">${esc(m.reference || m.notes || '—')}</td>
+        <td style="font-size:.85rem">${esc(m.notes || '—')}</td>
         <td style="color:var(--text-muted);font-size:.83rem">${esc(m.user_name || '—')}</td>
       </tr>
     `).join('');
@@ -1692,6 +1767,64 @@ window.openMovementsModal = async function(productId, productName) {
 
 $('btn-movements-close').addEventListener('click', () => $('movements-modal').classList.add('hidden'));
 $('movements-modal').addEventListener('click', e => { if (e.target === $('movements-modal')) $('movements-modal').classList.add('hidden'); });
+
+// ── Historial global ──────────────────────────────────────────────────────────
+let _histPage    = 1;
+let _histFilters = {};
+
+async function loadStockHistory(page = 1) {
+  _histPage = page;
+  // Populate product filter if empty
+  const sel = $('hist-product-filter');
+  if (sel.options.length <= 1) {
+    try {
+      const products = await api('GET', '/stock');
+      sel.innerHTML = '<option value="">Todos los artículos</option>' +
+        products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    } catch(e) {}
+  }
+
+  try {
+    const params = new URLSearchParams({ page, per_page: 50, ..._histFilters });
+    const data   = await api('GET', `/stock/movements?${params}`);
+    $('hist-tbody').innerHTML = data.movements.length ? data.movements.map(m => `
+      <tr>
+        <td style="color:var(--text-muted);font-size:.85rem">${fmtDateTime(m.created_at)}</td>
+        <td style="font-weight:500">${esc(m.product_name)}</td>
+        <td class="text-center">${movTypeBadge(m.type)}</td>
+        <td class="text-right" style="font-weight:600">${m.quantity}</td>
+        <td class="text-right" style="color:var(--text-muted)">${m.previous_qty != null ? m.previous_qty : '—'}</td>
+        <td class="text-right" style="color:var(--text-muted)">${m.new_qty != null ? m.new_qty : '—'}</td>
+        <td style="font-size:.83rem;color:var(--text-muted)">${esc(m.notes || '—')}</td>
+        <td style="font-size:.82rem;color:var(--text-muted)">${esc(m.user_name || '—')}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Sin movimientos en el período</td></tr>';
+
+    const pages = Math.ceil(data.total / data.per_page);
+    $('hist-pagination').innerHTML = pages <= 1 ? '' : `
+      <button class="btn btn-ghost btn-sm" ${page <= 1 ? 'disabled' : ''} onclick="loadStockHistory(${page-1})">← Ant.</button>
+      <span style="font-size:.85rem;color:var(--text-muted)">Pág. ${page} / ${pages} · ${data.total} registros</span>
+      <button class="btn btn-ghost btn-sm" ${page >= pages ? 'disabled' : ''} onclick="loadStockHistory(${page+1})">Sig. →</button>`;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-hist-filter').addEventListener('click', () => {
+  _histFilters = {};
+  const pid = $('hist-product-filter').value;
+  const df  = $('hist-date-from').value;
+  const dt  = $('hist-date-to').value;
+  if (pid) _histFilters.product_id = pid;
+  if (df)  _histFilters.date_from  = df;
+  if (dt)  _histFilters.date_to    = dt;
+  loadStockHistory(1);
+});
+$('btn-hist-clear').addEventListener('click', () => {
+  _histFilters = {};
+  $('hist-product-filter').value = '';
+  $('hist-date-from').value = '';
+  $('hist-date-to').value   = '';
+  loadStockHistory(1);
+});
 
 window.deleteDelivery = async function(orderId, delivId, num) {
   if (!await confirm(`¿Cancelar la Entrega #${num}? El stock de los productos se va a restaurar.`)) return;
@@ -1741,6 +1874,10 @@ document.querySelectorAll('.contable-tab').forEach(b => {
     if (tab === 'asientos')   loadManualEntries();
     if (tab === 'balance')    {}
     if (tab === 'resultados') {}
+    if (tab === 'libro-mayor')   loadLibroMayorAccounts();
+    if (tab === 'cierres')       loadCierres();
+    if (tab === 'conciliacion')  loadRecBankAccounts();
+    if (tab === 'calendario')    loadCalendar();
   });
 });
 
@@ -1892,6 +2029,14 @@ window.openSupplierAccount = async function(id) {
         <td>${esc(p.notes || '—')}</td>
         <td class="text-center"><button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteSupplierPayment(${p.id})">Eliminar</button></td>
       </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">Sin pagos</td></tr>';
+    $('sup-notes-tbody').innerHTML = d.notes && d.notes.length ? d.notes.map(n => `
+      <tr>
+        <td>${fmtDate(n.date)}</td>
+        <td><span class="badge ${n.note_type==='debito'?'badge-warning':'badge-success'}">${n.note_type==='debito'?'Débito':'Crédito'}</span></td>
+        <td>${esc(n.description)}</td>
+        <td class="text-right" style="font-weight:600;color:${n.note_type==='credito'?'var(--success)':'var(--error)'}">${fmtMoney(n.amount)}</td>
+        <td class="text-center"><button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteNote(${n.id},'supplier',${n.entity_id})">✕</button></td>
+      </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--text-muted)">Sin notas</td></tr>';
   } catch (err) { toast(err.message, 'error'); }
 };
 
@@ -2922,6 +3067,402 @@ $('am-save').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+
+/* ================================================================ LIBRO MAYOR */
+
+async function loadLibroMayorAccounts() {
+  try {
+    const accounts = await api('GET', '/accounting/accounts');
+    const sel = $('lm-account-select');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— Seleccioná una cuenta —</option>' +
+      accounts.filter(a => a.accepts_movements).map(a =>
+        `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`
+      ).join('');
+    if (cur) sel.value = cur;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-load-lm').addEventListener('click', loadLibroMayor);
+
+async function loadLibroMayor() {
+  const accountId = $('lm-account-select').value;
+  if (!accountId) { toast('Seleccioná una cuenta', 'error'); return; }
+  const df = $('lm-date-from').value;
+  const dt = $('lm-date-to').value;
+  const params = new URLSearchParams({ account_id: accountId });
+  if (df) params.set('date_from', df);
+  if (dt) params.set('date_to', dt);
+  try {
+    const d = await api('GET', `/accounting/ledger?${params}`);
+    const isDebitNormal = ['Activo','Costo','Gasto'].includes(d.account.type);
+
+    $('lm-summary').classList.remove('hidden');
+    $('lm-opening').textContent = fmtMoney(d.opening_balance);
+    $('lm-opening').style.color = d.opening_balance < 0 ? 'var(--error)' : '';
+    $('lm-closing').textContent = fmtMoney(d.closing_balance);
+    $('lm-closing').style.color = d.closing_balance < 0 ? 'var(--error)' : 'var(--primary)';
+    const totalD = d.rows.reduce((s,r) => s + r.debit, 0);
+    const totalC = d.rows.reduce((s,r) => s + r.credit, 0);
+    $('lm-total-debit').textContent  = fmtMoney(totalD);
+    $('lm-total-credit').textContent = fmtMoney(totalC);
+
+    const openingRow = df ? `<tr style="background:var(--surface-2,#f8f8f8);font-style:italic">
+      <td colspan="5" style="color:var(--text-muted);font-size:.85rem">Saldo inicial al ${fmtDate(df)}</td>
+      <td class="text-right" style="font-weight:600">${fmtMoney(d.opening_balance)}</td>
+    </tr>` : '';
+
+    $('lm-tbody').innerHTML = openingRow + (d.rows.length ? d.rows.map(r => `
+      <tr>
+        <td>${fmtDate(r.date)}</td>
+        <td>${esc(r.description)}${r.line_description ? `<br><span style="font-size:.8rem;color:var(--text-muted)">${esc(r.line_description)}</span>` : ''}</td>
+        <td style="font-size:.78rem;color:var(--text-muted)">${esc(r.ref_type||'')}</td>
+        <td class="text-right">${r.debit  > 0 ? fmtMoney(r.debit)  : ''}</td>
+        <td class="text-right">${r.credit > 0 ? fmtMoney(r.credit) : ''}</td>
+        <td class="text-right" style="font-weight:600;${r.balance < 0 ? 'color:var(--error)' : ''}">${fmtMoney(r.balance)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin movimientos en el período</td></tr>');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ================================================================ CIERRES CONTABLES */
+
+async function loadCierres() {
+  try {
+    const rows = await api('GET', '/accounting/closes');
+    $('closes-tbody').innerHTML = rows.length ? rows.map(r => `
+      <tr>
+        <td style="font-weight:600;font-family:monospace">${esc(r.period)}</td>
+        <td>${fmtDateTime(r.closed_at)}</td>
+        <td>${esc(r.closed_by_name || '—')}</td>
+        <td class="text-center">
+          <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="reopenPeriod(${r.id},'${esc(r.period)}')">Reabrir</button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted)">Sin períodos cerrados</td></tr>';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-new-close').addEventListener('click', () => {
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  $('inp-close-period').value = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
+  $('close-form-wrap').classList.remove('hidden');
+});
+$('btn-close-cancel').addEventListener('click', () => $('close-form-wrap').classList.add('hidden'));
+$('btn-close-confirm').addEventListener('click', async () => {
+  const period = $('inp-close-period').value;
+  if (!period) { toast('Seleccioná un período', 'error'); return; }
+  if (!await confirm(`¿Cerrar el período ${period}? Los asientos de ese mes no podrán crearse ni modificarse.`)) return;
+  const btn = $('btn-close-confirm');
+  btn.disabled = true;
+  try {
+    await api('POST', '/accounting/closes', { period });
+    toast(`Período ${period} cerrado`, 'success');
+    $('close-form-wrap').classList.add('hidden');
+    loadCierres();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.reopenPeriod = async function(id, period) {
+  if (!await confirm(`¿Reabrir el período ${period}? Los asientos volverán a poder modificarse.`)) return;
+  try {
+    await api('DELETE', `/accounting/closes/${id}`);
+    toast(`Período ${period} reabierto`, 'success');
+    loadCierres();
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+/* ================================================================ CONCILIACIÓN BANCARIA */
+
+let _recId = null;
+
+async function loadRecBankAccounts() {
+  try {
+    const accounts = await api('GET', '/bank/accounts');
+    $('rec-bank-select').innerHTML = '<option value="">— Seleccioná —</option>' +
+      accounts.filter(a => a.active).map(a =>
+        `<option value="${a.id}">${esc(a.name)}${a.bank ? ' — '+a.bank : ''}</option>`
+      ).join('');
+    if (!$('rec-period').value) {
+      const now = new Date();
+      $('rec-period').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    }
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-load-rec').addEventListener('click', loadReconciliation);
+
+async function loadReconciliation() {
+  const bankId = $('rec-bank-select').value;
+  const period = $('rec-period').value;
+  if (!bankId || !period) { toast('Seleccioná cuenta y período', 'error'); return; }
+  const [year, month] = period.split('-');
+  try {
+    const d = await api('GET', `/accounting/reconciliation?bank_account_id=${bankId}&year=${year}&month=${month}`);
+    _recId = d.reconciliation.id;
+    $('rec-bank-balance-inp').value = d.reconciliation.bank_balance || '';
+    $('rec-system-balance').textContent = fmtMoney(d.system_balance);
+    updateRecDiff(d.system_balance, d.reconciliation.bank_balance);
+    renderRecSystemMovements(d.system_movements, d.reconciliation.id);
+    renderRecBankLines(d.bank_lines, d.reconciliation.id);
+    $('rec-content').classList.remove('hidden');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function updateRecDiff(sysBalance, bankBalance) {
+  const diff = (bankBalance || 0) - sysBalance;
+  const el = $('rec-diff');
+  el.textContent = fmtMoney(diff);
+  el.style.color = Math.abs(diff) < 0.01 ? 'var(--success)' : 'var(--error)';
+}
+
+$('btn-rec-save-balance').addEventListener('click', async () => {
+  if (!_recId) return;
+  const val = parseFloat($('rec-bank-balance-inp').value) || 0;
+  try {
+    const sysText = $('rec-system-balance').textContent;
+    await api('PUT', `/accounting/reconciliation/${_recId}`, { bank_balance: val });
+    const sysBalance = parseFloat(sysText.replace(/[^\d.,-]/g,'').replace(',','.')) || 0;
+    updateRecDiff(parseFloat($('rec-system-balance').textContent.replace(/[$.\s]/g,'').replace(',','.'))||0, val);
+    toast('Saldo bancario actualizado', 'success');
+    loadReconciliation();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+function renderRecSystemMovements(movements, recId) {
+  $('rec-system-tbody').innerHTML = movements.length ? movements.map(m => {
+    const amt = m.type === 'ingreso' ? m.amount : -m.amount;
+    return `<tr style="${m.is_reconciled ? 'opacity:.5;text-decoration:line-through' : ''}">
+      <td>${fmtDate(m.created_at)}</td>
+      <td style="font-size:.82rem">${esc(m.description||m.ref_type||'—')}</td>
+      <td class="text-right" style="font-weight:600;color:${amt>=0?'var(--success)':'var(--error)'}">${fmtMoney(Math.abs(m.amount))} ${amt>=0?'↑':'↓'}</td>
+      <td class="text-center">
+        <input type="checkbox" ${m.is_reconciled?'checked':''} onchange="toggleRecMark(${m.id},this.checked)">
+      </td>
+    </tr>`;
+  }).join('')
+  : '<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text-muted)">Sin movimientos en el período</td></tr>';
+}
+
+function renderRecBankLines(lines, recId) {
+  $('rec-bank-tbody').innerHTML = lines.length ? lines.map(l => `
+    <tr style="${l.is_reconciled ? 'opacity:.5;text-decoration:line-through' : ''}">
+      <td>${fmtDate(l.date)}</td>
+      <td style="font-size:.82rem">${esc(l.description||'—')}</td>
+      <td class="text-right" style="font-weight:600;color:${l.amount>=0?'var(--success)':'var(--error)'}">${fmtMoney(Math.abs(l.amount))} ${l.amount>=0?'↑':'↓'}</td>
+      <td class="text-center">
+        <input type="checkbox" ${l.is_reconciled?'checked':''} onchange="toggleRecBankLine(${l.id},this.checked)">
+      </td>
+      <td class="text-center">
+        <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteRecBankLine(${l.id})">✕</button>
+      </td>
+    </tr>`).join('')
+  : '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">Sin líneas del extracto</td></tr>';
+}
+
+window.toggleRecMark = async function(movementId, mark) {
+  if (!_recId) return;
+  try { await api('POST', `/accounting/reconciliation/${_recId}/mark`, { movement_id: movementId, mark }); }
+  catch (err) { toast(err.message, 'error'); loadReconciliation(); }
+};
+
+window.toggleRecBankLine = async function(lineId, is_reconciled) {
+  if (!_recId) return;
+  try { await api('PUT', `/accounting/reconciliation/${_recId}/bank-line/${lineId}`, { is_reconciled }); }
+  catch (err) { toast(err.message, 'error'); loadReconciliation(); }
+};
+
+window.deleteRecBankLine = async function(lineId) {
+  if (!_recId) return;
+  if (!await confirm('¿Eliminar esta línea del extracto?')) return;
+  try {
+    await api('DELETE', `/accounting/reconciliation/${_recId}/bank-line/${lineId}`);
+    loadReconciliation();
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+$('btn-rec-add-line').addEventListener('click', () => {
+  $('rec-add-line-form').classList.remove('hidden');
+  $('rec-line-date').value = new Date().toISOString().slice(0,10);
+  $('rec-line-amount').value = '';
+  $('rec-line-desc').value = '';
+});
+$('btn-rec-line-cancel').addEventListener('click', () => $('rec-add-line-form').classList.add('hidden'));
+$('btn-rec-line-save').addEventListener('click', async () => {
+  if (!_recId) return;
+  const date   = $('rec-line-date').value;
+  const amount = parseFloat($('rec-line-amount').value);
+  const desc   = $('rec-line-desc').value.trim();
+  if (!date || isNaN(amount)) { toast('Fecha y monto requeridos', 'error'); return; }
+  try {
+    await api('POST', `/accounting/reconciliation/${_recId}/bank-line`, { date, description: desc, amount });
+    $('rec-add-line-form').classList.add('hidden');
+    loadReconciliation();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+/* ================================================================ CALENDARIO */
+
+let _calFilter = 'all';
+
+document.querySelectorAll('[data-cal-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-cal-filter]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _calFilter = btn.dataset.calFilter;
+    loadCalendar();
+  });
+});
+$('btn-refresh-calendar').addEventListener('click', loadCalendar);
+
+async function loadCalendar() {
+  try {
+    const d = await api('GET', `/accounting/calendar?days=90&type=${_calFilter}`);
+    const today = d.today;
+    const sevenDaysOut = new Date(Date.now() + 7 * 86400000).toISOString().slice(0,10);
+
+    // Summary
+    const totalCobrar = d.events.filter(e => ['cheque_cobrar','cliente_deuda'].includes(e.event_type))
+      .reduce((s,e) => s + (e.amount||0), 0);
+    const totalPagar  = d.events.filter(e => ['cheque_pagar','proveedor_deuda'].includes(e.event_type))
+      .reduce((s,e) => s + (e.amount||0), 0);
+    $('cal-total-cobrar').textContent = fmtMoney(totalCobrar);
+    $('cal-total-pagar').textContent  = fmtMoney(totalPagar);
+
+    if (!d.events.length) {
+      $('cal-content').innerHTML = '<p style="color:var(--text-muted);padding:20px 0">Sin eventos en los próximos 90 días</p>';
+      return;
+    }
+
+    // Group by week
+    const weeks = {};
+    d.events.forEach(e => {
+      const dt = new Date(e.date + 'T00:00:00');
+      // Find Monday of the week
+      const day = dt.getDay() || 7;
+      const mon = new Date(dt); mon.setDate(dt.getDate() - day + 1);
+      const key = mon.toISOString().slice(0,10);
+      if (!weeks[key]) weeks[key] = [];
+      weeks[key].push(e);
+    });
+
+    const typeLabel = { cheque_cobrar: 'Cheque a cobrar', cheque_pagar: 'Cheque a pagar', cliente_deuda: 'Saldo cliente', proveedor_deuda: 'Deuda proveedor' };
+    const typeColor = { cheque_cobrar: 'var(--success)', cheque_pagar: 'var(--error)', cliente_deuda: 'var(--success)', proveedor_deuda: 'var(--error)' };
+
+    $('cal-content').innerHTML = Object.keys(weeks).sort().map(weekKey => {
+      const events = weeks[weekKey];
+      const weekEnd = new Date(weekKey); weekEnd.setDate(weekEnd.getDate()+6);
+      const weekLabel = `Semana del ${fmtDate(weekKey)} al ${fmtDate(weekEnd.toISOString().slice(0,10))}`;
+      const weekCobrar = events.filter(e => ['cheque_cobrar','cliente_deuda'].includes(e.event_type)).reduce((s,e) => s+e.amount,0);
+      const weekPagar  = events.filter(e => ['cheque_pagar','proveedor_deuda'].includes(e.event_type)).reduce((s,e) => s+e.amount,0);
+
+      const rows = events.map(e => {
+        const isUrgent = e.date <= sevenDaysOut && e.date >= today;
+        return `<tr style="${isUrgent ? 'background:#fef9c3' : ''}">
+          <td>${fmtDate(e.date)}${isUrgent ? ' <span style="color:#b45309;font-size:.75rem;font-weight:600">⚡</span>' : ''}</td>
+          <td><span style="color:${typeColor[e.event_type]};font-weight:600;font-size:.82rem">${esc(typeLabel[e.event_type]||e.event_type)}</span></td>
+          <td>${esc(e.description)}</td>
+          <td>${esc(e.entity_name||'—')}</td>
+          <td class="text-right" style="font-weight:600;color:${typeColor[e.event_type]}">${fmtMoney(e.amount)}</td>
+        </tr>`;
+      }).join('');
+
+      return `<div style="margin-bottom:20px">
+        <div style="font-weight:700;font-size:.9rem;padding:8px 12px;background:var(--surface-2,#f8f8f8);border-radius:6px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+          <span>${weekLabel}</span>
+          <span style="font-size:.82rem;font-weight:400;color:var(--text-muted)">
+            <span style="color:var(--success)">A cobrar: ${fmtMoney(weekCobrar)}</span>&nbsp;·&nbsp;
+            <span style="color:var(--error)">A pagar: ${fmtMoney(weekPagar)}</span>
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th style="width:110px">Fecha</th><th style="width:140px">Tipo</th><th>Descripción</th><th style="width:160px">Entidad</th><th class="text-right" style="width:120px">Monto</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ================================================================ NOTAS DE DÉBITO/CRÉDITO */
+
+let _noteEntityType = null;
+let _noteEntityId   = null;
+
+// Open from client account
+$('btn-new-client-note').addEventListener('click', () => {
+  if (!_accountCustomerId) return;
+  openNoteModal('customer', _accountCustomerId);
+});
+
+// Open from supplier account (wired after supplier functions)
+$('btn-new-sup-note').addEventListener('click', () => {
+  if (!currentSupplierId) return;
+  openNoteModal('supplier', currentSupplierId);
+});
+
+function openNoteModal(entityType, entityId) {
+  _noteEntityType = entityType;
+  _noteEntityId   = entityId;
+  const label = entityType === 'customer' ? 'cliente' : 'proveedor';
+  $('note-modal-title').textContent = `Nueva nota — ${label}`;
+  $('inp-note-type').value = 'debito';
+  $('inp-note-date').value = new Date().toISOString().slice(0,10);
+  $('inp-note-desc').value = '';
+  $('inp-note-amount').value = '';
+  $('inp-note-ref').value = '';
+  updateNoteHint();
+  $('note-modal').classList.remove('hidden');
+}
+
+function updateNoteHint() {
+  const type = $('inp-note-type').value;
+  const entity = _noteEntityType === 'customer' ? 'cliente' : 'proveedor';
+  $('note-modal-hint').textContent = type === 'debito'
+    ? `Nota de Débito: aumenta lo que el ${entity} debe.`
+    : `Nota de Crédito: reduce lo que el ${entity} debe.`;
+}
+$('inp-note-type').addEventListener('change', updateNoteHint);
+
+$('btn-note-cancel').addEventListener('click', () => $('note-modal').classList.add('hidden'));
+$('note-modal').addEventListener('click', e => { if (e.target === $('note-modal')) $('note-modal').classList.add('hidden'); });
+
+$('btn-note-save').addEventListener('click', async () => {
+  const desc   = $('inp-note-desc').value.trim();
+  const amount = parseFloat($('inp-note-amount').value);
+  const date   = $('inp-note-date').value;
+  const type   = $('inp-note-type').value;
+  const ref    = $('inp-note-ref').value.trim();
+  if (!desc) { toast('Descripción requerida', 'error'); return; }
+  if (!amount || amount <= 0) { toast('Monto inválido', 'error'); return; }
+  const btn = $('btn-note-save');
+  btn.disabled = true;
+  try {
+    await api('POST', '/accounting/notes', {
+      entity_type: _noteEntityType, entity_id: _noteEntityId,
+      note_type: type, date, description: desc, amount, reference: ref
+    });
+    toast('Nota guardada', 'success');
+    $('note-modal').classList.add('hidden');
+    if (_noteEntityType === 'customer') loadAccount();
+    else openSupplierAccount(_noteEntityId);
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.deleteNote = async function(id, entityType, entityId) {
+  if (!await confirm('¿Eliminar esta nota? Se generará un contra-asiento contable automáticamente.')) return;
+  try {
+    await api('DELETE', `/accounting/notes/${id}`);
+    toast('Nota eliminada', 'success');
+    if (entityType === 'customer') loadAccount();
+    else openSupplierAccount(entityId);
+  } catch (err) { toast(err.message, 'error'); }
+};
 
 /* ================================================================ INIT */
 checkAuth();

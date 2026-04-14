@@ -243,6 +243,49 @@ db.exec(`
     debit REAL NOT NULL DEFAULT 0,
     credit REAL NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS accounting_closes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period TEXT UNIQUE NOT NULL,
+    closed_at TEXT DEFAULT (datetime('now','localtime')),
+    closed_by INTEGER REFERENCES users(id)
+  );
+  CREATE TABLE IF NOT EXISTS bank_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id),
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    bank_balance REAL NOT NULL DEFAULT 0,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(bank_account_id, year, month)
+  );
+  CREATE TABLE IF NOT EXISTS bank_reconciliation_marks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reconciliation_id INTEGER NOT NULL REFERENCES bank_reconciliations(id) ON DELETE CASCADE,
+    movement_id INTEGER NOT NULL,
+    UNIQUE(reconciliation_id, movement_id)
+  );
+  CREATE TABLE IF NOT EXISTS bank_reconciliation_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reconciliation_id INTEGER NOT NULL REFERENCES bank_reconciliations(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    amount REAL NOT NULL,
+    is_reconciled INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS credit_debit_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    note_type TEXT NOT NULL,
+    date TEXT NOT NULL,
+    description TEXT NOT NULL,
+    amount REAL NOT NULL,
+    reference TEXT NOT NULL DEFAULT '',
+    journal_entry_id INTEGER REFERENCES journal_entries(id),
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
@@ -266,6 +309,8 @@ addColIfMissing('cheques',           'deposited_to',    'INTEGER REFERENCES bank
 addColIfMissing('supplier_payments', 'purchase_id',     'INTEGER REFERENCES purchases(id)');
 addColIfMissing('journal_entries',    'reference',        "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('journal_entry_lines','line_description', "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('stock_movements',    'previous_qty',     'REAL');
+addColIfMissing('stock_movements',    'new_qty',          'REAL');
 
 // Seed plan de cuentas
 {
