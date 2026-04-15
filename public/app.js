@@ -471,6 +471,14 @@ async function loadCatalog() {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+function stockBadge(stock, stock_min) {
+  if (stock === 0)
+    return `<span class="badge badge-stock-out">Sin stock</span>`;
+  if (stock_min > 0 && stock <= stock_min)
+    return `<span class="badge badge-stock-low">${stock}</span>`;
+  return `<span class="badge badge-stock-ok">${stock}</span>`;
+}
+
 function renderCatalog(products) {
   const tbody = $('catalog-tbody');
   const noEl  = $('no-catalog');
