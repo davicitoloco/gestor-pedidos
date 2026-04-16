@@ -23,6 +23,9 @@ function getCompanyName() {
   return r ? r.value : 'Mi Empresa';
 }
 
+// Factor de descuento encadenado para usar en SQL
+const DF = "(1.0 - o.discount/100.0) * (1.0 - COALESCE(o.discount2,0)/100.0) * (1.0 - COALESCE(o.discount3,0)/100.0) * (1.0 - COALESCE(o.discount4,0)/100.0)";
+
 // ── GET /api/reports/stats ───────────────────────────────────────────────────
 router.get('/stats', (req, res) => {
   try {
@@ -43,7 +46,7 @@ router.get('/stats', (req, res) => {
     `).get(monthStart);
 
     const totalSales = db.prepare(`
-      SELECT COALESCE(SUM(sub.t * (1.0 - o.discount/100.0)),0) AS s
+      SELECT COALESCE(SUM(sub.t * ${DF}),0) AS s
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
@@ -94,7 +97,7 @@ router.get('/weekly', (req, res) => {
 
       const row = db.prepare(`
         SELECT COUNT(DISTINCT o.id) AS cnt,
-               COALESCE(SUM(sub.t*(1.0-o.discount/100.0)),0) AS total
+               COALESCE(SUM(sub.t * ${DF}),0) AS total
         FROM orders o
         LEFT JOIN (
           SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
@@ -157,8 +160,8 @@ router.get('/top-customers', (req, res) => {
     const rows = db.prepare(`
       SELECT TRIM(o.customer_name) AS customer_name,
              COUNT(DISTINCT o.id)   AS order_count,
-             COALESCE(SUM(sub.t * (1.0 - o.discount/100.0)), 0) AS total,
-             COALESCE(AVG(sub.t * (1.0 - o.discount/100.0)), 0) AS avg_ticket
+             COALESCE(SUM(sub.t * ${DF}), 0) AS total,
+             COALESCE(AVG(sub.t * ${DF}), 0) AS avg_ticket
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
@@ -226,15 +229,16 @@ router.get('/top-discounts', (req, res) => {
     const rows = db.prepare(`
       SELECT printf('%03d', o.order_sequence) AS order_number,
              o.customer_name,
-             o.discount        AS discount_pct,
+             ROUND((1.0 - ${DF}) * 100.0, 2) AS discount_pct,
              COALESCE(sub.t, 0) AS subtotal,
-             COALESCE(sub.t * (o.discount/100.0), 0) AS discount_amount
+             COALESCE(sub.t * (1.0 - ${DF}), 0) AS discount_amount
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
         FROM order_items GROUP BY order_id
       ) sub ON sub.order_id = o.id
-      WHERE o.discount > 0 AND o.status != 'Cancelado'
+      WHERE (o.discount > 0 OR COALESCE(o.discount2,0) > 0 OR COALESCE(o.discount3,0) > 0 OR COALESCE(o.discount4,0) > 0)
+        AND o.status != 'Cancelado'
         ${rangeClause('o', 'created_at', from, to)}
       ORDER BY discount_amount DESC
       LIMIT ?
@@ -252,8 +256,8 @@ router.get('/top-vendors', (req, res) => {
     const rows = db.prepare(`
       SELECT COALESCE(u.full_name, u.username, 'Sin asignar') AS vendor_name,
              COUNT(DISTINCT o.id) AS order_count,
-             COALESCE(SUM(sub.t * (1.0 - o.discount/100.0)), 0) AS total,
-             COALESCE(AVG(sub.t * (1.0 - o.discount/100.0)), 0) AS avg_ticket
+             COALESCE(SUM(sub.t * ${DF}), 0) AS total,
+             COALESCE(AVG(sub.t * ${DF}), 0) AS avg_ticket
       FROM orders o
       LEFT JOIN users u ON o.created_by = u.id
       LEFT JOIN (
@@ -303,8 +307,8 @@ router.get('/excel', async (req, res) => {
              COALESCE(u.full_name, u.username, '—') AS vendor_name,
              COUNT(oi.id) AS item_count,
              COALESCE(SUM(oi.quantity*oi.unit_price*(1.0-oi.discount/100.0)),0) AS subtotal,
-             o.discount,
-             COALESCE(SUM(oi.quantity*oi.unit_price*(1.0-oi.discount/100.0)),0)*(1.0-o.discount/100.0) AS total,
+             o.discount, o.discount2, o.discount3, o.discount4,
+             COALESCE(SUM(oi.quantity*oi.unit_price*(1.0-oi.discount/100.0)),0)*(1.0-o.discount/100.0)*(1.0-COALESCE(o.discount2,0)/100.0)*(1.0-COALESCE(o.discount3,0)/100.0)*(1.0-COALESCE(o.discount4,0)/100.0) AS total,
              o.delivery_date, o.created_at, o.notes
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
@@ -318,7 +322,7 @@ router.get('/excel', async (req, res) => {
         num: '#' + o.order_number, customer: o.customer_name,
         status: o.status, vendor: o.vendor_name,
         items: o.item_count, subtotal: o.subtotal,
-        disc: o.discount + '%', total: o.total,
+        disc: [o.discount, o.discount2, o.discount3, o.discount4].filter(d => d > 0).join('+') + '%' || '0%', total: o.total,
         delivery: o.delivery_date || '', created: o.created_at, notes: o.notes || ''
       });
       row.getCell('subtotal').numFmt = currency;
@@ -364,7 +368,7 @@ router.get('/excel', async (req, res) => {
       const vendors = db.prepare(`
         SELECT COALESCE(u.full_name, u.username, 'Sin asignar') AS vendor_name,
                COUNT(DISTINCT o.id) AS order_count,
-               COALESCE(SUM(sub.t*(1.0-o.discount/100.0)),0) AS total
+               COALESCE(SUM(sub.t*(1.0-o.discount/100.0)*(1.0-COALESCE(o.discount2,0)/100.0)*(1.0-COALESCE(o.discount3,0)/100.0)*(1.0-COALESCE(o.discount4,0)/100.0)),0) AS total
         FROM orders o
         LEFT JOIN users u ON o.created_by = u.id
         LEFT JOIN (SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t FROM order_items GROUP BY order_id) sub ON sub.order_id = o.id
@@ -398,7 +402,7 @@ router.get('/print', (req, res) => {
     const total = db.prepare(`SELECT COUNT(*) AS c FROM orders o WHERE 1=1 ${vc}`).get().c;
     const monthData = db.prepare(`
       SELECT COUNT(DISTINCT o.id) AS cnt,
-             COALESCE(SUM(sub.t*(1.0-o.discount/100.0)),0) AS sales
+             COALESCE(SUM(sub.t*(1.0-o.discount/100.0)*(1.0-COALESCE(o.discount2,0)/100.0)*(1.0-COALESCE(o.discount3,0)/100.0)*(1.0-COALESCE(o.discount4,0)/100.0)),0) AS sales
       FROM orders o
       LEFT JOIN (SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t FROM order_items GROUP BY order_id) sub ON sub.order_id=o.id
       WHERE o.created_at >= ? AND o.status != 'Cancelado' ${vc}

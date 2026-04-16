@@ -273,7 +273,8 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('inp-status').value       = 'Pendiente';
   $('inp-delivery-date').value = '';
   $('inp-notes').value        = '';
-  $('inp-order-discount').value = '0';
+  $('inp-disc1').value = '0'; $('inp-disc2').value = '0';
+  $('inp-disc3').value = '0'; $('inp-disc4').value = '0';
   $('form-status-badge').innerHTML = '';
   $('btn-export-pdf').classList.add('hidden');
   if ($('inp-vendor-display')) $('inp-vendor-display').value = '';
@@ -286,7 +287,10 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('inp-status').value         = o.status;
       $('inp-delivery-date').value  = o.delivery_date || '';
       $('inp-notes').value          = o.notes || '';
-      $('inp-order-discount').value = o.discount || 0;
+      $('inp-disc1').value = o.discount  || 0;
+      $('inp-disc2').value = o.discount2 || 0;
+      $('inp-disc3').value = o.discount3 || 0;
+      $('inp-disc4').value = o.discount4 || 0;
       $('form-status-badge').innerHTML = statusBadge(o.status);
       $('btn-export-pdf').classList.remove('hidden');
       if ($('inp-vendor-display') && isAdmin()) $('inp-vendor-display').value = o.vendor_name || '—';
@@ -396,13 +400,38 @@ function refreshItem(i) {
 }
 function calcTotals() {
   const subtotal = state.items.reduce((s, it) => s + itemSubtotal(it), 0);
-  const pct      = parseFloat($('inp-order-discount').value) || 0;
-  const discAmt  = subtotal * pct / 100;
-  $('calc-subtotal').textContent = fmtMoney(subtotal);
-  $('calc-discount').textContent = `− ${fmtMoney(discAmt)}`;
-  $('calc-total').textContent    = fmtMoney(subtotal - discAmt);
+  const d1 = parseFloat($('inp-disc1').value) || 0;
+  const d2 = parseFloat($('inp-disc2').value) || 0;
+  const d3 = parseFloat($('inp-disc3').value) || 0;
+  const d4 = parseFloat($('inp-disc4').value) || 0;
+
+  const base1 = subtotal;
+  const amt1  = base1 * d1 / 100;
+  const base2 = base1 - amt1;
+  const amt2  = base2 * d2 / 100;
+  const base3 = base2 - amt2;
+  const amt3  = base3 * d3 / 100;
+  const base4 = base3 - amt3;
+  const amt4  = base4 * d4 / 100;
+
+  const totalDisc  = amt1 + amt2 + amt3 + amt4;
+  const netTotal   = subtotal - totalDisc;
+  const iva        = netTotal * 0.21;
+  const finalTotal = netTotal + iva;
+
+  $('calc-disc1-amt').textContent  = amt1 > 0 ? `− ${fmtMoney(amt1)}` : '—';
+  $('calc-disc2-amt').textContent  = amt2 > 0 ? `− ${fmtMoney(amt2)}` : '—';
+  $('calc-disc3-amt').textContent  = amt3 > 0 ? `− ${fmtMoney(amt3)}` : '—';
+  $('calc-disc4-amt').textContent  = amt4 > 0 ? `− ${fmtMoney(amt4)}` : '—';
+  $('calc-subtotal').textContent   = fmtMoney(subtotal);
+  $('calc-disc-total').textContent = totalDisc > 0 ? `− ${fmtMoney(totalDisc)}` : '—';
+  $('calc-net').textContent        = fmtMoney(netTotal);
+  $('calc-iva').textContent        = fmtMoney(iva);
+  $('calc-total').textContent      = fmtMoney(finalTotal);
 }
-$('inp-order-discount').addEventListener('input', calcTotals);
+['inp-disc1','inp-disc2','inp-disc3','inp-disc4'].forEach(id =>
+  $(id).addEventListener('input', calcTotals)
+);
 
 /* ================================================================ SAVE ORDER */
 $('order-form').addEventListener('submit', async e => {
@@ -415,7 +444,10 @@ $('order-form').addEventListener('submit', async e => {
     status:        $('inp-status').value,
     delivery_date: $('inp-delivery-date').value || null,
     notes:         $('inp-notes').value.trim(),
-    discount:      parseFloat($('inp-order-discount').value) || 0,
+    discount:  parseFloat($('inp-disc1').value) || 0,
+    discount2: parseFloat($('inp-disc2').value) || 0,
+    discount3: parseFloat($('inp-disc3').value) || 0,
+    discount4: parseFloat($('inp-disc4').value) || 0,
     items:         state.items.filter(i => i.product_name.trim())
   };
 

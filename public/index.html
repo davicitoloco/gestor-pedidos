@@ -241,18 +241,28 @@
 
           <div class="card">
             <div class="card-body totals-layout">
-              <div class="field discount-field">
-                <label class="label">Descuento sobre el total del pedido (%)</label>
-                <div class="input-with-suffix">
-                  <input type="number" id="inp-order-discount" class="input" min="0" max="100" step="0.01" value="0">
-                  <span class="suffix">%</span>
-                </div>
+              <div class="discounts-grid">
+                <span class="label" style="grid-column:1/-1;margin-bottom:4px">Descuentos encadenados</span>
+                <span class="label" style="align-self:center">Desc. 1</span>
+                <div class="input-with-suffix"><input type="number" id="inp-disc1" class="input" min="0" max="100" step="0.01" value="0"><span class="suffix">%</span></div>
+                <span id="calc-disc1-amt" class="disc-amt">—</span>
+                <span class="label" style="align-self:center">Desc. 2</span>
+                <div class="input-with-suffix"><input type="number" id="inp-disc2" class="input" min="0" max="100" step="0.01" value="0"><span class="suffix">%</span></div>
+                <span id="calc-disc2-amt" class="disc-amt">—</span>
+                <span class="label" style="align-self:center">Desc. 3</span>
+                <div class="input-with-suffix"><input type="number" id="inp-disc3" class="input" min="0" max="100" step="0.01" value="0"><span class="suffix">%</span></div>
+                <span id="calc-disc3-amt" class="disc-amt">—</span>
+                <span class="label" style="align-self:center">Desc. 4</span>
+                <div class="input-with-suffix"><input type="number" id="inp-disc4" class="input" min="0" max="100" step="0.01" value="0"><span class="suffix">%</span></div>
+                <span id="calc-disc4-amt" class="disc-amt">—</span>
               </div>
               <div class="totals-box">
                 <div class="total-row"><span>Subtotal ítems:</span><span id="calc-subtotal" class="total-value">$ 0,00</span></div>
-                <div class="total-row"><span>Descuento pedido:</span><span id="calc-discount" class="total-value total-discount">− $ 0,00</span></div>
+                <div class="total-row"><span>Total descuentos:</span><span id="calc-disc-total" class="total-value total-discount">—</span></div>
+                <div class="total-row"><span>Total neto:</span><span id="calc-net" class="total-value">$ 0,00</span></div>
+                <div class="total-row"><span>IVA 21%:</span><span id="calc-iva" class="total-value">$ 0,00</span></div>
                 <div class="total-row total-final-row">
-                  <span class="total-label">TOTAL</span>
+                  <span class="total-label">TOTAL FINAL</span>
                   <span id="calc-total" class="total-final">$ 0,00</span>
                 </div>
               </div>

@@ -158,6 +158,8 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .totals-layout{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}
 .discount-field{min-width:250px}
 .discount-field .input{max-width:160px}
+.discounts-grid{display:grid;grid-template-columns:auto 110px 1fr;gap:5px 10px;align-items:center;min-width:260px}
+.disc-amt{font-size:.85rem;color:var(--danger);text-align:right;white-space:nowrap;font-weight:500}
 .totals-box{min-width:260px;display:flex;flex-direction:column;gap:7px}
 .total-row{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;color:var(--text-muted)}
 .total-value{font-weight:500;color:var(--text)}

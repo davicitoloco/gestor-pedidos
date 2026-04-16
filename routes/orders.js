@@ -49,12 +49,16 @@ router.get('/', (req, res) => {
         o.id,
         printf('%03d', o.order_sequence) AS order_number,
         o.customer_name, o.notes, o.delivery_date, o.status,
-        o.discount, o.created_at, o.updated_at,
+        o.discount, o.discount2, o.discount3, o.discount4,
+        o.created_at, o.updated_at,
         COALESCE(u.full_name, u.username)        AS vendor_name,
         COUNT(oi.id)                              AS item_count,
         COALESCE(SUM(oi.quantity * oi.unit_price * (1.0 - oi.discount/100.0)), 0) AS subtotal,
         COALESCE(SUM(oi.quantity * oi.unit_price * (1.0 - oi.discount/100.0)), 0)
-          * (1.0 - o.discount/100.0)              AS total
+          * (1.0 - o.discount/100.0)
+          * (1.0 - COALESCE(o.discount2,0)/100.0)
+          * (1.0 - COALESCE(o.discount3,0)/100.0)
+          * (1.0 - COALESCE(o.discount4,0)/100.0) AS total
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN users u ON o.created_by = u.id
@@ -101,8 +105,22 @@ router.get('/:id/print', (req, res) => {
     const items    = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
     const company  = getCompanyName();
     const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
-    const discAmt  = subtotal * order.discount / 100;
-    const total    = subtotal - discAmt;
+    const d1 = order.discount  || 0;
+    const d2 = order.discount2 || 0;
+    const d3 = order.discount3 || 0;
+    const d4 = order.discount4 || 0;
+    const base1 = subtotal;
+    const amt1  = base1 * d1 / 100;
+    const base2 = base1 - amt1;
+    const amt2  = base2 * d2 / 100;
+    const base3 = base2 - amt2;
+    const amt3  = base3 * d3 / 100;
+    const base4 = base3 - amt3;
+    const amt4  = base4 * d4 / 100;
+    const totalDisc  = amt1 + amt2 + amt3 + amt4;
+    const netTotal   = subtotal - totalDisc;
+    const iva        = netTotal * 0.21;
+    const finalTotal = netTotal + iva;
 
     // Historial de entregas
     const deliveries = db.prepare(`
@@ -222,8 +240,14 @@ tbody tr:nth-child(even) td{background:#f8fafc}
   <div class="totals-wrap">
     <table class="totals">
       <tr><td class="t-label">Subtotal ítems</td><td class="t-val">${fmtMoney(subtotal)}</td></tr>
-      ${order.discount > 0 ? `<tr><td class="t-label">Descuento (${order.discount}%)</td><td class="t-val" style="color:#ef4444">−${fmtMoney(discAmt)}</td></tr>` : ''}
-      <tr class="t-final"><td>TOTAL</td><td class="t-val">${fmtMoney(total)}</td></tr>
+      ${d1 > 0 ? `<tr><td class="t-label">Desc. 1 (${d1}%)</td><td class="t-val" style="color:#ef4444">−${fmtMoney(amt1)}</td></tr>` : ''}
+      ${d2 > 0 ? `<tr><td class="t-label">Desc. 2 (${d2}%)</td><td class="t-val" style="color:#ef4444">−${fmtMoney(amt2)}</td></tr>` : ''}
+      ${d3 > 0 ? `<tr><td class="t-label">Desc. 3 (${d3}%)</td><td class="t-val" style="color:#ef4444">−${fmtMoney(amt3)}</td></tr>` : ''}
+      ${d4 > 0 ? `<tr><td class="t-label">Desc. 4 (${d4}%)</td><td class="t-val" style="color:#ef4444">−${fmtMoney(amt4)}</td></tr>` : ''}
+      ${totalDisc > 0 ? `<tr><td class="t-label" style="font-weight:600">Total descuentos</td><td class="t-val" style="color:#ef4444;font-weight:600">−${fmtMoney(totalDisc)}</td></tr>` : ''}
+      <tr><td class="t-label">Total neto</td><td class="t-val">${fmtMoney(netTotal)}</td></tr>
+      <tr><td class="t-label">IVA 21%</td><td class="t-val">${fmtMoney(iva)}</td></tr>
+      <tr class="t-final"><td>TOTAL FINAL</td><td class="t-val">${fmtMoney(finalTotal)}</td></tr>
     </table>
   </div>
   ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
@@ -299,17 +323,20 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { customer_name, notes, delivery_date, status, discount, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, items } = req.body;
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
 
     const orderId = withTransaction(() => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
       const result = db.prepare(`
-        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(next, customer_name.trim(), notes || '', delivery_date || null,
-             status || 'Pendiente', parseFloat(discount) || 0, req.session.userId);
+             status || 'Pendiente',
+             parseFloat(discount)  || 0, parseFloat(discount2) || 0,
+             parseFloat(discount3) || 0, parseFloat(discount4) || 0,
+             req.session.userId);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
         const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
@@ -338,14 +365,17 @@ router.put('/:id', (req, res) => {
     if (isVendor(req) && existing.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar pedidos de otros vendedores' });
 
-    const { customer_name, notes, delivery_date, status, discount, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, items } = req.body;
     withTransaction(() => {
-      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         customer_name !== undefined ? customer_name.trim() : existing.customer_name,
         notes !== undefined ? notes : existing.notes,
         delivery_date !== undefined ? (delivery_date || null) : existing.delivery_date,
         status || existing.status,
-        discount !== undefined ? (parseFloat(discount) || 0) : existing.discount,
+        discount  !== undefined ? (parseFloat(discount)  || 0) : existing.discount,
+        discount2 !== undefined ? (parseFloat(discount2) || 0) : (existing.discount2 || 0),
+        discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0),
+        discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0),
         id
       );
       if (items !== undefined) {
