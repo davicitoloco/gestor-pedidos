@@ -520,14 +520,15 @@ function renderCatalog(products) {
   noEl.classList.add('hidden');
 
   tbody.innerHTML = products.map(p => {
-    const stockClass = p.active && p.stock === 0 ? 'stock-critical' : (p.active && p.stock_min > 0 && p.stock <= p.stock_min ? 'stock-low' : '');
+    const stockClass = isAdmin() && p.active && p.stock === 0 ? 'stock-critical'
+      : (isAdmin() && p.active && p.stock_min > 0 && p.stock <= p.stock_min ? 'stock-low' : '');
     return `
     <tr class="${stockClass}">
       <td style="${!p.active ? 'opacity:.5;text-decoration:line-through' : ''}">${esc(p.name)}</td>
       <td class="text-right" style="font-weight:600">${fmtMoney(p.base_price)}</td>
-      <td class="text-center">
+      ${isAdmin() ? `<td class="text-center">
         ${p.active ? stockBadge(p.stock, p.stock_min) : '<span class="badge badge-default">—</span>'}
-      </td>
+      </td>` : ''}
       <td class="text-center">
         ${p.active
           ? '<span class="badge badge-success">Activo</span>'

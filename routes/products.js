@@ -16,10 +16,12 @@ router.use(requireAuth);
 // GET /api/products — todos los autenticados pueden listar
 router.get('/', (req, res) => {
   try {
+    const isVendor = req.session.role === 'vendedor';
     const all = req.query.all === '1';
     const rows = all
       ? db.prepare('SELECT * FROM products ORDER BY name ASC').all()
       : db.prepare('SELECT * FROM products WHERE active = 1 ORDER BY name ASC').all();
+    if (isVendor) rows.forEach(r => { r.stock = null; r.stock_min = null; });
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
