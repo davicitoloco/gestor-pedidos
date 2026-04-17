@@ -210,6 +210,12 @@
                 <label class="label">Notas / Observaciones</label>
                 <textarea id="inp-notes" class="input textarea" rows="2" placeholder="Instrucciones, observaciones..."></textarea>
               </div>
+              <div style="margin-top:12px">
+                <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+                  <input type="checkbox" id="inp-iva-exempt" style="width:16px;height:16px;cursor:pointer">
+                  <span class="label" style="margin:0;font-size:.9rem">Exento de IVA</span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -260,7 +266,7 @@
                 <div class="total-row"><span>Subtotal ítems:</span><span id="calc-subtotal" class="total-value">$ 0,00</span></div>
                 <div class="total-row"><span>Total descuentos:</span><span id="calc-disc-total" class="total-value total-discount">—</span></div>
                 <div class="total-row"><span>Total neto:</span><span id="calc-net" class="total-value">$ 0,00</span></div>
-                <div class="total-row"><span>IVA 21%:</span><span id="calc-iva" class="total-value">$ 0,00</span></div>
+                <div class="total-row"><span id="calc-iva-label">IVA 21%:</span><span id="calc-iva" class="total-value">$ 0,00</span></div>
                 <div class="total-row total-final-row">
                   <span class="total-label">TOTAL FINAL</span>
                   <span id="calc-total" class="total-final">$ 0,00</span>

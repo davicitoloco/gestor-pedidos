@@ -52,8 +52,9 @@ router.get('/:id/print', (req, res) => {
 
     const items   = db.prepare('SELECT * FROM remito_items WHERE remito_id = ? ORDER BY id').all(id);
     const company = getCompanyName();
-    const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
-    const discAmt  = subtotal * (remito.order_discount || 0) / 100;
+    const subtotal   = items.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+    const discAmt    = subtotal * (remito.order_discount || 0) / 100;
+    const ivaExempt  = !!remito.iva_exempt;
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>${esc(remito.remito_number)} — ${esc(company)}</title>
@@ -139,6 +140,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
       <tr><td class="t-label">Subtotal</td><td class="t-val">${fmtMoney(subtotal)}</td></tr>
       <tr><td class="t-label">Descuento (${remito.order_discount}%)</td><td class="t-val" style="color:#ef4444">−${fmtMoney(discAmt)}</td></tr>
       ` : ''}
+      ${ivaExempt ? `<tr><td class="t-label">IVA</td><td class="t-val" style="color:#16a34a;font-weight:600">Exento</td></tr>` : ''}
       <tr class="t-final"><td>TOTAL</td><td class="t-val">${fmtMoney(remito.total)}</td></tr>
     </table>
   </div>

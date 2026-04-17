@@ -119,7 +119,8 @@ router.get('/:id/print', (req, res) => {
     const amt4  = base4 * d4 / 100;
     const totalDisc  = amt1 + amt2 + amt3 + amt4;
     const netTotal   = subtotal - totalDisc;
-    const iva        = netTotal * 0.21;
+    const ivaExempt  = !!order.iva_exempt;
+    const iva        = ivaExempt ? 0 : netTotal * 0.21;
     const finalTotal = netTotal + iva;
 
     // Historial de entregas
@@ -246,7 +247,10 @@ tbody tr:nth-child(even) td{background:#f8fafc}
       ${d4 > 0 ? `<tr><td class="t-label">Desc. 4 (${d4}%)</td><td class="t-val" style="color:#ef4444">−${fmtMoney(amt4)}</td></tr>` : ''}
       ${totalDisc > 0 ? `<tr><td class="t-label" style="font-weight:600">Total descuentos</td><td class="t-val" style="color:#ef4444;font-weight:600">−${fmtMoney(totalDisc)}</td></tr>` : ''}
       <tr><td class="t-label">Total neto</td><td class="t-val">${fmtMoney(netTotal)}</td></tr>
-      <tr><td class="t-label">IVA 21%</td><td class="t-val">${fmtMoney(iva)}</td></tr>
+      ${ivaExempt
+        ? `<tr><td class="t-label">IVA</td><td class="t-val" style="color:#16a34a;font-weight:600">Exento</td></tr>`
+        : `<tr><td class="t-label">IVA 21%</td><td class="t-val">${fmtMoney(iva)}</td></tr>`
+      }
       <tr class="t-final"><td>TOTAL FINAL</td><td class="t-val">${fmtMoney(finalTotal)}</td></tr>
     </table>
   </div>
@@ -323,19 +327,20 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, items } = req.body;
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
 
     const orderId = withTransaction(() => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
       const result = db.prepare(`
-        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(next, customer_name.trim(), notes || '', delivery_date || null,
              status || 'Pendiente',
              parseFloat(discount)  || 0, parseFloat(discount2) || 0,
              parseFloat(discount3) || 0, parseFloat(discount4) || 0,
+             iva_exempt ? 1 : 0,
              req.session.userId);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
@@ -365,9 +370,9 @@ router.put('/:id', (req, res) => {
     if (isVendor(req) && existing.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar pedidos de otros vendedores' });
 
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, items } = req.body;
     withTransaction(() => {
-      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         customer_name !== undefined ? customer_name.trim() : existing.customer_name,
         notes !== undefined ? notes : existing.notes,
         delivery_date !== undefined ? (delivery_date || null) : existing.delivery_date,
@@ -376,6 +381,7 @@ router.put('/:id', (req, res) => {
         discount2 !== undefined ? (parseFloat(discount2) || 0) : (existing.discount2 || 0),
         discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0),
         discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0),
+        iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0),
         id
       );
       if (items !== undefined) {
@@ -494,8 +500,8 @@ router.post('/:id/deliveries', (req, res) => {
       const cust      = db.prepare("SELECT id, iva_condition FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
       const { nextR } = db.prepare('SELECT COALESCE(MAX(remito_sequence), 0) + 1 AS nextR FROM remitos').get();
       const rr = db.prepare(
-        'INSERT INTO remitos (remito_sequence, order_id, delivery_id, customer_id, customer_name, customer_iva, total, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(nextR, id, delivId, cust ? cust.id : null, order.customer_name, cust ? (cust.iva_condition || 'Consumidor Final') : 'Consumidor Final', rTotal, req.session.userId);
+        'INSERT INTO remitos (remito_sequence, order_id, delivery_id, customer_id, customer_name, customer_iva, total, iva_exempt, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(nextR, id, delivId, cust ? cust.id : null, order.customer_name, cust ? (cust.iva_condition || 'Consumidor Final') : 'Consumidor Final', rTotal, order.iva_exempt ? 1 : 0, req.session.userId);
       const remitoId = Number(rr.lastInsertRowid);
       const insRI = db.prepare('INSERT INTO remito_items (remito_id, product_name, quantity, unit_price, discount) VALUES (?, ?, ?, ?, ?)');
       for (const it of remitoItems) insRI.run(remitoId, it.product_name, it.quantity, it.unit_price, it.discount);

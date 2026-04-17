@@ -275,6 +275,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('inp-notes').value        = '';
   $('inp-disc1').value = '0'; $('inp-disc2').value = '0';
   $('inp-disc3').value = '0'; $('inp-disc4').value = '0';
+  $('inp-iva-exempt').checked = false;
   $('form-status-badge').innerHTML = '';
   $('btn-export-pdf').classList.add('hidden');
   if ($('inp-vendor-display')) $('inp-vendor-display').value = '';
@@ -291,6 +292,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('inp-disc2').value = o.discount2 || 0;
       $('inp-disc3').value = o.discount3 || 0;
       $('inp-disc4').value = o.discount4 || 0;
+      $('inp-iva-exempt').checked = !!o.iva_exempt;
       $('form-status-badge').innerHTML = statusBadge(o.status);
       $('btn-export-pdf').classList.remove('hidden');
       if ($('inp-vendor-display') && isAdmin()) $('inp-vendor-display').value = o.vendor_name || '—';
@@ -416,7 +418,8 @@ function calcTotals() {
 
   const totalDisc  = amt1 + amt2 + amt3 + amt4;
   const netTotal   = subtotal - totalDisc;
-  const iva        = netTotal * 0.21;
+  const ivaExempt  = $('inp-iva-exempt').checked;
+  const iva        = ivaExempt ? 0 : netTotal * 0.21;
   const finalTotal = netTotal + iva;
 
   $('calc-disc1-amt').textContent  = amt1 > 0 ? `− ${fmtMoney(amt1)}` : '—';
@@ -426,12 +429,14 @@ function calcTotals() {
   $('calc-subtotal').textContent   = fmtMoney(subtotal);
   $('calc-disc-total').textContent = totalDisc > 0 ? `− ${fmtMoney(totalDisc)}` : '—';
   $('calc-net').textContent        = fmtMoney(netTotal);
-  $('calc-iva').textContent        = fmtMoney(iva);
+  $('calc-iva-label').textContent  = ivaExempt ? 'IVA: Exento' : 'IVA 21%:';
+  $('calc-iva').textContent        = ivaExempt ? '—' : fmtMoney(iva);
   $('calc-total').textContent      = fmtMoney(finalTotal);
 }
 ['inp-disc1','inp-disc2','inp-disc3','inp-disc4'].forEach(id =>
   $(id).addEventListener('input', calcTotals)
 );
+$('inp-iva-exempt').addEventListener('change', calcTotals);
 
 /* ================================================================ SAVE ORDER */
 $('order-form').addEventListener('submit', async e => {
@@ -448,6 +453,7 @@ $('order-form').addEventListener('submit', async e => {
     discount2: parseFloat($('inp-disc2').value) || 0,
     discount3: parseFloat($('inp-disc3').value) || 0,
     discount4: parseFloat($('inp-disc4').value) || 0,
+    iva_exempt: $('inp-iva-exempt').checked ? 1 : 0,
     items:         state.items.filter(i => i.product_name.trim())
   };
 
@@ -2294,7 +2300,7 @@ function renderPurchaseItems() {
 }
 
 function addPurchaseItemRow() {
-  purchaseItems.push({ name:'', qty:1, price:0 });
+  purchaseItems.push({ name:'', qty:'', price:'' });
   renderPurchaseItems();
 }
 
