@@ -19,6 +19,11 @@ function fmtDateTime(s) {
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+function formatCuit(c) {
+  const d = String(c || '').replace(/\D/g, '');
+  if (d.length !== 11) return d || '';
+  return `${d.slice(0,2)}-${d.slice(2,10)}-${d.slice(10)}`;
+}
 function statusBadge(s) {
   const cls = { 'Pendiente':'warning','En preparación':'info','Entregado':'success','Cancelado':'default','Entrega parcial':'partial' };
   return `<span class="badge badge-${cls[s]||'default'}">${esc(s)}</span>`;
@@ -330,6 +335,18 @@ $('btn-export-pdf-deposito').addEventListener('click', () => {
 });
 $('inp-status').addEventListener('change', () => {
   if (state.editingOrderId) $('form-status-badge').innerHTML = statusBadge($('inp-status').value);
+});
+$('inp-customer').addEventListener('input', () => {
+  const hint = $('customer-cuit-hint');
+  if (!hint) return;
+  const name = $('inp-customer').value.trim().toLowerCase();
+  const match = (state.customerList || []).find(c => c.name.toLowerCase() === name);
+  if (match && match.cuit) {
+    hint.textContent = `CUIT: ${formatCuit(match.cuit)}`;
+    hint.style.display = 'block';
+  } else {
+    hint.style.display = 'none';
+  }
 });
 
 /* ================================================================ ORDER ITEMS */
@@ -1009,6 +1026,7 @@ function renderClients(clients) {
         : `<span style="color:var(--text-muted)">Sin deuda</span>`;
     return `<tr>
       <td style="font-weight:500">${esc(c.name)}</td>
+      <td style="color:var(--text-muted);font-size:.85rem;font-family:monospace">${esc(formatCuit(c.cuit) || '—')}</td>
       <td style="color:var(--text-muted)">${esc(c.phone || '—')}</td>
       <td style="color:var(--text-muted);font-size:.85rem">${esc(c.email || '—')}</td>
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(c.vendor_name || '—')}</td>` : ''}
@@ -1040,17 +1058,20 @@ window.openClientForm = function(id) {
   state.editingClientId = id || null;
   $('client-form-title').textContent = id ? 'Editar Cliente' : 'Nuevo Cliente';
   $('inp-client-name').value    = '';
+  $('inp-client-cuit').value    = '';
   $('inp-client-phone').value   = '';
   $('inp-client-email').value   = '';
   $('inp-client-address').value = '';
   $('inp-client-notes').value   = '';
   $('inp-client-iva').value     = 'Consumidor Final';
+  $('lbl-client-cuit').className = id ? 'label' : 'label required';
 
   if (id) {
     api('GET', '/customers').then(list => {
       const c = list.find(x => x.id === id);
       if (c) {
         $('inp-client-name').value    = c.name;
+        $('inp-client-cuit').value    = formatCuit(c.cuit);
         $('inp-client-phone').value   = c.phone || '';
         $('inp-client-email').value   = c.email || '';
         $('inp-client-address').value = c.address || '';
@@ -1253,8 +1274,17 @@ $('client-form').addEventListener('submit', async e => {
   e.preventDefault();
   const name = $('inp-client-name').value.trim();
   if (!name) { toast('El nombre es requerido', 'error'); $('inp-client-name').focus(); return; }
+  const rawCuit = $('inp-client-cuit').value.trim();
+  const normalizedCuit = rawCuit.replace(/\D/g, '');
+  if (!state.editingClientId) {
+    if (!normalizedCuit) { toast('El CUIT es requerido', 'error'); $('inp-client-cuit').focus(); return; }
+    if (normalizedCuit.length !== 11) { toast('El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)', 'error'); $('inp-client-cuit').focus(); return; }
+  } else if (rawCuit && normalizedCuit.length !== 11) {
+    toast('El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)', 'error'); $('inp-client-cuit').focus(); return;
+  }
   const data = {
     name,
+    cuit:          normalizedCuit || '',
     phone:         $('inp-client-phone').value.trim(),
     email:         $('inp-client-email').value.trim(),
     address:       $('inp-client-address').value.trim(),

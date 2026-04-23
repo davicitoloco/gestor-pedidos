@@ -316,6 +316,8 @@ addColIfMissing('stock_movements',    'previous_qty',     'REAL');
 addColIfMissing('stock_movements',    'new_qty',          'REAL');
 addColIfMissing('orders',  'iva_exempt', 'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('remitos', 'iva_exempt', 'INTEGER NOT NULL DEFAULT 0');
+addColIfMissing('customers', 'cuit', "TEXT NOT NULL DEFAULT ''");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_cuit ON customers(cuit) WHERE cuit != ''");
 
 // Seed plan de cuentas
 {

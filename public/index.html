@@ -204,6 +204,7 @@
                 <div class="field">
                   <label class="label required">Cliente</label>
                   <input type="text" id="inp-customer" class="input" list="customers-datalist" placeholder="Buscar o escribir cliente..." required>
+                  <div id="customer-cuit-hint" style="display:none;margin-top:4px;font-size:.82rem;color:var(--text-muted)"></div>
                 </div>
                 <div class="field admin-only-field hidden">
                   <label class="label">Vendedor</label>
@@ -322,9 +323,10 @@
           <table class="table">
             <thead><tr>
               <th>Nombre</th>
-              <th style="width:140px">Teléfono</th>
-              <th style="width:190px">Email</th>
-              <th class="admin-only-col" style="width:140px">Vendedor</th>
+              <th style="width:140px">CUIT</th>
+              <th style="width:130px">Teléfono</th>
+              <th style="width:180px">Email</th>
+              <th class="admin-only-col" style="width:130px">Vendedor</th>
               <th>Dirección</th>
               <th style="width:120px" class="text-right">Saldo</th>
               <th style="width:140px" class="text-center">Acciones</th>
@@ -358,6 +360,10 @@
                   <input type="text" id="inp-client-name" class="input" placeholder="Ej: Juan García">
                 </div>
                 <div class="field">
+                  <label class="label" id="lbl-client-cuit">CUIT</label>
+                  <input type="text" id="inp-client-cuit" class="input" placeholder="XX-XXXXXXXX-X" maxlength="13">
+                </div>
+                <div class="field">
                   <label class="label">Teléfono</label>
                   <input type="text" id="inp-client-phone" class="input" placeholder="Ej: 11 1234-5678">
                 </div>
@@ -365,7 +371,7 @@
                   <label class="label">Email</label>
                   <input type="email" id="inp-client-email" class="input" placeholder="correo@ejemplo.com">
                 </div>
-                <div class="field">
+                <div class="field" style="grid-column:1/-1">
                   <label class="label">Dirección</label>
                   <input type="text" id="inp-client-address" class="input" placeholder="Calle y número, ciudad">
                 </div>

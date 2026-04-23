@@ -28,6 +28,11 @@ function fmtDateTime(s) {
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+function fmtCuit(c) {
+  const d = String(c || '').replace(/\D/g, '');
+  if (d.length !== 11) return d || '';
+  return `${d.slice(0,2)}-${d.slice(2,10)}-${d.slice(10)}`;
+}
 function getCompanyName() {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'company_name'").get();
   return row ? row.value : 'Mi Empresa';
@@ -104,6 +109,8 @@ router.get('/:id/print', (req, res) => {
 
     const items    = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
     const company  = getCompanyName();
+    const custRow  = db.prepare("SELECT cuit FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
+    const custCuit = custRow && custRow.cuit ? custRow.cuit : null;
     const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
     const d1 = order.discount  || 0;
     const d2 = order.discount2 || 0;
@@ -211,6 +218,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
     <div class="info-item"><label>Fecha de creación</label><p>${fmtDateTime(order.created_at)}</p></div>
     <div class="info-item"><label>Cliente</label><p>${esc(order.customer_name)}</p></div>
     <div class="info-item"><label>Fecha de entrega</label><p>${fmtDate(order.delivery_date)}</p></div>
+    ${custCuit ? `<div class="info-item"><label>CUIT</label><p>${esc(fmtCuit(custCuit))}</p></div>` : ''}
     <div class="info-item"><label>Vendedor</label><p>${esc(order.vendor_name || 'Sin asignar')}</p></div>
     <div class="info-item"><label>Estado</label>
       <p><span class="badge" style="background:${statusBg[order.status]||'#f1f5f9'};color:${statusColor[order.status]||'#475569'}">${esc(order.status)}</span></p>
