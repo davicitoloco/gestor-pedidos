@@ -324,6 +324,110 @@ tbody tr:nth-child(even) td{background:#f8fafc}
   } catch (err) { res.status(500).send(err.message); }
 });
 
+// ── GET /api/orders/:id/print-deposito ───────────────────────────────────────
+router.get('/:id/print-deposito', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare(`
+      SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
+             COALESCE(u.full_name, u.username) AS vendor_name
+      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+      WHERE o.id = ?
+    `).get(id);
+    if (!order) return res.status(404).send('Pedido no encontrado');
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).send('Acceso denegado');
+
+    const items   = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
+    const company = getCompanyName();
+    const cust    = db.prepare("SELECT address FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
+    const address = cust && cust.address ? cust.address : null;
+
+    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Cancelado':'#475569' };
+    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Cancelado':'#f1f5f9' };
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>Pedido #${esc(order.order_number)} — Depósito</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1e293b;background:#fff}
+.page{padding:32px 40px;max-width:820px;margin:0 auto;position:relative}
+.no-print{text-align:right;margin-bottom:18px}
+.print-btn{padding:9px 22px;background:#475569;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600}
+.watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:72px;font-weight:900;color:rgba(71,85,105,0.07);white-space:nowrap;pointer-events:none;z-index:0;letter-spacing:.04em}
+.content{position:relative;z-index:1}
+.banner{background:#475569;color:#fff;text-align:center;padding:10px 16px;border-radius:6px;margin-bottom:22px;font-size:14px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.header{text-align:center;padding-bottom:18px;border-bottom:2px solid #475569;margin-bottom:22px}
+.header h1{font-size:26px;color:#475569;letter-spacing:.01em}
+.header h2{font-size:13px;color:#64748b;margin-top:4px;font-weight:normal;text-transform:uppercase;letter-spacing:.08em}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 30px;margin-bottom:26px}
+.info-item label{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:3px}
+.info-item p{font-size:13px;font-weight:500}
+.info-item.full{grid-column:1/-1}
+.badge{display:inline-block;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:700}
+h3{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:12.5px}
+thead th{background:#475569;color:#fff;padding:8px 10px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+thead th.r{text-align:right}
+tbody td{padding:8px 10px;border-bottom:1px solid #e2e8f0}
+tbody td.r{text-align:right;font-weight:600}
+tbody tr:nth-child(even) td{background:#f8fafc}
+.notes-box{margin-top:20px;padding:14px 16px;background:#f8fafc;border-left:3px solid #475569;border-radius:0 6px 6px 0}
+.notes-box strong{display:block;margin-bottom:5px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+.footer{margin-top:36px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
+@media print{
+  .no-print{display:none}
+  body{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .page{padding:20px}
+  .watermark{position:fixed}
+}
+</style></head><body>
+<div class="page">
+  <div class="watermark">USO INTERNO — DEPÓSITO</div>
+  <div class="content">
+    <div class="no-print">
+      <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+    </div>
+    <div class="banner">USO INTERNO — DEPÓSITO</div>
+    <div class="header">
+      <h1>${esc(company)}</h1>
+      <h2>Orden de Preparación</h2>
+    </div>
+    <div class="info-grid">
+      <div class="info-item"><label>Número de pedido</label><p>#${esc(order.order_number)}</p></div>
+      <div class="info-item"><label>Fecha de creación</label><p>${fmtDateTime(order.created_at)}</p></div>
+      <div class="info-item"><label>Cliente</label><p>${esc(order.customer_name)}</p></div>
+      <div class="info-item"><label>Fecha de entrega</label><p>${fmtDate(order.delivery_date)}</p></div>
+      ${address ? `<div class="info-item full"><label>Dirección de entrega</label><p>${esc(address)}</p></div>` : ''}
+      <div class="info-item"><label>Estado</label>
+        <p><span class="badge" style="background:${statusBg[order.status]||'#f1f5f9'};color:${statusColor[order.status]||'#475569'}">${esc(order.status)}</span></p>
+      </div>
+    </div>
+    <h3>Productos a preparar</h3>
+    <table>
+      <thead><tr>
+        <th>Producto / Descripción</th>
+        <th class="r">Cantidad</th>
+      </tr></thead>
+      <tbody>
+        ${items.map(item => `<tr>
+          <td>${esc(item.product_name)}</td>
+          <td class="r">${item.quantity}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
+    <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>
+  </div>
+</div>
+<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));</script>
+</body></html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) { res.status(500).send(err.message); }
+});
+
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {

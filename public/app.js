@@ -278,6 +278,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('inp-iva-exempt').checked = false;
   $('form-status-badge').innerHTML = '';
   $('btn-export-pdf').classList.add('hidden');
+  $('btn-export-pdf-deposito').classList.add('hidden');
   if ($('inp-vendor-display')) $('inp-vendor-display').value = '';
 
   if (orderId) {
@@ -295,6 +296,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('inp-iva-exempt').checked = !!o.iva_exempt;
       $('form-status-badge').innerHTML = statusBadge(o.status);
       $('btn-export-pdf').classList.remove('hidden');
+      $('btn-export-pdf-deposito').classList.remove('hidden');
       if ($('inp-vendor-display') && isAdmin()) $('inp-vendor-display').value = o.vendor_name || '—';
       state.items = (o.items || []).map(i => ({ ...i }));
     } catch (err) { toast(err.message, 'error'); return; }
@@ -322,6 +324,9 @@ $('btn-back').addEventListener('click', () => loadOrders());
 $('btn-cancel-form').addEventListener('click', () => loadOrders());
 $('btn-export-pdf').addEventListener('click', () => {
   if (state.editingOrderId) window.open(`/api/orders/${state.editingOrderId}/print`, '_blank');
+});
+$('btn-export-pdf-deposito').addEventListener('click', () => {
+  if (state.editingOrderId) window.open(`/api/orders/${state.editingOrderId}/print-deposito`, '_blank');
 });
 $('inp-status').addEventListener('change', () => {
   if (state.editingOrderId) $('form-status-badge').innerHTML = statusBadge($('inp-status').value);
