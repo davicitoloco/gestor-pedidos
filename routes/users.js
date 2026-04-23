@@ -29,7 +29,7 @@ router.post('/', (req, res) => {
     const result = db.prepare(`
       INSERT INTO users (username, password_hash, full_name, role)
       VALUES (?, ?, ?, ?)
-    `).run(username.trim(), hash, (full_name || '').trim(), role === 'admin' ? 'admin' : 'vendedor');
+    `).run(username.trim(), hash, (full_name || '').trim(), ['admin','subadmin'].includes(role) ? role : 'vendedor');
     const user = db.prepare('SELECT id, username, full_name, role, active, created_at FROM users WHERE id = ?').get(Number(result.lastInsertRowid));
     res.status(201).json(user);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -57,7 +57,7 @@ router.put('/:id', (req, res) => {
     `).run(
       newHash,
       full_name !== undefined ? full_name.trim() : existing.full_name,
-      role !== undefined ? (role === 'admin' ? 'admin' : 'vendedor') : existing.role,
+      role !== undefined ? (['admin','subadmin'].includes(role) ? role : 'vendedor') : existing.role,
       active !== undefined ? (active ? 1 : 0) : existing.active,
       id
     );

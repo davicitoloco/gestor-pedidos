@@ -28,7 +28,9 @@ function statusBadge(s) {
   const cls = { 'Pendiente':'warning','En preparación':'info','Entregado':'success','Cancelado':'default','Entrega parcial':'partial' };
   return `<span class="badge badge-${cls[s]||'default'}">${esc(s)}</span>`;
 }
-function isAdmin() { return state.user && state.user.role === 'admin'; }
+function isAdmin()      { return state.user && state.user.role === 'admin'; }
+function isSubAdmin()   { return state.user && state.user.role === 'subadmin'; }
+function isAdminLike()  { return state.user && (state.user.role === 'admin' || state.user.role === 'subadmin'); }
 
 /* ================================================================ STATE */
 const state = {
@@ -107,10 +109,12 @@ async function showApp() {
 
   // Aplicar visibilidad según rol
   $('sidebar-username').textContent = state.user.username;
-  $('sidebar-role').textContent = state.user.role === 'admin' ? 'Administrador' : 'Vendedor';
-  document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  document.querySelectorAll('.admin-only-col').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  document.querySelectorAll('.admin-only-field').forEach(el => el.classList.toggle('hidden', !isAdmin()));
+  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor' };
+  $('sidebar-role').textContent = roleLabels[state.user.role] || 'Vendedor';
+  document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
+  document.querySelectorAll('.admin-only-col').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
+  document.querySelectorAll('.admin-only-field').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
+  document.querySelectorAll('.strict-admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
 
   // Cargar settings
   try {
@@ -156,6 +160,10 @@ function closeMobileSidebar() {
 }
 
 function navigate(section) {
+  if (isSubAdmin() && (section === 'usuarios' || section === 'contable')) {
+    toast('Sin acceso a esta sección', 'error');
+    return;
+  }
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.section === section)
   );
@@ -662,7 +670,9 @@ function renderUsers(users) {
       <td style="color:var(--text-muted);font-size:.88rem">${esc(u.username)}</td>
       <td>${u.role === 'admin'
         ? '<span class="badge badge-admin">Admin</span>'
-        : '<span class="badge badge-vendor">Vendedor</span>'}</td>
+        : u.role === 'subadmin'
+          ? '<span class="badge badge-info">Subadmin</span>'
+          : '<span class="badge badge-vendor">Vendedor</span>'}</td>
       <td class="text-center">
         ${u.active
           ? '<span class="badge badge-success">Activo</span>'

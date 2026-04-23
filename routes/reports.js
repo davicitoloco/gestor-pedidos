@@ -4,7 +4,7 @@ const { db } = require('../db');
 
 function requireAdmin(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
-  if (req.session.role !== 'admin') return res.status(403).json({ error: 'Solo los administradores pueden ver los reportes' });
+  if (!['admin','subadmin'].includes(req.session.role)) return res.status(403).json({ error: 'Solo los administradores pueden ver los reportes' });
   next();
 }
 router.use(requireAdmin);

@@ -8,7 +8,7 @@ function requireAuth(req, res, next) {
   next();
 }
 function requireAdmin(req, res, next) {
-  if (req.session.role !== 'admin') return res.status(403).json({ error: 'Acceso denegado' });
+  if (!['admin','subadmin'].includes(req.session.role)) return res.status(403).json({ error: 'Acceso denegado' });
   next();
 }
 router.use(requireAuth);
