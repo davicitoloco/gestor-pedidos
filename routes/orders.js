@@ -415,12 +415,10 @@ tbody tr:nth-child(even) td{background:#f8fafc}
     <table>
       <thead><tr>
         <th>Producto / Descripción</th>
-        <th class="r">Cantidad</th>
       </tr></thead>
       <tbody>
         ${items.map(item => `<tr>
-          <td>${esc(item.product_name)}</td>
-          <td class="r">${item.quantity}</td>
+          <td style="padding:14px 10px;line-height:1.8"><strong>${esc(item.product_name)}</strong> — ${item.quantity}u</td>
         </tr>`).join('')}
       </tbody>
     </table>
