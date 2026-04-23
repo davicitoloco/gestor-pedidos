@@ -344,16 +344,29 @@ $('btn-export-pdf-deposito').addEventListener('click', () => {
 $('inp-status').addEventListener('change', () => {
   if (state.editingOrderId) $('form-status-badge').innerHTML = statusBadge($('inp-status').value);
 });
+function findCustomerByName(name) {
+  return (state.customerList || []).find(c => c.name.toLowerCase() === name.toLowerCase().trim());
+}
+
 $('inp-customer').addEventListener('input', () => {
   const hint = $('customer-cuit-hint');
   if (!hint) return;
-  const name = $('inp-customer').value.trim().toLowerCase();
-  const match = (state.customerList || []).find(c => c.name.toLowerCase() === name);
+  const match = findCustomerByName($('inp-customer').value);
   if (match && match.cuit) {
     hint.textContent = `CUIT: ${formatCuit(match.cuit)}`;
     hint.style.display = 'block';
   } else {
     hint.style.display = 'none';
+  }
+});
+
+$('inp-customer').addEventListener('blur', () => {
+  const val = $('inp-customer').value.trim();
+  if (!val) return;
+  if (!findCustomerByName(val)) {
+    $('inp-customer').value = '';
+    const hint = $('customer-cuit-hint');
+    if (hint) hint.style.display = 'none';
   }
 });
 
@@ -473,6 +486,7 @@ $('order-form').addEventListener('submit', async e => {
   e.preventDefault();
   const customer = $('inp-customer').value.trim();
   if (!customer) { toast('El nombre del cliente es requerido', 'error'); $('inp-customer').focus(); return; }
+  if (!findCustomerByName(customer)) { toast('El cliente debe estar registrado en el módulo Clientes', 'error'); $('inp-customer').focus(); return; }
 
   const data = {
     customer_name: customer,
