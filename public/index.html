@@ -319,18 +319,18 @@
             </button>
           </div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap" style="overflow-x:auto">
           <table class="table">
             <thead><tr>
               <th>Nombre</th>
-              <th style="width:140px">CUIT</th>
-              <th style="width:130px">Teléfono</th>
-              <th style="width:180px">Email</th>
-              <th class="admin-only-col" style="width:130px">Vendedor</th>
-              <th>Dirección</th>
-              <th style="width:160px">Localidad / Prov.</th>
-              <th style="width:120px" class="text-right">Saldo</th>
-              <th style="width:140px" class="text-center">Acciones</th>
+              <th style="width:130px">CUIT</th>
+              <th style="width:105px">Teléfono</th>
+              <th style="width:140px;max-width:140px;overflow:hidden;text-overflow:ellipsis">Email</th>
+              <th class="admin-only-col" style="width:110px">Vendedor</th>
+              <th style="width:140px;max-width:140px">Dirección</th>
+              <th style="width:140px">Localidad / Prov.</th>
+              <th style="width:105px" class="text-right">Saldo</th>
+              <th style="width:110px;position:sticky;right:0;background:var(--bg);z-index:2;box-shadow:-2px 0 4px rgba(0,0,0,0.06)" class="text-center">Acciones</th>
             </tr></thead>
             <tbody id="clients-tbody"></tbody>
           </table>
@@ -353,7 +353,7 @@
         </div>
         <form id="client-form" novalidate>
           <div class="card">
-            <div class="card-header">Datos del cliente</div>
+            <div class="card-header">Datos del cliente <span style="font-size:.78rem;font-weight:400;color:var(--text-muted);margin-left:8px">* Obligatorios: Nombre y CUIT</span></div>
             <div class="card-body">
               <div class="form-grid-2">
                 <div class="field">

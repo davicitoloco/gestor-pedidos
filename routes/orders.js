@@ -246,6 +246,13 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         </tr>`;
       }).join('')}
     </tbody>
+    <tfoot>
+      <tr style="background:#f1f5f9">
+        <td colspan="5" style="padding:8px 10px;text-align:right;font-weight:700;font-size:13px;border-top:2px solid #e2e8f0;color:#1e293b">
+          Total unidades: <span style="color:#2563eb">${totalUnits}</span>
+        </td>
+      </tr>
+    </tfoot>
   </table>
   <div class="totals-wrap">
     <table class="totals">
@@ -260,7 +267,6 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         ? `<tr><td class="t-label">IVA</td><td class="t-val" style="color:#16a34a;font-weight:600">Exento</td></tr>`
         : `<tr><td class="t-label">IVA 21%</td><td class="t-val">${fmtMoney(iva)}</td></tr>`
       }
-      <tr><td class="t-label">Total unidades</td><td class="t-val">${totalUnits}</td></tr>
       <tr class="t-final"><td>TOTAL FINAL</td><td class="t-val">${fmtMoney(finalTotal)}</td></tr>
     </table>
   </div>
@@ -428,10 +434,14 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         ${items.map(item => `<tr>
           <td style="padding:14px 10px;line-height:1.8"><strong>${esc(item.product_name)}</strong> — ${item.quantity}u</td>
         </tr>`).join('')}
-        <tr style="background:#f1f5f9">
-          <td style="padding:10px;font-weight:700;font-size:13px;text-align:right">Total unidades: ${totalUnits}</td>
-        </tr>
       </tbody>
+      <tfoot>
+        <tr style="background:#f1f5f9">
+          <td style="padding:10px;font-weight:700;font-size:13px;text-align:right;border-top:2px solid #e2e8f0">
+            Total unidades: <span style="color:#475569">${totalUnits}</span>
+          </td>
+        </tr>
+      </tfoot>
     </table>
     ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
     <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>

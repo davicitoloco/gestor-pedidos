@@ -1057,7 +1057,7 @@ function renderClients(clients) {
       <td style="color:var(--text-muted);font-size:.85rem">${esc(c.address || '—')}</td>
       <td style="color:var(--text-muted);font-size:.85rem">${esc([c.localidad, c.provincia].filter(Boolean).join(', ') || '—')}</td>
       <td class="text-right">${balFmt}</td>
-      <td class="text-center" style="white-space:nowrap">
+      <td class="text-center" style="white-space:nowrap;position:sticky;right:0;background:var(--white);box-shadow:-2px 0 4px rgba(0,0,0,0.06)">
         <button class="btn-icon" onclick="openAccountView(${c.id})" title="Cuenta corriente">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         </button>
