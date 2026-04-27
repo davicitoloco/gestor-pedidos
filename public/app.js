@@ -1055,6 +1055,7 @@ function renderClients(clients) {
       <td style="color:var(--text-muted);font-size:.85rem">${esc(c.email || '—')}</td>
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(c.vendor_name || '—')}</td>` : ''}
       <td style="color:var(--text-muted);font-size:.85rem">${esc(c.address || '—')}</td>
+      <td style="color:var(--text-muted);font-size:.85rem">${esc([c.localidad, c.provincia].filter(Boolean).join(', ') || '—')}</td>
       <td class="text-right">${balFmt}</td>
       <td class="text-center" style="white-space:nowrap">
         <button class="btn-icon" onclick="openAccountView(${c.id})" title="Cuenta corriente">
@@ -1082,10 +1083,12 @@ window.openClientForm = function(id) {
   state.editingClientId = id || null;
   $('client-form-title').textContent = id ? 'Editar Cliente' : 'Nuevo Cliente';
   $('inp-client-name').value    = '';
-  $('inp-client-cuit').value    = '';
-  $('inp-client-phone').value   = '';
-  $('inp-client-email').value   = '';
-  $('inp-client-address').value = '';
+  $('inp-client-cuit').value       = '';
+  $('inp-client-phone').value      = '';
+  $('inp-client-email').value      = '';
+  $('inp-client-address').value    = '';
+  $('inp-client-localidad').value  = '';
+  $('inp-client-provincia').value  = '';
   $('inp-client-notes').value   = '';
   $('inp-client-iva').value     = 'Consumidor Final';
   $('lbl-client-cuit').className = id ? 'label' : 'label required';
@@ -1096,9 +1099,11 @@ window.openClientForm = function(id) {
       if (c) {
         $('inp-client-name').value    = c.name;
         $('inp-client-cuit').value    = formatCuit(c.cuit);
-        $('inp-client-phone').value   = c.phone || '';
-        $('inp-client-email').value   = c.email || '';
-        $('inp-client-address').value = c.address || '';
+        $('inp-client-phone').value      = c.phone || '';
+        $('inp-client-email').value      = c.email || '';
+        $('inp-client-address').value    = c.address || '';
+        $('inp-client-localidad').value  = c.localidad || '';
+        $('inp-client-provincia').value  = c.provincia || '';
         $('inp-client-notes').value   = c.notes || '';
         $('inp-client-iva').value     = c.iva_condition || 'Consumidor Final';
       }
@@ -1125,6 +1130,8 @@ async function loadAccount() {
     const data = await api('GET', `/customers/${_accountCustomerId}/account`);
     $('account-client-name').textContent = data.customer.name;
     $('account-client-iva').textContent  = data.customer.iva_condition || 'Consumidor Final';
+    const loc = [data.customer.localidad, data.customer.provincia].filter(Boolean).join(', ');
+    $('account-client-location').textContent = loc || '';
 
     $('account-total-debt').textContent = fmtMoney(data.total_debt);
     $('account-total-paid').textContent = fmtMoney(data.total_paid);
@@ -1312,6 +1319,8 @@ $('client-form').addEventListener('submit', async e => {
     phone:         $('inp-client-phone').value.trim(),
     email:         $('inp-client-email').value.trim(),
     address:       $('inp-client-address').value.trim(),
+    localidad:     $('inp-client-localidad').value.trim(),
+    provincia:     $('inp-client-provincia').value,
     notes:         $('inp-client-notes').value.trim(),
     iva_condition: $('inp-client-iva').value
   };

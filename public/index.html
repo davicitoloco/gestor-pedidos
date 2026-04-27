@@ -328,6 +328,7 @@
               <th style="width:180px">Email</th>
               <th class="admin-only-col" style="width:130px">Vendedor</th>
               <th>Dirección</th>
+              <th style="width:160px">Localidad / Prov.</th>
               <th style="width:120px" class="text-right">Saldo</th>
               <th style="width:140px" class="text-center">Acciones</th>
             </tr></thead>
@@ -373,7 +374,41 @@
                 </div>
                 <div class="field" style="grid-column:1/-1">
                   <label class="label">Dirección</label>
-                  <input type="text" id="inp-client-address" class="input" placeholder="Calle y número, ciudad">
+                  <input type="text" id="inp-client-address" class="input" placeholder="Calle y número">
+                </div>
+                <div class="field">
+                  <label class="label">Localidad</label>
+                  <input type="text" id="inp-client-localidad" class="input" placeholder="Ej: Rosario">
+                </div>
+                <div class="field">
+                  <label class="label">Provincia</label>
+                  <select id="inp-client-provincia" class="input select">
+                    <option value="">— Sin especificar —</option>
+                    <option>Buenos Aires</option>
+                    <option>Catamarca</option>
+                    <option>Chaco</option>
+                    <option>Chubut</option>
+                    <option>Ciudad Autónoma de Buenos Aires</option>
+                    <option>Córdoba</option>
+                    <option>Corrientes</option>
+                    <option>Entre Ríos</option>
+                    <option>Formosa</option>
+                    <option>Jujuy</option>
+                    <option>La Pampa</option>
+                    <option>La Rioja</option>
+                    <option>Mendoza</option>
+                    <option>Misiones</option>
+                    <option>Neuquén</option>
+                    <option>Río Negro</option>
+                    <option>Salta</option>
+                    <option>San Juan</option>
+                    <option>San Luis</option>
+                    <option>Santa Cruz</option>
+                    <option>Santa Fe</option>
+                    <option>Santiago del Estero</option>
+                    <option>Tierra del Fuego</option>
+                    <option>Tucumán</option>
+                  </select>
                 </div>
               </div>
               <div class="field">
@@ -409,6 +444,7 @@
             <div>
               <h2 class="page-title" id="account-client-name">Cuenta Corriente</h2>
               <p class="page-subtitle" id="account-client-iva"></p>
+              <p class="page-subtitle" id="account-client-location" style="color:var(--text-muted);font-size:.82rem"></p>
             </div>
           </div>
           <div style="display:flex;gap:8px">

@@ -318,6 +318,8 @@ addColIfMissing('orders',  'iva_exempt', 'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('remitos', 'iva_exempt', 'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('customers', 'cuit', "TEXT NOT NULL DEFAULT ''");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_cuit ON customers(cuit) WHERE cuit != ''");
+addColIfMissing('customers', 'localidad', "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('customers', 'provincia', "TEXT NOT NULL DEFAULT ''");
 
 // Seed plan de cuentas
 {

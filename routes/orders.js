@@ -111,6 +111,7 @@ router.get('/:id/print', (req, res) => {
     const company  = getCompanyName();
     const custRow  = db.prepare("SELECT cuit FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
     const custCuit = custRow && custRow.cuit ? custRow.cuit : null;
+    const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
     const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
     const d1 = order.discount  || 0;
     const d2 = order.discount2 || 0;
@@ -259,6 +260,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         ? `<tr><td class="t-label">IVA</td><td class="t-val" style="color:#16a34a;font-weight:600">Exento</td></tr>`
         : `<tr><td class="t-label">IVA 21%</td><td class="t-val">${fmtMoney(iva)}</td></tr>`
       }
+      <tr><td class="t-label">Total unidades</td><td class="t-val">${totalUnits}</td></tr>
       <tr class="t-final"><td>TOTAL FINAL</td><td class="t-val">${fmtMoney(finalTotal)}</td></tr>
     </table>
   </div>
@@ -348,8 +350,11 @@ router.get('/:id/print-deposito', (req, res) => {
 
     const items   = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
     const company = getCompanyName();
-    const cust    = db.prepare("SELECT address FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
-    const address = cust && cust.address ? cust.address : null;
+    const cust     = db.prepare("SELECT address, localidad, provincia FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
+    const address  = cust && cust.address   ? cust.address   : null;
+    const localidad = cust && cust.localidad ? cust.localidad : null;
+    const provincia = cust && cust.provincia ? cust.provincia : null;
+    const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
 
     const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Cancelado':'#475569' };
     const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Cancelado':'#f1f5f9' };
@@ -406,10 +411,13 @@ tbody tr:nth-child(even) td{background:#f8fafc}
       <div class="info-item"><label>Fecha de creación</label><p>${fmtDateTime(order.created_at)}</p></div>
       <div class="info-item"><label>Cliente</label><p>${esc(order.customer_name)}</p></div>
       <div class="info-item"><label>Fecha de entrega</label><p>${fmtDate(order.delivery_date)}</p></div>
-      ${address ? `<div class="info-item full"><label>Dirección de entrega</label><p>${esc(address)}</p></div>` : ''}
+      <div class="info-item"><label>Vendedor</label><p>${esc(order.vendor_name || 'Sin asignar')}</p></div>
       <div class="info-item"><label>Estado</label>
         <p><span class="badge" style="background:${statusBg[order.status]||'#f1f5f9'};color:${statusColor[order.status]||'#475569'}">${esc(order.status)}</span></p>
       </div>
+      ${address   ? `<div class="info-item full"><label>Dirección de entrega</label><p>${esc(address)}</p></div>` : ''}
+      ${localidad ? `<div class="info-item"><label>Localidad</label><p>${esc(localidad)}</p></div>` : ''}
+      ${provincia ? `<div class="info-item"><label>Provincia</label><p>${esc(provincia)}</p></div>` : ''}
     </div>
     <h3>Productos a preparar</h3>
     <table>
@@ -420,6 +428,9 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         ${items.map(item => `<tr>
           <td style="padding:14px 10px;line-height:1.8"><strong>${esc(item.product_name)}</strong> — ${item.quantity}u</td>
         </tr>`).join('')}
+        <tr style="background:#f1f5f9">
+          <td style="padding:10px;font-weight:700;font-size:13px;text-align:right">Total unidades: ${totalUnits}</td>
+        </tr>
       </tbody>
     </table>
     ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}

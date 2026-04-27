@@ -76,7 +76,7 @@ router.get('/:id/account', (req, res) => {
 // POST /api/customers
 router.post('/', (req, res) => {
   try {
-    const { name, phone, email, address, notes, iva_condition, cuit } = req.body;
+    const { name, phone, email, address, localidad, provincia, notes, iva_condition, cuit } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'El nombre es requerido' });
     const normalizedCuit = normalizeCuit(cuit);
     if (!normalizedCuit) return res.status(400).json({ error: 'El CUIT es requerido' });
@@ -84,9 +84,9 @@ router.post('/', (req, res) => {
     const dup = db.prepare("SELECT id FROM customers WHERE cuit = ?").get(normalizedCuit);
     if (dup) return res.status(409).json({ error: 'El CUIT ingresado ya corresponde a otro cliente' });
     const result = db.prepare(`
-      INSERT INTO customers (name, cuit, phone, email, address, notes, iva_condition, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(name.trim(), normalizedCuit, phone||'', email||'', address||'', notes||'', iva_condition||'Consumidor Final', req.session.userId);
+      INSERT INTO customers (name, cuit, phone, email, address, localidad, provincia, notes, iva_condition, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name.trim(), normalizedCuit, phone||'', email||'', address||'', localidad||'', provincia||'', notes||'', iva_condition||'Consumidor Final', req.session.userId);
     res.status(201).json(db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(result.lastInsertRowid)));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -99,7 +99,7 @@ router.put('/:id', (req, res) => {
     if (!ex) return res.status(404).json({ error: 'Cliente no encontrado' });
     if (isVendor(req) && ex.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar clientes de otros vendedores' });
-    const { name, phone, email, address, notes, iva_condition, cuit } = req.body;
+    const { name, phone, email, address, localidad, provincia, notes, iva_condition, cuit } = req.body;
     let finalCuit = ex.cuit || '';
     if (cuit !== undefined) {
       if (!cuit || cuit.trim() === '') {
@@ -111,12 +111,14 @@ router.put('/:id', (req, res) => {
         if (dup) return res.status(409).json({ error: 'El CUIT ingresado ya corresponde a otro cliente' });
       }
     }
-    db.prepare(`UPDATE customers SET name=?, cuit=?, phone=?, email=?, address=?, notes=?, iva_condition=? WHERE id=?`).run(
+    db.prepare(`UPDATE customers SET name=?, cuit=?, phone=?, email=?, address=?, localidad=?, provincia=?, notes=?, iva_condition=? WHERE id=?`).run(
       name          !== undefined ? name.trim()    : ex.name,
       finalCuit,
       phone         !== undefined ? phone          : ex.phone,
       email         !== undefined ? email          : ex.email,
       address       !== undefined ? address        : ex.address,
+      localidad     !== undefined ? localidad      : (ex.localidad || ''),
+      provincia     !== undefined ? provincia      : (ex.provincia || ''),
       notes         !== undefined ? notes          : ex.notes,
       iva_condition !== undefined ? iva_condition  : ex.iva_condition,
       id
