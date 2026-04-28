@@ -439,7 +439,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
       ${localidad  ? `<div class="info-item"><label>Localidad</label><p>${esc(localidad)}</p></div>` : ''}
       ${provincia  ? `<div class="info-item"><label>Provincia</label><p>${esc(provincia)}</p></div>` : ''}
       ${medioPago  ? `<div class="info-item"><label>Medio de pago</label><p style="font-weight:700">${esc(medioPago)}</p></div>` : ''}
-      ${hasDiscount ? `<div class="info-item"><label>Descuento otorgado</label><p>${discParts.join(' + ')} &nbsp;—&nbsp; <strong>${fmtMoney(depTotalDisc)}</strong></p></div>` : ''}
+      ${hasDiscount ? `<div class="info-item"><label>Descuento otorgado</label><p style="font-weight:700">${discParts.join(' + ')}</p></div>` : ''}
     </div>
     <h3>Productos a preparar</h3>
     <table>
