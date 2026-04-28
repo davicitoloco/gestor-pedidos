@@ -215,10 +215,18 @@
                 <label class="label">Notas / Observaciones</label>
                 <textarea id="inp-notes" class="input textarea" rows="2" placeholder="Instrucciones, observaciones..."></textarea>
               </div>
-              <div style="margin-top:12px">
+              <div style="margin-top:12px;display:flex;gap:24px;flex-wrap:wrap">
                 <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
                   <input type="checkbox" id="inp-iva-exempt" style="width:16px;height:16px;cursor:pointer">
                   <span class="label" style="margin:0;font-size:.9rem">Exento de IVA</span>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+                  <input type="checkbox" id="inp-payment-efectivo" style="width:16px;height:16px;cursor:pointer">
+                  <span class="label" style="margin:0;font-size:.9rem">Efectivo</span>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+                  <input type="checkbox" id="inp-payment-cheque" style="width:16px;height:16px;cursor:pointer">
+                  <span class="label" style="margin:0;font-size:.9rem">Cheque</span>
                 </label>
               </div>
             </div>

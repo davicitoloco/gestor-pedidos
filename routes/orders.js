@@ -362,6 +362,20 @@ router.get('/:id/print-deposito', (req, res) => {
     const provincia = cust && cust.provincia ? cust.provincia : null;
     const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
 
+    // Descuento y medio de pago para el PDF depósito
+    const medioPago = order.payment_efectivo ? 'Efectivo' : order.payment_cheque ? 'Cheque' : null;
+    const depSubtotal = items.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+    const dd1 = order.discount  || 0;
+    const dd2 = order.discount2 || 0;
+    const dd3 = order.discount3 || 0;
+    const dd4 = order.discount4 || 0;
+    const dBase2 = depSubtotal * (1 - dd1/100);
+    const dBase3 = dBase2 * (1 - dd2/100);
+    const dBase4 = dBase3 * (1 - dd3/100);
+    const depTotalDisc = depSubtotal - dBase4 * (1 - dd4/100);
+    const discParts = [dd1, dd2, dd3, dd4].filter(v => v > 0).map(v => `${v}%`);
+    const hasDiscount = discParts.length > 0;
+
     const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Cancelado':'#475569' };
     const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Cancelado':'#f1f5f9' };
 
@@ -421,9 +435,11 @@ tbody tr:nth-child(even) td{background:#f8fafc}
       <div class="info-item"><label>Estado</label>
         <p><span class="badge" style="background:${statusBg[order.status]||'#f1f5f9'};color:${statusColor[order.status]||'#475569'}">${esc(order.status)}</span></p>
       </div>
-      ${address   ? `<div class="info-item full"><label>Dirección de entrega</label><p>${esc(address)}</p></div>` : ''}
-      ${localidad ? `<div class="info-item"><label>Localidad</label><p>${esc(localidad)}</p></div>` : ''}
-      ${provincia ? `<div class="info-item"><label>Provincia</label><p>${esc(provincia)}</p></div>` : ''}
+      ${address    ? `<div class="info-item full"><label>Dirección de entrega</label><p>${esc(address)}</p></div>` : ''}
+      ${localidad  ? `<div class="info-item"><label>Localidad</label><p>${esc(localidad)}</p></div>` : ''}
+      ${provincia  ? `<div class="info-item"><label>Provincia</label><p>${esc(provincia)}</p></div>` : ''}
+      ${medioPago  ? `<div class="info-item"><label>Medio de pago</label><p style="font-weight:700">${esc(medioPago)}</p></div>` : ''}
+      ${hasDiscount ? `<div class="info-item"><label>Descuento otorgado</label><p>${discParts.join(' + ')} &nbsp;—&nbsp; <strong>${fmtMoney(depTotalDisc)}</strong></p></div>` : ''}
     </div>
     <h3>Productos a preparar</h3>
     <table>
@@ -458,20 +474,22 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items } = req.body;
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
 
     const orderId = withTransaction(() => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
+      const efe = payment_efectivo ? 1 : 0;
+      const chq = efe ? 0 : (payment_cheque ? 1 : 0);
       const result = db.prepare(`
-        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(next, customer_name.trim(), notes || '', delivery_date || null,
              status || 'Pendiente',
              parseFloat(discount)  || 0, parseFloat(discount2) || 0,
              parseFloat(discount3) || 0, parseFloat(discount4) || 0,
-             iva_exempt ? 1 : 0,
+             iva_exempt ? 1 : 0, efe, chq,
              req.session.userId);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
@@ -501,9 +519,11 @@ router.put('/:id', (req, res) => {
     if (isVendor(req) && existing.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar pedidos de otros vendedores' });
 
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items } = req.body;
     withTransaction(() => {
-      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      const efe = payment_efectivo !== undefined ? (payment_efectivo ? 1 : 0) : (existing.payment_efectivo || 0);
+      const chq = payment_cheque  !== undefined ? (payment_cheque  ? 1 : 0) : (existing.payment_cheque  || 0);
+      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         customer_name !== undefined ? customer_name.trim() : existing.customer_name,
         notes !== undefined ? notes : existing.notes,
         delivery_date !== undefined ? (delivery_date || null) : existing.delivery_date,
@@ -513,6 +533,7 @@ router.put('/:id', (req, res) => {
         discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0),
         discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0),
         iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0),
+        efe, chq,
         id
       );
       if (items !== undefined) {

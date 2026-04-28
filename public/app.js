@@ -288,7 +288,9 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('inp-notes').value        = '';
   $('inp-disc1').value = '0'; $('inp-disc2').value = '0';
   $('inp-disc3').value = '0'; $('inp-disc4').value = '0';
-  $('inp-iva-exempt').checked = false;
+  $('inp-iva-exempt').checked        = false;
+  $('inp-payment-efectivo').checked  = false;
+  $('inp-payment-cheque').checked    = false;
   $('form-status-badge').innerHTML = '';
   $('btn-export-pdf').classList.add('hidden');
   $('btn-export-pdf-deposito').classList.add('hidden');
@@ -306,7 +308,9 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('inp-disc2').value = o.discount2 || 0;
       $('inp-disc3').value = o.discount3 || 0;
       $('inp-disc4').value = o.discount4 || 0;
-      $('inp-iva-exempt').checked = !!o.iva_exempt;
+      $('inp-iva-exempt').checked       = !!o.iva_exempt;
+      $('inp-payment-efectivo').checked = !!o.payment_efectivo;
+      $('inp-payment-cheque').checked   = !!o.payment_cheque;
       $('form-status-badge').innerHTML = statusBadge(o.status);
       $('btn-export-pdf').classList.remove('hidden');
       $('btn-export-pdf-deposito').classList.remove('hidden');
@@ -480,6 +484,12 @@ function calcTotals() {
   $(id).addEventListener('input', calcTotals)
 );
 $('inp-iva-exempt').addEventListener('change', calcTotals);
+$('inp-payment-efectivo').addEventListener('change', () => {
+  if ($('inp-payment-efectivo').checked) $('inp-payment-cheque').checked = false;
+});
+$('inp-payment-cheque').addEventListener('change', () => {
+  if ($('inp-payment-cheque').checked) $('inp-payment-efectivo').checked = false;
+});
 
 /* ================================================================ SAVE ORDER */
 $('order-form').addEventListener('submit', async e => {
@@ -497,8 +507,10 @@ $('order-form').addEventListener('submit', async e => {
     discount2: parseFloat($('inp-disc2').value) || 0,
     discount3: parseFloat($('inp-disc3').value) || 0,
     discount4: parseFloat($('inp-disc4').value) || 0,
-    iva_exempt: $('inp-iva-exempt').checked ? 1 : 0,
-    items:         state.items.filter(i => i.product_name.trim())
+    iva_exempt:        $('inp-iva-exempt').checked ? 1 : 0,
+    payment_efectivo:  $('inp-payment-efectivo').checked ? 1 : 0,
+    payment_cheque:    $('inp-payment-cheque').checked   ? 1 : 0,
+    items:             state.items.filter(i => i.product_name.trim())
   };
 
   const btn = $('btn-save');
