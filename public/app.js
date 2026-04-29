@@ -34,16 +34,19 @@ function isAdminLike()  { return state.user && (state.user.role === 'admin' || s
 
 /* ================================================================ STATE */
 const state = {
-  user:          null,
-  filterStatus:  'Todos',
-  editingOrderId:  null,
-  editingProdId:   null,
-  editingUserId:   null,
-  editingClientId: null,
-  items:           [],
-  productCatalog:  [],
-  customerList:    [],
-  charts:          {}
+  user:              null,
+  sucursales:        [],
+  activeSucursalId:  null,
+  filterStatus:      'Todos',
+  editingOrderId:    null,
+  editingProdId:     null,
+  editingUserId:     null,
+  editingClientId:   null,
+  items:             [],
+  productCatalog:    [],
+  customerList:      [],
+  allSucursales:     [],
+  charts:            {}
 };
 
 /* ================================================================ API */
@@ -93,7 +96,10 @@ $('modal-overlay').addEventListener('click', e => {
 /* ================================================================ AUTH */
 async function checkAuth() {
   try {
-    state.user = await api('GET', '/auth/me');
+    const data = await api('GET', '/auth/me');
+    state.user = data;
+    state.sucursales = data.sucursales || [];
+    state.activeSucursalId = data.active_sucursal_id || null;
     showApp();
   } catch { showLogin(); }
 }
@@ -116,11 +122,14 @@ async function showApp() {
   document.querySelectorAll('.admin-only-field').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.strict-admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
 
+  // Renderizar selector de sucursal
+  renderSucursalSelector();
+
   // Cargar settings
   try {
     const cfg = await api('GET', '/settings');
-    $('sidebar-company').textContent = cfg.company_name || 'Pedidos';
-    $('mobile-company-name').textContent = cfg.company_name || 'Pedidos';
+    $('sidebar-company').textContent = cfg.company_name || 'Candex Pro';
+    $('mobile-company-name').textContent = cfg.company_name || 'Candex Pro';
     $('inp-company-name').value = cfg.company_name || '';
   } catch {}
 
@@ -136,10 +145,13 @@ $('login-form').addEventListener('submit', async e => {
   $('login-error').classList.add('hidden');
   btn.disabled = true; btn.textContent = 'Ingresando...';
   try {
-    state.user = await api('POST', '/auth/login', {
+    const data = await api('POST', '/auth/login', {
       username: $('inp-username').value.trim(),
       password: $('inp-password').value
     });
+    state.user = data;
+    state.sucursales = data.sucursales || [];
+    state.activeSucursalId = data.active_sucursal_id || null;
     showApp();
   } catch (err) {
     $('login-error').textContent = err.message;
@@ -151,6 +163,48 @@ $('btn-logout').addEventListener('click', async () => {
   await api('POST', '/auth/logout');
   state.user = null;
   showLogin();
+});
+
+/* ================================================================ SUCURSAL SELECTOR */
+function renderSucursalSelector() {
+  const container = $('sidebar-sucursal');
+  const sel = $('sel-sucursal');
+  const sucursales = state.sucursales || [];
+
+  // Show selector only if user has 2+ sucursales, or is admin
+  const showSel = sucursales.length >= 2 || isAdmin();
+  container.classList.toggle('hidden', !showSel);
+  if (!showSel) return;
+
+  sel.innerHTML = '';
+  if (isAdmin()) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Todas las sucursales';
+    sel.appendChild(opt);
+  }
+  for (const s of sucursales) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  }
+  sel.value = state.activeSucursalId || '';
+}
+
+$('sel-sucursal').addEventListener('change', async () => {
+  const val = $('sel-sucursal').value;
+  const sucursal_id = val === '' ? null : Number(val);
+  try {
+    await api('POST', '/auth/switch-sucursal', { sucursal_id });
+    state.activeSucursalId = sucursal_id;
+    // Reload current section data
+    const active = document.querySelector('.nav-item.active');
+    if (active) {
+      const section = active.getAttribute('data-section');
+      if (section) navigate(section);
+    }
+  } catch (err) { toast(err.message, 'error'); }
 });
 
 /* ================================================================ NAVIGATION */
@@ -699,6 +753,7 @@ function renderUsers(users) {
         : u.role === 'subadmin'
           ? '<span class="badge badge-info">Subadmin</span>'
           : '<span class="badge badge-vendor">Vendedor</span>'}</td>
+      <td style="font-size:.82rem;color:var(--text-muted)">${(u.sucursales||[]).map(s=>esc(s.name)).join(', ') || '—'}</td>
       <td class="text-center">
         ${u.active
           ? '<span class="badge badge-success">Activo</span>'
@@ -732,6 +787,21 @@ $('btn-new-user').addEventListener('click', () => openUserForm(null));
 $('btn-users-back').addEventListener('click', () => { showUsersSubview('list'); loadUsers(); });
 $('btn-user-cancel').addEventListener('click', () => { showUsersSubview('list'); loadUsers(); });
 
+function renderUserSucursalCheckboxes(assignedIds) {
+  const container = $('user-sucursal-checkboxes');
+  container.innerHTML = (state.allSucursales || []).map(s => `
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" value="${s.id}" ${(assignedIds || []).includes(s.id) ? 'checked' : ''}>
+      ${esc(s.name)}
+    </label>
+  `).join('');
+}
+
+function getSelectedSucursalIds() {
+  return Array.from($('user-sucursal-checkboxes').querySelectorAll('input[type=checkbox]:checked'))
+    .map(cb => Number(cb.value));
+}
+
 window.openUserForm = function(id) {
   state.editingUserId = id || null;
   $('user-form-title').textContent = id ? 'Editar Usuario' : 'Nuevo Usuario';
@@ -742,17 +812,25 @@ window.openUserForm = function(id) {
   $('inp-user-username').disabled = false;
   $('pwd-label').textContent = id ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña *';
 
-  if (id) {
-    api('GET', '/users').then(list => {
-      const u = list.find(x => x.id === id);
-      if (u) {
-        $('inp-user-fullname').value  = u.full_name;
-        $('inp-user-username').value  = u.username;
-        $('inp-user-role').value      = u.role;
-        $('inp-user-username').disabled = true;
-      }
-    });
-  }
+  // Load sucursales list then render checkboxes
+  api('GET', '/users/sucursales').then(subs => {
+    state.allSucursales = subs;
+    if (id) {
+      api('GET', '/users').then(list => {
+        const u = list.find(x => x.id === id);
+        if (u) {
+          $('inp-user-fullname').value  = u.full_name;
+          $('inp-user-username').value  = u.username;
+          $('inp-user-role').value      = u.role;
+          $('inp-user-username').disabled = true;
+          renderUserSucursalCheckboxes((u.sucursales || []).map(s => s.id));
+        }
+      });
+    } else {
+      renderUserSucursalCheckboxes([]);
+    }
+  });
+
   showUsersSubview('form');
   setTimeout(() => $('inp-user-fullname').focus(), 50);
 };
@@ -771,14 +849,15 @@ $('user-form').addEventListener('submit', async e => {
 
   const btn = $('btn-user-save');
   btn.disabled = true;
+  const sucursal_ids = getSelectedSucursalIds();
   try {
     if (state.editingUserId) {
-      const body = { full_name: fullname, role };
+      const body = { full_name: fullname, role, sucursal_ids };
       if (password) body.password = password;
       await api('PUT', `/users/${state.editingUserId}`, body);
       toast('Usuario actualizado', 'success');
     } else {
-      await api('POST', '/users', { username, password, full_name: fullname, role });
+      await api('POST', '/users', { username, password, full_name: fullname, role, sucursal_ids });
       toast('Usuario creado', 'success');
     }
     showUsersSubview('list');

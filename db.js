@@ -286,6 +286,16 @@ db.exec(`
     created_by INTEGER REFERENCES users(id),
     created_at TEXT DEFAULT (datetime('now','localtime'))
   );
+  CREATE TABLE IF NOT EXISTS sucursales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE TABLE IF NOT EXISTS user_sucursales (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sucursal_id INTEGER NOT NULL REFERENCES sucursales(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, sucursal_id)
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
@@ -322,6 +332,33 @@ addColIfMissing('customers', 'cuit', "TEXT NOT NULL DEFAULT ''");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_cuit ON customers(cuit) WHERE cuit != ''");
 addColIfMissing('customers', 'localidad', "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('customers', 'provincia', "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('orders',           'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('remitos',          'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('cash_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('bank_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('payments',         'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('supplier_payments','sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('cheques',          'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('stock_movements',  'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+
+// Seed sucursales
+{
+  const sucCount = db.prepare('SELECT COUNT(*) AS c FROM sucursales').get().c;
+  if (sucCount === 0) {
+    db.prepare("INSERT INTO sucursales (id, name) VALUES (1, 'Candex')").run();
+    db.prepare("INSERT INTO sucursales (id, name) VALUES (2, 'Estadistica')").run();
+  }
+}
+
+// Assign admin to all sucursales
+{
+  const admin = db.prepare("SELECT id FROM users WHERE username='admin'").get();
+  if (admin) {
+    const subs = db.prepare('SELECT id FROM sucursales').all();
+    const ins = db.prepare('INSERT OR IGNORE INTO user_sucursales (user_id, sucursal_id) VALUES (?,?)');
+    for (const s of subs) ins.run(admin.id, s.id);
+  }
+};
 
 // Seed plan de cuentas
 {

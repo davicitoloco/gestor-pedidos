@@ -2,6 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
+const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -61,8 +62,9 @@ router.get('/', requireAdmin, (req, res) => {
 router.get('/movements', requireAdmin, (req, res) => {
   try {
     const { product_id, date_from, date_to, page = 1, per_page = 50 } = req.query;
-    let where = '1=1';
-    const params = [];
+    const sf = getSucursalFilter(req, 'sm');
+    let where = `1=1 ${sf.clause}`;
+    const params = [...sf.params];
     if (product_id) { where += ' AND sm.product_id = ?'; params.push(Number(product_id)); }
     if (date_from)  { where += " AND DATE(sm.created_at) >= ?"; params.push(date_from); }
     if (date_to)    { where += " AND DATE(sm.created_at) <= ?"; params.push(date_to); }
@@ -119,9 +121,9 @@ router.put('/:article_id', requireAdmin, (req, res) => {
     withTransaction(() => {
       db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newQty, id);
       db.prepare(`
-        INSERT INTO stock_movements (product_id, type, quantity, notes, previous_qty, new_qty, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, type, delta, note, prevQty, newQty, req.session.userId);
+        INSERT INTO stock_movements (product_id, type, quantity, notes, previous_qty, new_qty, created_by, sucursal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, type, delta, note, prevQty, newQty, req.session.userId, getInsertSucursalId(req));
     });
 
     res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
@@ -145,9 +147,9 @@ router.post('/ingresos', requireAdmin, (req, res) => {
     withTransaction(() => {
       db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(qty, Number(product_id));
       db.prepare(`
-        INSERT INTO stock_movements (product_id, type, quantity, notes, previous_qty, new_qty, created_by)
-        VALUES (?, 'ingreso', ?, ?, ?, ?, ?)
-      `).run(Number(product_id), qty, notes || '', prevQty, newQty, req.session.userId);
+        INSERT INTO stock_movements (product_id, type, quantity, notes, previous_qty, new_qty, created_by, sucursal_id)
+        VALUES (?, 'ingreso', ?, ?, ?, ?, ?, ?)
+      `).run(Number(product_id), qty, notes || '', prevQty, newQty, req.session.userId, getInsertSucursalId(req));
     });
 
     res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(Number(product_id)));

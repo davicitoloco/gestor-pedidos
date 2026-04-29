@@ -1,13 +1,14 @@
 const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
+const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
   next();
 }
 function requireAdmin(req, res, next) {
-  if (req.session.role !== 'admin') return res.status(403).json({ error: 'Solo administradores' });
+  if (!['admin','subadmin'].includes(req.session.role)) return res.status(403).json({ error: 'Solo administradores' });
   next();
 }
 router.use(requireAuth, requireAdmin);
@@ -94,13 +95,14 @@ router.get('/accounts/:id/movements', (req, res) => {
     const id  = Number(req.params.id);
     const acc = db.prepare('SELECT * FROM bank_accounts WHERE id=?').get(id);
     if (!acc) return res.status(404).json({ error: 'Cuenta no encontrada' });
+    const sf = getSucursalFilter(req, 'bm');
     const rows = db.prepare(`
       SELECT bm.*, COALESCE(u.full_name, u.username) AS created_by_name
       FROM bank_movements bm
       LEFT JOIN users u ON bm.created_by = u.id
-      WHERE bm.bank_account_id = ?
+      WHERE bm.bank_account_id = ? ${sf.clause}
       ORDER BY bm.created_at ASC, bm.id ASC
-    `).all(id);
+    `).all(id, ...sf.params);
 
     let running = acc.initial_balance;
     const withBalance = rows.map(r => {
@@ -123,9 +125,9 @@ router.post('/accounts/:id/movements', (req, res) => {
     if (!['ingreso','egreso'].includes(type)) return res.status(400).json({ error: 'Tipo inválido' });
     if (!amount || parseFloat(amount) <= 0)   return res.status(400).json({ error: 'Monto inválido' });
     const r = db.prepare(`
-      INSERT INTO bank_movements (bank_account_id, type, amount, description, ref_type, created_by)
-      VALUES (?, ?, ?, ?, 'manual', ?)
-    `).run(bank_account_id, type, parseFloat(amount), description||'', req.session.userId);
+      INSERT INTO bank_movements (bank_account_id, type, amount, description, ref_type, created_by, sucursal_id)
+      VALUES (?, ?, ?, ?, 'manual', ?, ?)
+    `).run(bank_account_id, type, parseFloat(amount), description||'', req.session.userId, getInsertSucursalId(req));
     res.status(201).json(db.prepare('SELECT * FROM bank_movements WHERE id=?').get(Number(r.lastInsertRowid)));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

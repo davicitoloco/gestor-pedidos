@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gestor de Pedidos</title>
+  <title>Candex Pro</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -19,7 +19,7 @@
         <rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/>
       </svg>
     </div>
-    <h1 class="login-title">Gestor de Pedidos</h1>
+    <h1 class="login-title">Candex Pro</h1>
     <p class="login-subtitle">Ingresá con tu usuario y contraseña</p>
     <form id="login-form" autocomplete="on">
       <div class="field"><label class="label">Usuario</label>
@@ -42,7 +42,7 @@
         <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
         <rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/>
       </svg>
-      <span id="sidebar-company">Pedidos</span>
+      <span id="sidebar-company">Candex Pro</span>
     </div>
     <nav class="sidebar-nav">
       <a class="nav-item active" data-section="pedidos" href="#">
@@ -82,6 +82,9 @@
       <div class="sidebar-user">
         <span id="sidebar-username"></span>
         <span id="sidebar-role"></span>
+      </div>
+      <div id="sidebar-sucursal" class="hidden" style="padding:6px 12px 0">
+        <select id="sel-sucursal" class="input" style="font-size:12px;padding:4px 6px;height:auto"></select>
       </div>
       <button id="btn-settings" class="sidebar-settings admin-only" title="Configuración">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -656,6 +659,7 @@
               <th>Nombre</th>
               <th style="width:160px">Usuario</th>
               <th style="width:110px">Rol</th>
+              <th style="width:150px">Sucursales</th>
               <th style="width:90px" class="text-center">Estado</th>
               <th style="width:100px" class="text-center">Acciones</th>
             </tr></thead>
@@ -700,6 +704,10 @@
                     <option value="admin">Administrador</option>
                   </select>
                 </div>
+              </div>
+              <div class="field" style="margin-top:12px">
+                <label class="label">Sucursales asignadas</label>
+                <div id="user-sucursal-checkboxes" style="display:flex;gap:16px;flex-wrap:wrap;padding-top:4px"></div>
               </div>
             </div>
           </div>

@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
 const { acctBySubtype, acctByBankId, recordJournal } = require('../lib/accounting');
+const { getInsertSucursalId } = require('../lib/sucursal');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -66,9 +67,10 @@ router.post('/', (req, res) => {
         chequeId = Number(cr.lastInsertRowid);
       }
 
+      const sucursalId = getInsertSucursalId(req);
       const r = db.prepare(`
-        INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, reference, bank, bank_account_id, cheque_id, notes, payment_date, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, reference, bank, bank_account_id, cheque_id, notes, payment_date, created_by, sucursal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         sid,
         purchase_id ? Number(purchase_id) : null,
@@ -79,17 +81,18 @@ router.post('/', (req, res) => {
         chequeId,
         notes || '',
         payment_date || null,
-        req.session.userId
+        req.session.userId,
+        sucursalId
       );
       const paymentId = Number(r.lastInsertRowid);
 
       // Auto cash/bank movements
       if (method === 'efectivo') {
-        db.prepare(`INSERT INTO cash_movements (type,amount,description,ref_type,ref_id,created_by) VALUES (?,?,?,?,?,?)`)
-          .run('egreso', amt, desc, 'supplier_payment', paymentId, req.session.userId);
+        db.prepare(`INSERT INTO cash_movements (type,amount,description,ref_type,ref_id,created_by,sucursal_id) VALUES (?,?,?,?,?,?,?)`)
+          .run('egreso', amt, desc, 'supplier_payment', paymentId, req.session.userId, sucursalId);
       } else if (method === 'transferencia' && bank_account_id) {
-        db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by) VALUES (?,?,?,?,?,?,?)`)
-          .run(Number(bank_account_id), 'egreso', amt, desc, 'supplier_payment', paymentId, req.session.userId);
+        db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by,sucursal_id) VALUES (?,?,?,?,?,?,?,?)`)
+          .run(Number(bank_account_id), 'egreso', amt, desc, 'supplier_payment', paymentId, req.session.userId, sucursalId);
       }
       // cheque emitido → bank movement happens when status → debitado
 

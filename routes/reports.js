@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const { getSucursalFilter } = require('../lib/sucursal');
 
 function requireAdmin(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -11,6 +12,7 @@ router.use(requireAdmin);
 
 function isVendor(req) { return req.session.role === 'vendedor'; }
 function vendorClause(req) { return isVendor(req) ? `AND o.created_by = ${req.session.userId}` : ''; }
+function sucursalClause(req) { const sf = getSucursalFilter(req, 'o'); return { clause: sf.clause, params: sf.params }; }
 
 function fmtMoney(v) { return '$ ' + (v||0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
 function fmtDate(s) { if(!s) return '-'; const d=s.split(' ')[0].split('-'); return `${d[2]}/${d[1]}/${d[0]}`; }
@@ -30,10 +32,11 @@ const DF = "(1.0 - o.discount/100.0) * (1.0 - COALESCE(o.discount2,0)/100.0) * (
 router.get('/stats', (req, res) => {
   try {
     const vc = vendorClause(req);
+    const sc = sucursalClause(req);
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
 
-    const total = db.prepare(`SELECT COUNT(*) AS c FROM orders o WHERE 1=1 ${vc}`).get().c;
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM orders o WHERE 1=1 ${vc} ${sc.clause}`).get(...sc.params).c;
 
     const monthData = db.prepare(`
       SELECT COUNT(DISTINCT o.id) AS cnt, COALESCE(SUM(sub.t),0) AS sales
@@ -42,8 +45,8 @@ router.get('/stats', (req, res) => {
         SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
         FROM order_items GROUP BY order_id
       ) sub ON sub.order_id = o.id
-      WHERE o.created_at >= ? AND o.status != 'Cancelado' ${vc}
-    `).get(monthStart);
+      WHERE o.created_at >= ? AND o.status != 'Cancelado' ${vc} ${sc.clause}
+    `).get(monthStart, ...sc.params);
 
     const totalSales = db.prepare(`
       SELECT COALESCE(SUM(sub.t * ${DF}),0) AS s
@@ -52,16 +55,16 @@ router.get('/stats', (req, res) => {
         SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
         FROM order_items GROUP BY order_id
       ) sub ON sub.order_id = o.id
-      WHERE o.status != 'Cancelado' ${vc}
-    `).get().s;
+      WHERE o.status != 'Cancelado' ${vc} ${sc.clause}
+    `).get(...sc.params).s;
 
     const monthSales = monthData.sales;
     const monthOrders = monthData.cnt;
 
     // Pedidos por estado
     const byStatus = db.prepare(`
-      SELECT status, COUNT(*) AS cnt FROM orders o WHERE 1=1 ${vc} GROUP BY status
-    `).all();
+      SELECT status, COUNT(*) AS cnt FROM orders o WHERE 1=1 ${vc} ${sc.clause} GROUP BY status
+    `).all(...sc.params);
 
     res.json({
       total_orders: total,
@@ -78,6 +81,7 @@ router.get('/stats', (req, res) => {
 router.get('/weekly', (req, res) => {
   try {
     const vc = vendorClause(req);
+    const sc = sucursalClause(req);
     const now = new Date();
     const dayOfWeek = now.getDay();
     const daysToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
@@ -104,8 +108,8 @@ router.get('/weekly', (req, res) => {
           FROM order_items GROUP BY order_id
         ) sub ON sub.order_id = o.id
         WHERE o.created_at >= ? AND o.created_at <= ?
-          AND o.status != 'Cancelado' ${vc}
-      `).get(start, end);
+          AND o.status != 'Cancelado' ${vc} ${sc.clause}
+      `).get(start, end, ...sc.params);
 
       weeks.push({ label, count: row.cnt, total: row.total });
     }
@@ -117,6 +121,7 @@ router.get('/weekly', (req, res) => {
 router.get('/top-products', (req, res) => {
   try {
     const vc = vendorClause(req);
+    const sc = sucursalClause(req);
     const rows = db.prepare(`
       SELECT
         oi.product_name,
@@ -125,11 +130,11 @@ router.get('/top-products', (req, res) => {
         SUM(oi.quantity * oi.unit_price * (1.0-oi.discount/100.0)) AS revenue
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
-      WHERE o.status != 'Cancelado' ${vc}
+      WHERE o.status != 'Cancelado' ${vc} ${sc.clause}
       GROUP BY LOWER(TRIM(oi.product_name))
       ORDER BY revenue DESC
       LIMIT 15
-    `).all();
+    `).all(...sc.params);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -157,6 +162,7 @@ router.get('/top-customers', (req, res) => {
     const from  = validateDate(req.query.from);
     const to    = validateDate(req.query.to);
     const limit = rankingLimit(req);
+    const sc = sucursalClause(req);
     const rows = db.prepare(`
       SELECT TRIM(o.customer_name) AS customer_name,
              COUNT(DISTINCT o.id)   AS order_count,
@@ -168,11 +174,11 @@ router.get('/top-customers', (req, res) => {
         FROM order_items GROUP BY order_id
       ) sub ON sub.order_id = o.id
       WHERE o.status != 'Cancelado'
-        ${rangeClause('o', 'created_at', from, to)}
+        ${rangeClause('o', 'created_at', from, to)} ${sc.clause}
       GROUP BY LOWER(TRIM(o.customer_name))
       ORDER BY total DESC
       LIMIT ?
-    `).all(...rangeParams(from, to), limit);
+    `).all(...rangeParams(from, to), ...sc.params, limit);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -226,6 +232,7 @@ router.get('/top-discounts', (req, res) => {
     const from  = validateDate(req.query.from);
     const to    = validateDate(req.query.to);
     const limit = rankingLimit(req);
+    const sc = sucursalClause(req);
     const rows = db.prepare(`
       SELECT printf('%03d', o.order_sequence) AS order_number,
              o.customer_name,
@@ -239,10 +246,10 @@ router.get('/top-discounts', (req, res) => {
       ) sub ON sub.order_id = o.id
       WHERE (o.discount > 0 OR COALESCE(o.discount2,0) > 0 OR COALESCE(o.discount3,0) > 0 OR COALESCE(o.discount4,0) > 0)
         AND o.status != 'Cancelado'
-        ${rangeClause('o', 'created_at', from, to)}
+        ${rangeClause('o', 'created_at', from, to)} ${sc.clause}
       ORDER BY discount_amount DESC
       LIMIT ?
-    `).all(...rangeParams(from, to), limit);
+    `).all(...rangeParams(from, to), ...sc.params, limit);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -253,6 +260,7 @@ router.get('/top-vendors', (req, res) => {
     const from  = validateDate(req.query.from);
     const to    = validateDate(req.query.to);
     const limit = rankingLimit(req);
+    const sc = sucursalClause(req);
     const rows = db.prepare(`
       SELECT COALESCE(u.full_name, u.username, 'Sin asignar') AS vendor_name,
              COUNT(DISTINCT o.id) AS order_count,
@@ -265,11 +273,11 @@ router.get('/top-vendors', (req, res) => {
         FROM order_items GROUP BY order_id
       ) sub ON sub.order_id = o.id
       WHERE o.status != 'Cancelado'
-        ${rangeClause('o', 'created_at', from, to)}
+        ${rangeClause('o', 'created_at', from, to)} ${sc.clause}
       GROUP BY o.created_by
       ORDER BY total DESC
       LIMIT ?
-    `).all(...rangeParams(from, to), limit);
+    `).all(...rangeParams(from, to), ...sc.params, limit);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -279,6 +287,7 @@ router.get('/excel', async (req, res) => {
   try {
     const ExcelJS = require('exceljs');
     const vc = vendorClause(req);
+    const sc = sucursalClause(req);
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Gestor de Pedidos';
 
@@ -313,9 +322,9 @@ router.get('/excel', async (req, res) => {
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN users u ON o.created_by = u.id
-      WHERE 1=1 ${vc}
+      WHERE 1=1 ${vc} ${sc.clause}
       GROUP BY o.id ORDER BY o.order_sequence DESC
-    `).all();
+    `).all(...sc.params);
 
     orders.forEach(o => {
       const row = ws1.addRow({

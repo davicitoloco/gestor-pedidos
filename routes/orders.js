@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db, withTransaction } = require('../db');
+const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -45,9 +46,11 @@ router.get('/', (req, res) => {
     const vendorFilter = isVendor(req) ? `AND o.created_by = ${req.session.userId}` : '';
     const statusFilter = (status && status !== 'Todos') ? `AND o.status = ?` : '';
     const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ?)` : '';
+    const sf = getSucursalFilter(req, 'o');
     const params = [];
     if (status && status !== 'Todos') params.push(status);
     if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q); }
+    params.push(...sf.params);
 
     const sql = `
       SELECT
@@ -67,7 +70,7 @@ router.get('/', (req, res) => {
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN users u ON o.created_by = u.id
-      WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter}
+      WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter} ${sf.clause}
       GROUP BY o.id
       ORDER BY o.order_sequence DESC
     `;
@@ -482,15 +485,16 @@ router.post('/', (req, res) => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
       const efe = payment_efectivo ? 1 : 0;
       const chq = efe ? 0 : (payment_cheque ? 1 : 0);
+      const sucursalId = getInsertSucursalId(req);
       const result = db.prepare(`
-        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(next, customer_name.trim(), notes || '', delivery_date || null,
              status || 'Pendiente',
              parseFloat(discount)  || 0, parseFloat(discount2) || 0,
              parseFloat(discount3) || 0, parseFloat(discount4) || 0,
              iva_exempt ? 1 : 0, efe, chq,
-             req.session.userId);
+             req.session.userId, sucursalId);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
         const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
@@ -622,8 +626,8 @@ router.post('/:id/deliveries', (req, res) => {
         if (productId) {
           const qty = parseFloat(item.quantity_delivered);
           db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(qty, productId);
-          db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by) VALUES (?, 'egreso', ?, ?, ?)`)
-            .run(productId, qty, ref, req.session.userId);
+          db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by, sucursal_id) VALUES (?, 'egreso', ?, ?, ?, ?)`)
+            .run(productId, qty, ref, req.session.userId, getInsertSucursalId(req));
         }
       }
 
@@ -652,8 +656,8 @@ router.post('/:id/deliveries', (req, res) => {
       const cust      = db.prepare("SELECT id, iva_condition FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
       const { nextR } = db.prepare('SELECT COALESCE(MAX(remito_sequence), 0) + 1 AS nextR FROM remitos').get();
       const rr = db.prepare(
-        'INSERT INTO remitos (remito_sequence, order_id, delivery_id, customer_id, customer_name, customer_iva, total, iva_exempt, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(nextR, id, delivId, cust ? cust.id : null, order.customer_name, cust ? (cust.iva_condition || 'Consumidor Final') : 'Consumidor Final', rTotal, order.iva_exempt ? 1 : 0, req.session.userId);
+        'INSERT INTO remitos (remito_sequence, order_id, delivery_id, customer_id, customer_name, customer_iva, total, iva_exempt, created_by, sucursal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(nextR, id, delivId, cust ? cust.id : null, order.customer_name, cust ? (cust.iva_condition || 'Consumidor Final') : 'Consumidor Final', rTotal, order.iva_exempt ? 1 : 0, req.session.userId, getInsertSucursalId(req));
       const remitoId = Number(rr.lastInsertRowid);
       const insRI = db.prepare('INSERT INTO remito_items (remito_id, product_name, quantity, unit_price, discount) VALUES (?, ?, ?, ?, ?)');
       for (const it of remitoItems) insRI.run(remitoId, it.product_name, it.quantity, it.unit_price, it.discount);
@@ -692,8 +696,8 @@ router.delete('/:id/deliveries/:delivId', (req, res) => {
         }
         if (productId) {
           db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity_delivered, productId);
-          db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by) VALUES (?, 'ingreso', ?, ?, ?)`)
-            .run(productId, item.quantity_delivered, ref, req.session.userId);
+          db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by, sucursal_id) VALUES (?, 'ingreso', ?, ?, ?, ?)`)
+            .run(productId, item.quantity_delivered, ref, req.session.userId, getInsertSucursalId(req));
         }
       }
 

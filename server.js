@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -52,7 +52,7 @@ app.use('/api/accounting',        require('./routes/accounting'));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`\n  Gestor de Pedidos → http://localhost:${PORT}`);
+  console.log(`\n  Candex Pro → http://localhost:${PORT}`);
   console.log(`  Base de datos      → ${DB_FILE} ${dbIsNew ? '[NUEVA]' : '[existente]'}`);
   if (dbIsNew) console.log('  ⚠  Base de datos creada desde cero. Si esto ocurre en cada deploy, el volumen no está montado correctamente.');
   console.log();

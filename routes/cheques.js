@@ -2,13 +2,14 @@ const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
 const { acctBySubtype, acctByBankId, recordJournal } = require('../lib/accounting');
+const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
   next();
 }
 function requireAdmin(req, res, next) {
-  if (req.session.role !== 'admin') return res.status(403).json({ error: 'Solo administradores' });
+  if (!['admin','subadmin'].includes(req.session.role)) return res.status(403).json({ error: 'Solo administradores' });
   next();
 }
 router.use(requireAuth, requireAdmin);
@@ -17,8 +18,9 @@ router.use(requireAuth, requireAdmin);
 router.get('/', (req, res) => {
   try {
     const { direction, status } = req.query;
-    let where = '1=1';
-    const params = [];
+    const sf = getSucursalFilter(req, 'c');
+    let where = `1=1 ${sf.clause}`;
+    const params = [...sf.params];
     if (direction) { where += ' AND c.direction = ?'; params.push(direction); }
     if (status)    { where += ' AND c.status = ?';    params.push(status); }
 
@@ -69,13 +71,13 @@ router.post('/', (req, res) => {
 
     const status = direction === 'recibido' ? 'en_cartera' : 'emitido';
     const r = db.prepare(`
-      INSERT INTO cheques (direction, bank, cheque_number, amount, due_date, status, holder_name, notes, customer_id, supplier_id, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO cheques (direction, bank, cheque_number, amount, due_date, status, holder_name, notes, customer_id, supplier_id, created_by, sucursal_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(direction, bank.trim(), cheque_number, parseFloat(amount), due_date, status,
            holder_name||'', notes||'',
            customer_id ? Number(customer_id) : null,
            supplier_id ? Number(supplier_id) : null,
-           req.session.userId);
+           req.session.userId, getInsertSucursalId(req));
     res.status(201).json(db.prepare('SELECT * FROM cheques WHERE id=?').get(Number(r.lastInsertRowid)));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -98,8 +100,8 @@ router.patch('/:id/status', (req, res) => {
         if (!bank_account_id) throw new Error('Se requiere cuenta bancaria para depositar');
         const accId = Number(bank_account_id);
         db.prepare('UPDATE cheques SET status=?, deposited_to=? WHERE id=?').run(status, accId, id);
-        db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by) VALUES (?,?,?,?,?,?,?)`)
-          .run(accId, 'ingreso', ch.amount, `Depósito cheque ${ch.bank} Nro ${ch.cheque_number}`, 'cheque_deposit', id, req.session.userId);
+        db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by,sucursal_id) VALUES (?,?,?,?,?,?,?,?)`)
+          .run(accId, 'ingreso', ch.amount, `Depósito cheque ${ch.bank} Nro ${ch.cheque_number}`, 'cheque_deposit', id, req.session.userId, getInsertSucursalId(req));
         // Journal: Banco / Cheques en cartera
         try {
           const bancoAcct  = acctByBankId(accId);
@@ -116,8 +118,8 @@ router.patch('/:id/status', (req, res) => {
         if (!bank_account_id) throw new Error('Se requiere cuenta bancaria');
         const accId = Number(bank_account_id);
         db.prepare('UPDATE cheques SET status=?, deposited_to=? WHERE id=?').run(status, accId, id);
-        db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by) VALUES (?,?,?,?,?,?,?)`)
-          .run(accId, 'egreso', ch.amount, `Débito cheque ${ch.bank} Nro ${ch.cheque_number}`, 'cheque_debit', id, req.session.userId);
+        db.prepare(`INSERT INTO bank_movements (bank_account_id,type,amount,description,ref_type,ref_id,created_by,sucursal_id) VALUES (?,?,?,?,?,?,?,?)`)
+          .run(accId, 'egreso', ch.amount, `Débito cheque ${ch.bank} Nro ${ch.cheque_number}`, 'cheque_debit', id, req.session.userId, getInsertSucursalId(req));
         // Journal: Otras deudas / Banco
         try {
           const otrasDeudasAcct = db.prepare("SELECT id FROM accounts WHERE code='2.1.02'").get();
