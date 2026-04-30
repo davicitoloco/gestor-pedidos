@@ -31,6 +31,7 @@ function statusBadge(s) {
 function isAdmin()      { return state.user && state.user.role === 'admin'; }
 function isSubAdmin()   { return state.user && state.user.role === 'subadmin'; }
 function isAdminLike()  { return state.user && (state.user.role === 'admin' || state.user.role === 'subadmin'); }
+function isVendor()     { return state.user && state.user.role === 'vendedor'; }
 
 /* ================================================================ STATE */
 const state = {
@@ -349,6 +350,19 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('btn-export-pdf').classList.add('hidden');
   $('btn-export-pdf-deposito').classList.add('hidden');
   if ($('inp-vendor-display')) $('inp-vendor-display').value = '';
+  // Poblar select de sucursal para admin
+  if (isAdmin()) {
+    const sel = $('inp-sucursal-id');
+    if (sel) {
+      sel.innerHTML = '<option value="">— Sin asignar —</option>' +
+        (state.sucursales || []).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      sel.value = '';
+    }
+  }
+
+  // Vendedores solo pueden seleccionar Cancelado
+  const statusSel = $('inp-status');
+  Array.from(statusSel.options).forEach(opt => { opt.disabled = isVendor() && opt.value !== 'Cancelado'; });
 
   if (orderId) {
     try {
@@ -369,6 +383,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('btn-export-pdf').classList.remove('hidden');
       $('btn-export-pdf-deposito').classList.remove('hidden');
       if ($('inp-vendor-display') && isAdmin()) $('inp-vendor-display').value = o.vendor_name || '—';
+      if ($('inp-sucursal-id') && isAdmin()) $('inp-sucursal-id').value = o.sucursal_id || '';
       state.items = (o.items || []).map(i => ({ ...i }));
     } catch (err) { toast(err.message, 'error'); return; }
   }
@@ -552,6 +567,10 @@ $('order-form').addEventListener('submit', async e => {
   if (!customer) { toast('El nombre del cliente es requerido', 'error'); $('inp-customer').focus(); return; }
   if (!findCustomerByName(customer)) { toast('El cliente debe estar registrado en el módulo Clientes', 'error'); $('inp-customer').focus(); return; }
 
+  if (isAdmin() && $('inp-sucursal-id') && !$('inp-sucursal-id').value) {
+    toast('La sucursal es obligatoria', 'error'); $('inp-sucursal-id').focus(); return;
+  }
+
   const data = {
     customer_name: customer,
     status:        $('inp-status').value,
@@ -566,6 +585,10 @@ $('order-form').addEventListener('submit', async e => {
     payment_cheque:    $('inp-payment-cheque').checked   ? 1 : 0,
     items:             state.items.filter(i => i.product_name.trim())
   };
+  if (isAdmin() && $('inp-sucursal-id')) {
+    const sid = $('inp-sucursal-id').value;
+    data.sucursal_id = sid ? Number(sid) : null;
+  }
 
   const btn = $('btn-save');
   btn.disabled = true;
@@ -837,10 +860,11 @@ window.openUserForm = function(id) {
 
 $('user-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const fullname = $('inp-user-fullname').value.trim();
-  const username = $('inp-user-username').value.trim();
-  const password = $('inp-user-password').value;
-  const role     = $('inp-user-role').value;
+  const fullname     = $('inp-user-fullname').value.trim();
+  const username     = $('inp-user-username').value.trim();
+  const password     = $('inp-user-password').value;
+  const role         = $('inp-user-role').value;
+  const sucursal_ids = getSelectedSucursalIds();
 
   if (!fullname) { toast('El nombre completo es requerido', 'error'); return; }
   if (!state.editingUserId && !username) { toast('El nombre de usuario es requerido', 'error'); return; }
@@ -849,7 +873,6 @@ $('user-form').addEventListener('submit', async e => {
 
   const btn = $('btn-user-save');
   btn.disabled = true;
-  const sucursal_ids = getSelectedSucursalIds();
   try {
     if (state.editingUserId) {
       const body = { full_name: fullname, role, sucursal_ids };

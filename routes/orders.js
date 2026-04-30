@@ -477,7 +477,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id } = req.body;
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
 
@@ -485,7 +485,9 @@ router.post('/', (req, res) => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
       const efe = payment_efectivo ? 1 : 0;
       const chq = efe ? 0 : (payment_cheque ? 1 : 0);
-      const sucursalId = getInsertSucursalId(req);
+      const orderSucursalId = req.session.role === 'admin' && sucursal_id != null
+        ? Number(sucursal_id)
+        : getInsertSucursalId(req);
       const result = db.prepare(`
         INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -494,7 +496,7 @@ router.post('/', (req, res) => {
              parseFloat(discount)  || 0, parseFloat(discount2) || 0,
              parseFloat(discount3) || 0, parseFloat(discount4) || 0,
              iva_exempt ? 1 : 0, efe, chq,
-             req.session.userId, sucursalId);
+             req.session.userId, orderSucursalId);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
         const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
@@ -523,11 +525,18 @@ router.put('/:id', (req, res) => {
     if (isVendor(req) && existing.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar pedidos de otros vendedores' });
 
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id } = req.body;
+
+    if (isVendor(req) && status !== undefined && status !== 'Cancelado')
+      return res.status(403).json({ error: 'Solo podés cambiar el estado a Cancelado' });
+
     withTransaction(() => {
       const efe = payment_efectivo !== undefined ? (payment_efectivo ? 1 : 0) : (existing.payment_efectivo || 0);
       const chq = payment_cheque  !== undefined ? (payment_cheque  ? 1 : 0) : (existing.payment_cheque  || 0);
-      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      const newSucursalId = req.session.role === 'admin' && sucursal_id !== undefined
+        ? (sucursal_id != null ? Number(sucursal_id) : null)
+        : existing.sucursal_id;
+      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, sucursal_id=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         customer_name !== undefined ? customer_name.trim() : existing.customer_name,
         notes !== undefined ? notes : existing.notes,
         delivery_date !== undefined ? (delivery_date || null) : existing.delivery_date,
@@ -537,7 +546,7 @@ router.put('/:id', (req, res) => {
         discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0),
         discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0),
         iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0),
-        efe, chq,
+        efe, chq, newSucursalId,
         id
       );
       if (items !== undefined) {
