@@ -20,7 +20,8 @@
       "Bash(pkill -f \"node.*index\\\\|node.*server\\\\|node.*app\")",
       "Bash(pkill -f \"node.*server\")",
       "Bash(git pull *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(grep -v \"Use \\\\`node\")"
     ]
   }
 }
