@@ -486,9 +486,7 @@ router.post('/', (req, res) => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
       const efe = payment_efectivo ? 1 : 0;
       const chq = efe ? 0 : (payment_cheque ? 1 : 0);
-      const orderSucursalId = req.session.role === 'admin' && sucursal_id != null
-        ? Number(sucursal_id)
-        : getInsertSucursalId(req);
+      const orderSucursalId = sucursal_id != null ? Number(sucursal_id) : getInsertSucursalId(req);
       const result = db.prepare(`
         INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -534,7 +532,7 @@ router.put('/:id', (req, res) => {
     withTransaction(() => {
       const efe = payment_efectivo !== undefined ? (payment_efectivo ? 1 : 0) : (existing.payment_efectivo || 0);
       const chq = payment_cheque  !== undefined ? (payment_cheque  ? 1 : 0) : (existing.payment_cheque  || 0);
-      const newSucursalId = req.session.role === 'admin' && sucursal_id !== undefined
+      const newSucursalId = sucursal_id !== undefined
         ? (sucursal_id != null ? Number(sucursal_id) : null)
         : existing.sucursal_id;
       db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, sucursal_id=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
