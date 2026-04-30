@@ -1196,33 +1196,60 @@ $('btn-client-cancel').addEventListener('click', () => { showClientsSubview('lis
 window.openClientForm = function(id) {
   state.editingClientId = id || null;
   $('client-form-title').textContent = id ? 'Editar Cliente' : 'Nuevo Cliente';
-  $('inp-client-name').value    = '';
+  $('inp-client-name').value       = '';
   $('inp-client-cuit').value       = '';
   $('inp-client-phone').value      = '';
   $('inp-client-email').value      = '';
   $('inp-client-address').value    = '';
   $('inp-client-localidad').value  = '';
   $('inp-client-provincia').value  = '';
-  $('inp-client-notes').value   = '';
-  $('inp-client-iva').value     = 'Consumidor Final';
-  $('lbl-client-cuit').className = id ? 'label' : 'label required';
+  $('inp-client-notes').value      = '';
+  $('inp-client-iva').value        = 'Consumidor Final';
+  if ($('inp-client-vendor')) $('inp-client-vendor').value = '';
 
-  if (id) {
+  if (isAdmin()) {
+    api('GET', '/users').then(users => {
+      const sel = $('inp-client-vendor');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">— Seleccioná un vendedor —</option>' +
+        users.filter(u => u.active && u.role !== 'admin')
+             .map(u => `<option value="${u.id}">${esc(u.full_name || u.username)}</option>`)
+             .join('');
+      if (id) {
+        api('GET', '/customers').then(list => {
+          const c = list.find(x => x.id === id);
+          if (c) {
+            $('inp-client-name').value      = c.name;
+            $('inp-client-cuit').value      = formatCuit(c.cuit);
+            $('inp-client-phone').value     = c.phone || '';
+            $('inp-client-email').value     = c.email || '';
+            $('inp-client-address').value   = c.address || '';
+            $('inp-client-localidad').value = c.localidad || '';
+            $('inp-client-provincia').value = c.provincia || '';
+            $('inp-client-notes').value     = c.notes || '';
+            $('inp-client-iva').value       = c.iva_condition || 'Consumidor Final';
+            sel.value = c.vendor_id || '';
+          }
+        });
+      }
+    });
+  } else if (id) {
     api('GET', '/customers').then(list => {
       const c = list.find(x => x.id === id);
       if (c) {
-        $('inp-client-name').value    = c.name;
-        $('inp-client-cuit').value    = formatCuit(c.cuit);
-        $('inp-client-phone').value      = c.phone || '';
-        $('inp-client-email').value      = c.email || '';
-        $('inp-client-address').value    = c.address || '';
-        $('inp-client-localidad').value  = c.localidad || '';
-        $('inp-client-provincia').value  = c.provincia || '';
-        $('inp-client-notes').value   = c.notes || '';
-        $('inp-client-iva').value     = c.iva_condition || 'Consumidor Final';
+        $('inp-client-name').value      = c.name;
+        $('inp-client-cuit').value      = formatCuit(c.cuit);
+        $('inp-client-phone').value     = c.phone || '';
+        $('inp-client-email').value     = c.email || '';
+        $('inp-client-address').value   = c.address || '';
+        $('inp-client-localidad').value = c.localidad || '';
+        $('inp-client-provincia').value = c.provincia || '';
+        $('inp-client-notes').value     = c.notes || '';
+        $('inp-client-iva').value       = c.iva_condition || 'Consumidor Final';
       }
     });
   }
+
   showClientsSubview('form');
   setTimeout(() => $('inp-client-name').focus(), 50);
 };
@@ -1417,27 +1444,44 @@ window.newOrderForClient = function(clientName) {
 
 $('client-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const name = $('inp-client-name').value.trim();
-  if (!name) { toast('El nombre es requerido', 'error'); $('inp-client-name').focus(); return; }
+  const isNew = !state.editingClientId;
+  const name     = $('inp-client-name').value.trim();
+  const phone    = $('inp-client-phone').value.trim();
+  const email    = $('inp-client-email').value.trim();
+  const address  = $('inp-client-address').value.trim();
+  const localidad = $('inp-client-localidad').value.trim();
+  const provincia = $('inp-client-provincia').value;
+  const vendorVal = $('inp-client-vendor') ? $('inp-client-vendor').value : '';
+
+  if (!name)     { toast('El nombre es requerido', 'error');     $('inp-client-name').focus();     return; }
+
   const rawCuit = $('inp-client-cuit').value.trim();
   const normalizedCuit = rawCuit.replace(/\D/g, '');
-  if (!state.editingClientId) {
-    if (!normalizedCuit) { toast('El CUIT es requerido', 'error'); $('inp-client-cuit').focus(); return; }
-    if (normalizedCuit.length !== 11) { toast('El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)', 'error'); $('inp-client-cuit').focus(); return; }
+  if (isNew) {
+    if (!normalizedCuit)            { toast('El CUIT es requerido', 'error');                                          $('inp-client-cuit').focus();     return; }
+    if (normalizedCuit.length !== 11) { toast('El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)', 'error');     $('inp-client-cuit').focus();     return; }
+    if (!phone)    { toast('El teléfono es requerido', 'error');    $('inp-client-phone').focus();    return; }
+    if (!email)    { toast('El email es requerido', 'error');        $('inp-client-email').focus();    return; }
+    if (!address)  { toast('La dirección es requerida', 'error');    $('inp-client-address').focus();  return; }
+    if (!localidad){ toast('La localidad es requerida', 'error');    $('inp-client-localidad').focus();return; }
+    if (!provincia){ toast('La provincia es requerida', 'error');    $('inp-client-provincia').focus();return; }
+    if (isAdmin() && !vendorVal) { toast('El vendedor es requerido', 'error'); $('inp-client-vendor').focus(); return; }
   } else if (rawCuit && normalizedCuit.length !== 11) {
     toast('El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)', 'error'); $('inp-client-cuit').focus(); return;
   }
+
   const data = {
     name,
     cuit:          normalizedCuit || '',
-    phone:         $('inp-client-phone').value.trim(),
-    email:         $('inp-client-email').value.trim(),
-    address:       $('inp-client-address').value.trim(),
-    localidad:     $('inp-client-localidad').value.trim(),
-    provincia:     $('inp-client-provincia').value,
+    phone,
+    email,
+    address,
+    localidad,
+    provincia,
     notes:         $('inp-client-notes').value.trim(),
     iva_condition: $('inp-client-iva').value
   };
+  if (isAdmin() && $('inp-client-vendor')) data.vendor_id = vendorVal ? Number(vendorVal) : null;
   const btn = $('btn-client-save');
   btn.disabled = true;
   try {

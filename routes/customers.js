@@ -19,12 +19,12 @@ router.get('/', (req, res) => {
     const vc = isVendor(req) ? `AND c.created_by = ${req.session.userId}` : '';
     const rows = db.prepare(`
       SELECT c.*,
-        COALESCE(u.full_name, u.username) AS vendor_name,
+        COALESCE(uv.full_name, uv.username) AS vendor_name,
         COALESCE((SELECT SUM(r.total)  FROM remitos  r WHERE r.customer_id = c.id), 0)
         - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.customer_id = c.id), 0)
         + COALESCE((SELECT SUM(CASE WHEN n.note_type='debito' THEN n.amount ELSE -n.amount END) FROM credit_debit_notes n WHERE n.entity_type='customer' AND n.entity_id = c.id), 0) AS balance
       FROM customers c
-      LEFT JOIN users u ON c.created_by = u.id
+      LEFT JOIN users uv ON c.vendor_id = uv.id
       WHERE 1=1 ${vc}
       ORDER BY c.name ASC
     `).all();
@@ -76,17 +76,27 @@ router.get('/:id/account', (req, res) => {
 // POST /api/customers
 router.post('/', (req, res) => {
   try {
-    const { name, phone, email, address, localidad, provincia, notes, iva_condition, cuit } = req.body;
-    if (!name || !name.trim()) return res.status(400).json({ error: 'El nombre es requerido' });
+    const { name, phone, email, address, localidad, provincia, notes, iva_condition, cuit, vendor_id } = req.body;
+    if (!name || !name.trim())       return res.status(400).json({ error: 'El nombre es requerido' });
+    if (!phone || !phone.trim())     return res.status(400).json({ error: 'El teléfono es requerido' });
+    if (!email || !email.trim())     return res.status(400).json({ error: 'El email es requerido' });
+    if (!address || !address.trim()) return res.status(400).json({ error: 'La dirección es requerida' });
+    if (!localidad || !localidad.trim()) return res.status(400).json({ error: 'La localidad es requerida' });
+    if (!provincia || !provincia.trim()) return res.status(400).json({ error: 'La provincia es requerida' });
+    if (req.session.role === 'admin' && !vendor_id)
+      return res.status(400).json({ error: 'El vendedor es requerido' });
     const normalizedCuit = normalizeCuit(cuit);
     if (!normalizedCuit) return res.status(400).json({ error: 'El CUIT es requerido' });
     if (!isValidCuit(normalizedCuit)) return res.status(400).json({ error: 'El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)' });
     const dup = db.prepare("SELECT id FROM customers WHERE cuit = ?").get(normalizedCuit);
     if (dup) return res.status(409).json({ error: 'El CUIT ingresado ya corresponde a otro cliente' });
     const result = db.prepare(`
-      INSERT INTO customers (name, cuit, phone, email, address, localidad, provincia, notes, iva_condition, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(name.trim(), normalizedCuit, phone||'', email||'', address||'', localidad||'', provincia||'', notes||'', iva_condition||'Consumidor Final', req.session.userId);
+      INSERT INTO customers (name, cuit, phone, email, address, localidad, provincia, notes, iva_condition, vendor_id, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name.trim(), normalizedCuit, phone.trim(), email.trim(), address.trim(), localidad.trim(), provincia.trim(),
+           notes||'', iva_condition||'Consumidor Final',
+           vendor_id ? Number(vendor_id) : null,
+           req.session.userId);
     res.status(201).json(db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(result.lastInsertRowid)));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -99,7 +109,7 @@ router.put('/:id', (req, res) => {
     if (!ex) return res.status(404).json({ error: 'Cliente no encontrado' });
     if (isVendor(req) && ex.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar clientes de otros vendedores' });
-    const { name, phone, email, address, localidad, provincia, notes, iva_condition, cuit } = req.body;
+    const { name, phone, email, address, localidad, provincia, notes, iva_condition, cuit, vendor_id } = req.body;
     let finalCuit = ex.cuit || '';
     if (cuit !== undefined) {
       if (!cuit || cuit.trim() === '') {
@@ -111,7 +121,10 @@ router.put('/:id', (req, res) => {
         if (dup) return res.status(409).json({ error: 'El CUIT ingresado ya corresponde a otro cliente' });
       }
     }
-    db.prepare(`UPDATE customers SET name=?, cuit=?, phone=?, email=?, address=?, localidad=?, provincia=?, notes=?, iva_condition=? WHERE id=?`).run(
+    const newVendorId = req.session.role === 'admin' && vendor_id !== undefined
+      ? (vendor_id ? Number(vendor_id) : null)
+      : ex.vendor_id;
+    db.prepare(`UPDATE customers SET name=?, cuit=?, phone=?, email=?, address=?, localidad=?, provincia=?, notes=?, iva_condition=?, vendor_id=? WHERE id=?`).run(
       name          !== undefined ? name.trim()    : ex.name,
       finalCuit,
       phone         !== undefined ? phone          : ex.phone,
@@ -121,6 +134,7 @@ router.put('/:id', (req, res) => {
       provincia     !== undefined ? provincia      : (ex.provincia || ''),
       notes         !== undefined ? notes          : ex.notes,
       iva_condition !== undefined ? iva_condition  : ex.iva_condition,
+      newVendorId,
       id
     );
     res.json(db.prepare('SELECT * FROM customers WHERE id = ?').get(id));
