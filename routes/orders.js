@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db, withTransaction } = require('../db');
 const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
+const { acctBySubtype, acctByCode, recordJournal } = require('../lib/accounting');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -560,6 +561,59 @@ router.put('/:id', (req, res) => {
             }
           }
         }
+      }
+
+      // ── Asiento contable ─────────────────────────────────────────────────────
+      const prevStatus  = existing.status;
+      const finalStatus = status || existing.status;
+      const DELIVERY_STATUSES = ['Entrega parcial', 'Entregado'];
+
+      if (DELIVERY_STATUSES.includes(finalStatus) && !DELIVERY_STATUSES.includes(prevStatus)) {
+        const dup = db.prepare(
+          "SELECT id FROM journal_entries WHERE ref_type='order' AND ref_id=? AND is_reversed=0"
+        ).get(id);
+        if (!dup) {
+          const currentItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id);
+          const sub = currentItems.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+          const fd1 = discount  !== undefined ? (parseFloat(discount)  || 0) : (existing.discount  || 0);
+          const fd2 = discount2 !== undefined ? (parseFloat(discount2) || 0) : (existing.discount2 || 0);
+          const fd3 = discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0);
+          const fd4 = discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0);
+          const total = sub * (1 - fd1/100) * (1 - fd2/100) * (1 - fd3/100) * (1 - fd4/100);
+          const finalIvaExempt = iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0);
+
+          if (total > 0.005) {
+            const deudores  = acctBySubtype('Clientes');
+            const ventas    = acctByCode('4.1.01');
+            const ivaVentas = acctByCode('2.1.03');
+            if (deudores && ventas) {
+              const orderNum = String(existing.order_sequence).padStart(3, '0');
+              const lines = [{ account_id: deudores.id, debit: total, credit: 0 }];
+              if (finalIvaExempt || !ivaVentas) {
+                lines.push({ account_id: ventas.id, debit: 0, credit: total });
+              } else {
+                const neto = total / 1.21;
+                const iva  = total - neto;
+                lines.push({ account_id: ventas.id,    debit: 0, credit: neto });
+                lines.push({ account_id: ivaVentas.id, debit: 0, credit: iva  });
+              }
+              recordJournal({
+                date:     new Date().toISOString().slice(0, 10),
+                desc:     `Venta pedido #${orderNum} - cliente ${existing.customer_name}`,
+                ref_type: 'order',
+                ref_id:   id,
+                lines,
+                userId:   req.session.userId
+              });
+            }
+          }
+        }
+      }
+
+      if (finalStatus === 'Cancelado' && prevStatus !== 'Cancelado') {
+        db.prepare(
+          "UPDATE journal_entries SET is_reversed=1 WHERE ref_type='order' AND ref_id=? AND is_reversed=0"
+        ).run(id);
       }
     });
 

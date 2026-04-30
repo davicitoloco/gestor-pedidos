@@ -405,6 +405,8 @@ addColIfMissing('stock_movements',  'sucursal_id', 'INTEGER REFERENCES sucursale
       }
     }
   } catch(e) {}
+  // IVA Ventas — cuenta de pasivo para IVA repercutido
+  db.prepare("INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code) VALUES ('2.1.03','IVA Ventas','Pasivo','IVAVentas',1,'2.1')").run();
 }
 
 // Settings por defecto
