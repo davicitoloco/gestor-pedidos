@@ -338,6 +338,9 @@
             </button>
           </div>
         </div>
+        <div style="margin-bottom:12px">
+          <input type="search" id="client-search" class="input" placeholder="Buscar por nombre, CUIT, localidad, provincia, email o teléfono…" style="width:100%;max-width:480px">
+        </div>
         <div class="table-wrap" style="overflow-x:auto">
           <table class="table">
             <thead><tr>
@@ -355,7 +358,7 @@
           </table>
           <div id="no-clients" class="empty-state hidden">
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <p>No hay clientes cargados todavía</p>
+            <p id="no-clients-msg">No hay clientes cargados todavía</p>
           </div>
         </div>
       </div>

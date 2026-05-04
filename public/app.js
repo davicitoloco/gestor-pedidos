@@ -1132,22 +1132,38 @@ function showClientsSubview(view) {
   $('clients-account-view').classList.toggle('hidden', view !== 'account');
 }
 
+let _allClients = [];
+
 async function loadClients() {
   try {
-    const clients = await api('GET', '/customers');
-    renderClients(clients);
+    _allClients = await api('GET', '/customers');
+    const q = ($('client-search') || {}).value || '';
+    renderClients(_allClients, q);
   } catch (err) { toast(err.message, 'error'); }
 }
 
-function renderClients(clients) {
+function renderClients(clients, searchQuery) {
   const tbody = $('clients-tbody');
   const noEl  = $('no-clients');
-  $('clients-count').textContent = `${clients.length} cliente${clients.length !== 1 ? 's' : ''}`;
+  const noMsg = $('no-clients-msg');
 
-  if (!clients.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
+  const q = (searchQuery || '').toLowerCase().trim();
+  const filtered = q
+    ? clients.filter(c => [c.name, c.cuit, c.localidad, c.provincia, c.email, c.phone]
+        .some(v => v && v.toLowerCase().includes(q)))
+    : clients;
+
+  $('clients-count').textContent = `${filtered.length} cliente${filtered.length !== 1 ? 's' : ''}`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = '';
+    if (noMsg) noMsg.textContent = q ? 'No se encontraron clientes' : 'No hay clientes cargados todavía';
+    noEl.classList.remove('hidden');
+    return;
+  }
   noEl.classList.add('hidden');
 
-  tbody.innerHTML = clients.map(c => {
+  tbody.innerHTML = filtered.map(c => {
     const bal = c.balance || 0;
     const balFmt = bal > 0.005
       ? `<span style="color:var(--danger);font-weight:600">${fmtMoney(bal)}</span>`
@@ -1184,6 +1200,10 @@ function renderClients(clients) {
 $('btn-new-client').addEventListener('click', () => openClientForm(null));
 $('btn-clients-back').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
 $('btn-client-cancel').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
+
+if ($('client-search')) {
+  $('client-search').addEventListener('input', e => renderClients(_allClients, e.target.value));
+}
 
 window.openClientForm = function(id) {
   state.editingClientId = id || null;

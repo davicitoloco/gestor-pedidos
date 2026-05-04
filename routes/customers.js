@@ -16,7 +16,7 @@ function isValidCuit(c)     { return /^\d{11}$/.test(c); }
 // GET /api/customers
 router.get('/', (req, res) => {
   try {
-    const vc = isVendor(req) ? `AND c.created_by = ${req.session.userId}` : '';
+    const vc = isVendor(req) ? `AND c.vendor_id = ${req.session.userId}` : '';
     const rows = db.prepare(`
       SELECT c.*,
         COALESCE(uv.full_name, uv.username) AS vendor_name,
