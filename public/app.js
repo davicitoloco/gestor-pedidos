@@ -1224,7 +1224,7 @@ window.openClientForm = function(id) {
       const sel = $('inp-client-vendor');
       if (!sel) return;
       sel.innerHTML = '<option value="">— Seleccioná un vendedor —</option>' +
-        users.filter(u => u.active && u.role !== 'admin')
+        users.filter(u => u.active)
              .map(u => `<option value="${u.id}">${esc(u.full_name || u.username)}</option>`)
              .join('');
       if (id) {
