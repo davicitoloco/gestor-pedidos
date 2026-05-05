@@ -1800,12 +1800,10 @@ $('btn-import-clients-cancel').addEventListener('click', () => $('import-clients
 $('btn-clients-template').addEventListener('click', () => {
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([
-    ['nombre', 'telefono', 'email', 'direccion'],
-    ['Juan García', '11 1234-5678', 'juan@ejemplo.com', 'Av. Corrientes 1234, CABA'],
-    ['María López', '351 555-6789', 'maria@empresa.com', 'San Martín 567, Córdoba'],
-    ['Empresa ABC S.A.', '11 9876-5432', 'compras@abc.com', 'Callao 890, CABA']
+    ['nombre', 'cuit', 'telefono', 'email', 'direccion', 'localidad', 'provincia', 'vendedor'],
+    ['Juan García', '20-12345678-9', '11 1234-5678', 'juan@ejemplo.com', 'Av. Corrientes 1234', 'Buenos Aires', 'Buenos Aires', 'María Vendedora']
   ]);
-  ws['!cols'] = [{ wch: 32 }, { wch: 18 }, { wch: 30 }, { wch: 38 }];
+  ws['!cols'] = [{ wch: 32 }, { wch: 16 }, { wch: 16 }, { wch: 28 }, { wch: 28 }, { wch: 18 }, { wch: 16 }, { wch: 22 }];
   XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
   XLSX.writeFile(wb, 'plantilla-clientes.xlsx');
 });
