@@ -95,7 +95,7 @@ router.post('/', (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(name.trim(), normalizedCuit, phone.trim(), email.trim(), address.trim(), localidad.trim(), provincia.trim(),
            notes||'', iva_condition||'Consumidor Final',
-           vendor_id ? Number(vendor_id) : null,
+           vendor_id ? Number(vendor_id) : (isVendor(req) ? req.session.userId : null),
            req.session.userId);
     res.status(201).json(db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(result.lastInsertRowid)));
   } catch (err) { res.status(500).json({ error: err.message }); }
