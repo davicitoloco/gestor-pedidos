@@ -70,7 +70,7 @@ router.get('/', (req, res) => {
           * (1.0 - COALESCE(o.discount4,0)/100.0) AS total
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      LEFT JOIN users u ON o.created_by = u.id
+      LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
       WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter} ${sf.clause}
       GROUP BY o.id
       ORDER BY o.order_sequence DESC
@@ -86,7 +86,7 @@ router.get('/:id', (req, res) => {
     const order = db.prepare(`
       SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
              COALESCE(u.full_name, u.username) AS vendor_name
-      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+      FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
       WHERE o.id = ?
     `).get(id);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -104,7 +104,7 @@ router.get('/:id/print', (req, res) => {
     const order = db.prepare(`
       SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
              COALESCE(u.full_name, u.username) AS vendor_name
-      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+      FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
       WHERE o.id = ?
     `).get(id);
     if (!order) return res.status(404).send('Pedido no encontrado');
@@ -351,7 +351,7 @@ router.get('/:id/print-deposito', (req, res) => {
     const order = db.prepare(`
       SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
              COALESCE(u.full_name, u.username) AS vendor_name
-      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+      FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
       WHERE o.id = ?
     `).get(id);
     if (!order) return res.status(404).send('Pedido no encontrado');
@@ -478,7 +478,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id } = req.body;
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
 
@@ -488,14 +488,15 @@ router.post('/', (req, res) => {
       const chq = efe ? 0 : (payment_cheque ? 1 : 0);
       const orderSucursalId = sucursal_id != null ? Number(sucursal_id) : getInsertSucursalId(req);
       const result = db.prepare(`
-        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id, vendor_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(next, customer_name.trim(), notes || '', delivery_date || null,
              status || 'Pendiente',
              parseFloat(discount)  || 0, parseFloat(discount2) || 0,
              parseFloat(discount3) || 0, parseFloat(discount4) || 0,
              iva_exempt ? 1 : 0, efe, chq,
-             req.session.userId, orderSucursalId);
+             req.session.userId, orderSucursalId,
+             vendor_id ? Number(vendor_id) : null);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
         const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
@@ -509,7 +510,7 @@ router.post('/', (req, res) => {
       return oid;
     });
 
-    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON o.created_by = u.id WHERE o.id = ?`).get(orderId);
+    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id WHERE o.id = ?`).get(orderId);
     const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(orderId);
     res.status(201).json({ ...order, items: orderItems });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -524,7 +525,7 @@ router.put('/:id', (req, res) => {
     if (isVendor(req) && existing.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar pedidos de otros vendedores' });
 
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id } = req.body;
 
     if (isVendor(req) && status !== undefined && status !== 'Cancelado')
       return res.status(403).json({ error: 'Solo podés cambiar el estado a Cancelado' });
@@ -535,7 +536,10 @@ router.put('/:id', (req, res) => {
       const newSucursalId = sucursal_id !== undefined
         ? (sucursal_id != null ? Number(sucursal_id) : null)
         : existing.sucursal_id;
-      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, sucursal_id=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      const newVendorId = req.session.role === 'admin' && vendor_id !== undefined
+        ? (vendor_id ? Number(vendor_id) : null)
+        : existing.vendor_id;
+      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, sucursal_id=?, vendor_id=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         customer_name !== undefined ? customer_name.trim() : existing.customer_name,
         notes !== undefined ? notes : existing.notes,
         delivery_date !== undefined ? (delivery_date || null) : existing.delivery_date,
@@ -545,7 +549,7 @@ router.put('/:id', (req, res) => {
         discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0),
         discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0),
         iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0),
-        efe, chq, newSucursalId,
+        efe, chq, newSucursalId, newVendorId,
         id
       );
       if (items !== undefined) {
@@ -615,7 +619,7 @@ router.put('/:id', (req, res) => {
       }
     });
 
-    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON o.created_by = u.id WHERE o.id = ?`).get(id);
+    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id WHERE o.id = ?`).get(id);
     const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
     res.json({ ...order, items: orderItems });
   } catch (err) { res.status(500).json({ error: err.message }); }

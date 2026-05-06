@@ -349,12 +349,23 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('form-status-badge').innerHTML = '';
   $('btn-export-pdf').classList.add('hidden');
   $('btn-export-pdf-deposito').classList.add('hidden');
-  if ($('inp-vendor-display')) $('inp-vendor-display').value = '';
   if ($('inp-sucursal-id')) $('inp-sucursal-id').value = '';
 
   // Vendedores solo pueden seleccionar Cancelado
   const statusSel = $('inp-status');
   Array.from(statusSel.options).forEach(opt => { opt.disabled = isVendor() && opt.value !== 'Cancelado'; });
+
+  // Cargar lista de usuarios para selector de vendedor (solo admin)
+  if (isAdmin() && $('inp-vendor-id')) {
+    try {
+      const users = await api('GET', '/users');
+      const sel = $('inp-vendor-id');
+      sel.innerHTML = '<option value="">— Sin asignar —</option>' +
+        users.filter(u => u.active)
+             .map(u => `<option value="${u.id}">${esc(u.full_name || u.username)}</option>`)
+             .join('');
+    } catch {}
+  }
 
   if (orderId) {
     try {
@@ -374,7 +385,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('form-status-badge').innerHTML = statusBadge(o.status);
       $('btn-export-pdf').classList.remove('hidden');
       $('btn-export-pdf-deposito').classList.remove('hidden');
-      if ($('inp-vendor-display') && isAdmin()) $('inp-vendor-display').value = o.vendor_name || '—';
+      if ($('inp-vendor-id') && isAdmin()) $('inp-vendor-id').value = o.vendor_id || '';
       if ($('inp-sucursal-id')) $('inp-sucursal-id').value = o.sucursal_id || '';
       state.items = (o.items || []).map(i => ({ ...i }));
     } catch (err) { toast(err.message, 'error'); return; }
@@ -580,6 +591,10 @@ $('order-form').addEventListener('submit', async e => {
   if ($('inp-sucursal-id')) {
     const sid = $('inp-sucursal-id').value;
     data.sucursal_id = sid ? Number(sid) : null;
+  }
+  if (isAdmin() && $('inp-vendor-id')) {
+    const vid = $('inp-vendor-id').value;
+    data.vendor_id = vid ? Number(vid) : null;
   }
 
   const btn = $('btn-save');

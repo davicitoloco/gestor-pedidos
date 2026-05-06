@@ -334,6 +334,7 @@ addColIfMissing('customers', 'localidad',  "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('customers', 'provincia',  "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('customers', 'vendor_id',  'INTEGER REFERENCES users(id)');
 addColIfMissing('orders',           'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('orders',           'vendor_id',   'INTEGER REFERENCES users(id)');
 addColIfMissing('remitos',          'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('cash_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('bank_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
