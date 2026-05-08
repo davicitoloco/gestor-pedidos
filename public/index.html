@@ -223,6 +223,12 @@
                     <option value="2">Estadistica</option>
                   </select>
                 </div>
+                <div class="field admin-only-field hidden">
+                  <label class="label">Lista de precios</label>
+                  <select id="inp-price-list-id" class="input select">
+                    <option value="">— Vigente —</option>
+                  </select>
+                </div>
               </div>
               <div class="field" style="margin-top:16px">
                 <label class="label">Notas / Observaciones</label>
@@ -550,8 +556,16 @@
     <!-- ======================== SECCIÓN: CATÁLOGO -->
     <div id="section-catalogo" class="app-section hidden">
       <div class="page-header">
-        <div><h2 class="page-title">Catálogo de Productos</h2><p class="page-subtitle" id="catalog-count"></p></div>
+        <div>
+          <h2 class="page-title">Catálogo de Productos</h2>
+          <p class="page-subtitle" id="catalog-count"></p>
+          <p id="active-price-list-info" style="font-size:.82rem;color:var(--text-muted);margin-top:2px"></p>
+        </div>
         <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm admin-only" id="btn-new-price-list">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            Nueva lista de precios
+          </button>
           <button class="btn btn-secondary btn-sm admin-only" id="btn-import-products">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Importar
@@ -2233,5 +2247,38 @@
 </div>
 
 <script src="/app.js"></script>
+
+<!-- ======================== MODAL: NUEVA LISTA DE PRECIOS -->
+<div id="price-list-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:760px;width:95%">
+    <div class="modal-header">
+      <h3>Nueva lista de precios</h3>
+      <button class="modal-close" id="btn-price-list-cancel">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div class="field">
+          <label class="label required">Nombre</label>
+          <input type="text" id="inp-pl-nombre" class="input" placeholder="Ej: Lista Mayo 2026">
+        </div>
+        <div class="field">
+          <label class="label required">Fecha de vigencia</label>
+          <input type="date" id="inp-pl-fecha" class="input">
+        </div>
+      </div>
+      <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:8px">Modificá los precios que necesites. Los demás se mantienen igual.</p>
+      <div style="max-height:400px;overflow-y:auto">
+        <table class="table">
+          <thead><tr><th>Producto</th><th style="width:160px" class="text-right">Precio</th></tr></thead>
+          <tbody id="pl-items-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
+      <button class="btn btn-ghost" id="btn-price-list-cancel2">Cancelar</button>
+      <button class="btn btn-primary" id="btn-price-list-save">Guardar y activar lista</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

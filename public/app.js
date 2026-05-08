@@ -349,11 +349,15 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('form-status-badge').innerHTML = '';
   $('btn-export-pdf').classList.add('hidden');
   $('btn-export-pdf-deposito').classList.add('hidden');
-  if ($('inp-sucursal-id')) $('inp-sucursal-id').value = '';
+  if ($('inp-sucursal-id'))    $('inp-sucursal-id').value    = '';
+  if ($('inp-price-list-id')) $('inp-price-list-id').value  = '';
 
   // Vendedores solo pueden seleccionar Cancelado
   const statusSel = $('inp-status');
   Array.from(statusSel.options).forEach(opt => { opt.disabled = isVendor() && opt.value !== 'Cancelado'; });
+
+  // Cargar listas de precios para selector (solo admin)
+  if (isAdmin()) await loadPriceLists();
 
   // Cargar lista de usuarios para selector de vendedor (solo admin)
   if (isAdmin() && $('inp-vendor-id')) {
@@ -385,8 +389,9 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('form-status-badge').innerHTML = statusBadge(o.status);
       $('btn-export-pdf').classList.remove('hidden');
       $('btn-export-pdf-deposito').classList.remove('hidden');
-      if ($('inp-vendor-id') && isAdmin()) $('inp-vendor-id').value = o.vendor_id || '';
-      if ($('inp-sucursal-id')) $('inp-sucursal-id').value = o.sucursal_id || '';
+      if ($('inp-vendor-id') && isAdmin())     $('inp-vendor-id').value     = o.vendor_id || '';
+      if ($('inp-sucursal-id'))                 $('inp-sucursal-id').value    = o.sucursal_id || '';
+      if ($('inp-price-list-id') && isAdmin()) $('inp-price-list-id').value  = o.price_list_id || '';
       state.items = (o.items || []).map(i => ({ ...i }));
     } catch (err) { toast(err.message, 'error'); return; }
   }
@@ -484,13 +489,17 @@ function renderItems() {
     inp.addEventListener('input', () => {
       const i = inp.dataset.i;
       state.items[i].product_name = inp.value;
-      // Auto-fill price from catalog when exact match
+      // Auto-fill price from selected price list (or active list / base_price fallback)
       const match = state.productCatalog.find(p => p.name.toLowerCase() === inp.value.toLowerCase());
       if (match) {
         const priceInp = inp.closest('tr').querySelector('.item-inp-price');
-        state.items[i].unit_price = match.base_price;
-        priceInp.value = match.base_price;
-        refreshItem(i);
+        const selListId = $('inp-price-list-id') ? Number($('inp-price-list-id').value) || null : null;
+        getPriceForList(selListId).then(priceMap => {
+          const price = (priceMap && priceMap[match.id] !== undefined) ? priceMap[match.id] : match.base_price;
+          state.items[i].unit_price = price;
+          priceInp.value = price;
+          refreshItem(i);
+        });
       }
     });
   });
@@ -596,6 +605,10 @@ $('order-form').addEventListener('submit', async e => {
     const vid = $('inp-vendor-id').value;
     data.vendor_id = vid ? Number(vid) : null;
   }
+  if (isAdmin() && $('inp-price-list-id')) {
+    const plid = $('inp-price-list-id').value;
+    data.price_list_id = plid ? Number(plid) : null;
+  }
 
   const btn = $('btn-save');
   btn.disabled = true;
@@ -644,9 +657,123 @@ async function loadCustomerList() {
 /* ================================================================ CATALOG SECTION */
 async function loadCatalog() {
   try {
-    const products = await api('GET', '/products?all=1');
+    const [products, activeList] = await Promise.all([
+      api('GET', '/products?all=1'),
+      api('GET', '/price-lists/active').catch(() => null)
+    ]);
     renderCatalog(products);
+    const infoEl = $('active-price-list-info');
+    if (infoEl) {
+      if (activeList) {
+        infoEl.textContent = `Lista vigente: ${activeList.nombre} (desde ${fmtDate(activeList.fecha_vigencia)})`;
+      } else {
+        infoEl.textContent = 'Sin lista de precios activa — se usan los precios base de cada producto';
+      }
+    }
   } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ================================================================ LISTAS DE PRECIO */
+
+if ($('btn-new-price-list')) {
+  $('btn-new-price-list').addEventListener('click', openPriceListModal);
+}
+['btn-price-list-cancel','btn-price-list-cancel2'].forEach(id => {
+  if ($(id)) $(id).addEventListener('click', () => $('price-list-modal').classList.add('hidden'));
+});
+$('price-list-modal').addEventListener('click', e => {
+  if (e.target === $('price-list-modal')) $('price-list-modal').classList.add('hidden');
+});
+
+async function openPriceListModal() {
+  $('inp-pl-nombre').value  = '';
+  $('inp-pl-fecha').value   = new Date().toISOString().slice(0,10);
+  $('price-list-modal').classList.remove('hidden');
+
+  // Cargar productos con precios actuales
+  try {
+    const [products, activeList] = await Promise.all([
+      api('GET', '/products?all=1'),
+      api('GET', '/price-lists/active').catch(() => null)
+    ]);
+    const priceMap = {};
+    if (activeList && activeList.items) {
+      for (const it of activeList.items) priceMap[it.product_id] = it.precio;
+    }
+    const activeProducts = products.filter(p => p.active);
+    $('pl-items-tbody').innerHTML = activeProducts.map(p => {
+      const precio = priceMap[p.id] !== undefined ? priceMap[p.id] : p.base_price;
+      return `<tr>
+        <td>${esc(p.name)}</td>
+        <td class="text-right"><input type="number" class="input pl-price-inp" data-pid="${p.id}" value="${precio}" min="0" step="0.01" style="width:120px;text-align:right"></td>
+      </tr>`;
+    }).join('');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+if ($('btn-price-list-save')) {
+  $('btn-price-list-save').addEventListener('click', async () => {
+    const nombre = $('inp-pl-nombre').value.trim();
+    const fecha  = $('inp-pl-fecha').value;
+    if (!nombre) { toast('El nombre es requerido', 'error'); $('inp-pl-nombre').focus(); return; }
+    if (!fecha)  { toast('La fecha de vigencia es requerida', 'error'); $('inp-pl-fecha').focus(); return; }
+
+    const items = Array.from($('pl-items-tbody').querySelectorAll('.pl-price-inp')).map(inp => ({
+      product_id: Number(inp.dataset.pid),
+      precio:     parseFloat(inp.value) || 0
+    }));
+    if (!items.length) { toast('No hay productos para guardar', 'error'); return; }
+
+    const btn = $('btn-price-list-save');
+    btn.disabled = true;
+    try {
+      await api('POST', '/price-lists', { nombre, fecha_vigencia: fecha, items });
+      toast('Lista de precios guardada y activada', 'success');
+      $('price-list-modal').classList.add('hidden');
+      loadCatalog();
+      // Recargar catálogo de productos y listas en el formulario de pedido
+      await loadProductCatalog();
+      await loadPriceLists();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { btn.disabled = false; }
+  });
+}
+
+let _priceLists   = [];
+let _activePriceListItems = {};
+
+async function loadPriceLists() {
+  try {
+    _priceLists = await api('GET', '/price-lists');
+    const sel = $('inp-price-list-id');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— Vigente —</option>' +
+      _priceLists.map(l => `<option value="${l.id}">${esc(l.nombre)} (${fmtDate(l.fecha_vigencia)})${l.active ? ' ✓' : ''}</option>`).join('');
+  } catch {}
+}
+
+async function getPriceForList(listId) {
+  if (!listId) {
+    // Usar lista activa
+    try {
+      const active = await api('GET', '/price-lists/active');
+      if (active && active.items) {
+        const map = {};
+        for (const it of active.items) map[it.product_id] = it.precio;
+        return map;
+      }
+    } catch {}
+    return null;
+  }
+  try {
+    const list = await api('GET', `/price-lists/${listId}`);
+    if (list && list.items) {
+      const map = {};
+      for (const it of list.items) map[it.product_id] = it.precio;
+      return map;
+    }
+  } catch {}
+  return null;
 }
 
 function stockBadge(stock, stock_min) {

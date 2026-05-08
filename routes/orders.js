@@ -478,7 +478,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id, price_list_id } = req.body;
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
 
@@ -488,15 +488,16 @@ router.post('/', (req, res) => {
       const chq = efe ? 0 : (payment_cheque ? 1 : 0);
       const orderSucursalId = sucursal_id != null ? Number(sucursal_id) : getInsertSucursalId(req);
       const result = db.prepare(`
-        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id, vendor_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id, vendor_id, price_list_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(next, customer_name.trim(), notes || '', delivery_date || null,
              status || 'Pendiente',
              parseFloat(discount)  || 0, parseFloat(discount2) || 0,
              parseFloat(discount3) || 0, parseFloat(discount4) || 0,
              iva_exempt ? 1 : 0, efe, chq,
              req.session.userId, orderSucursalId,
-             vendor_id ? Number(vendor_id) : null);
+             vendor_id ? Number(vendor_id) : null,
+             price_list_id ? Number(price_list_id) : null);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
         const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
@@ -525,7 +526,7 @@ router.put('/:id', (req, res) => {
     if (isVendor(req) && existing.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar pedidos de otros vendedores' });
 
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id, price_list_id } = req.body;
 
     if (isVendor(req) && status !== undefined && status !== 'Cancelado')
       return res.status(403).json({ error: 'Solo podés cambiar el estado a Cancelado' });
@@ -539,7 +540,10 @@ router.put('/:id', (req, res) => {
       const newVendorId = req.session.role === 'admin' && vendor_id !== undefined
         ? (vendor_id ? Number(vendor_id) : null)
         : existing.vendor_id;
-      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, sucursal_id=?, vendor_id=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      const newPriceListId = req.session.role === 'admin' && price_list_id !== undefined
+        ? (price_list_id ? Number(price_list_id) : null)
+        : existing.price_list_id;
+      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, sucursal_id=?, vendor_id=?, price_list_id=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         customer_name !== undefined ? customer_name.trim() : existing.customer_name,
         notes !== undefined ? notes : existing.notes,
         delivery_date !== undefined ? (delivery_date || null) : existing.delivery_date,
@@ -549,7 +553,7 @@ router.put('/:id', (req, res) => {
         discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0),
         discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0),
         iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0),
-        efe, chq, newSucursalId, newVendorId,
+        efe, chq, newSucursalId, newVendorId, newPriceListId,
         id
       );
       if (items !== undefined) {

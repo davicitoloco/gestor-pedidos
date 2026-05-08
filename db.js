@@ -296,6 +296,19 @@ db.exec(`
     sucursal_id INTEGER NOT NULL REFERENCES sucursales(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, sucursal_id)
   );
+  CREATE TABLE IF NOT EXISTS price_lists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    fecha_vigencia TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS price_list_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    price_list_id INTEGER NOT NULL REFERENCES price_lists(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    precio REAL NOT NULL DEFAULT 0
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
@@ -334,7 +347,8 @@ addColIfMissing('customers', 'localidad',  "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('customers', 'provincia',  "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('customers', 'vendor_id',  'INTEGER REFERENCES users(id)');
 addColIfMissing('orders',           'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
-addColIfMissing('orders',           'vendor_id',   'INTEGER REFERENCES users(id)');
+addColIfMissing('orders',           'vendor_id',      'INTEGER REFERENCES users(id)');
+addColIfMissing('orders',           'price_list_id',  'INTEGER REFERENCES price_lists(id)');
 addColIfMissing('remitos',          'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('cash_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('bank_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
@@ -361,6 +375,21 @@ addColIfMissing('stock_movements',  'sucursal_id', 'INTEGER REFERENCES sucursale
     for (const s of subs) ins.run(admin.id, s.id);
   }
 };
+
+// Seed lista de precios inicial (migra precios actuales si no existe ninguna lista)
+{
+  const plCount = db.prepare('SELECT COUNT(*) AS c FROM price_lists').get().c;
+  if (plCount === 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { lastInsertRowid } = db.prepare(
+      "INSERT INTO price_lists (nombre, fecha_vigencia, active) VALUES ('Lista anterior', ?, 0)"
+    ).run(today);
+    const listId = Number(lastInsertRowid);
+    const products = db.prepare('SELECT id, base_price FROM products WHERE active=1').all();
+    const ins = db.prepare('INSERT INTO price_list_items (price_list_id, product_id, precio) VALUES (?,?,?)');
+    for (const p of products) ins.run(listId, p.id, p.base_price);
+  }
+}
 
 // Seed plan de cuentas
 {
