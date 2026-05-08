@@ -812,6 +812,120 @@ async function getPriceForList(listId) {
   return null;
 }
 
+/* ================================================================ IMPORTAR LISTA DE PRECIOS */
+
+let _iplData = [];  // filas parseadas del Excel
+
+$('btn-import-price-list').addEventListener('click', () => {
+  _iplData = [];
+  $('inp-ipl-nombre').value = '';
+  $('inp-ipl-fecha').value  = new Date().toISOString().slice(0,10);
+  $('inp-ipl-file').value   = '';
+  $('ipl-preview').classList.add('hidden');
+  $('ipl-error').classList.add('hidden');
+  $('btn-import-pl-confirm').classList.add('hidden');
+  $('import-price-list-modal').classList.remove('hidden');
+});
+
+['btn-import-pl-cancel','btn-import-pl-cancel2'].forEach(id =>
+  $(id).addEventListener('click', () => $('import-price-list-modal').classList.add('hidden'))
+);
+$('import-price-list-modal').addEventListener('click', e => {
+  if (e.target === $('import-price-list-modal')) $('import-price-list-modal').classList.add('hidden');
+});
+
+$('inp-ipl-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('ipl-preview').classList.add('hidden');
+  $('ipl-error').classList.add('hidden');
+  $('btn-import-pl-confirm').classList.add('hidden');
+  _iplData = [];
+
+  try {
+    const buf = await file.arrayBuffer();
+    const ext = file.name.split('.').pop().toLowerCase();
+    let rows = [];
+    if (ext === 'csv') {
+      const text = new TextDecoder('utf-8').decode(buf);
+      rows = text.trim().split('\n').map(l => l.split(/[,;]/).map(c => c.trim().replace(/^"|"$/g, '')));
+    } else {
+      const wb = XLSX.read(buf, { type: 'array' });
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+    }
+    if (!rows.length) { $('ipl-error').textContent = 'Archivo vacío'; $('ipl-error').classList.remove('hidden'); return; }
+
+    // Detectar columnas
+    const header = rows[0].map(h => String(h).toLowerCase().trim());
+    const nameIdx  = header.findIndex(h => ['nombre','name','producto','product'].includes(h));
+    const priceIdx = header.findIndex(h => ['precio','price','base_price','valor','value','importe'].includes(h));
+    if (nameIdx < 0 || priceIdx < 0) {
+      $('ipl-error').textContent = 'No se encontraron columnas "nombre" y "precio". Revisá los encabezados del archivo.';
+      $('ipl-error').classList.remove('hidden'); return;
+    }
+
+    // Cargar catálogo para hacer el match
+    const catalog = await api('GET', '/products?all=1');
+    const catalogMap = {};
+    catalog.forEach(p => { catalogMap[p.name.toLowerCase().trim()] = p; });
+
+    const found = [], notFound = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const name  = String(row[nameIdx]  || '').trim();
+      const rawPrice = String(row[priceIdx] || '').replace(/[^\d.,]/g,'').replace(',','.');
+      const precio = parseFloat(rawPrice) || 0;
+      if (!name) continue;
+      const match = catalogMap[name.toLowerCase()];
+      if (match) {
+        found.push({ product_id: match.id, name: match.name, precio });
+      } else {
+        notFound.push(name);
+      }
+    }
+
+    _iplData = found;
+
+    // Mostrar preview
+    $('ipl-tbody').innerHTML = found.map(r =>
+      `<tr><td>${esc(r.name)}</td><td class="text-right">${fmtMoney(r.precio)}</td><td><span class="badge badge-success">OK</span></td></tr>`
+    ).join('');
+    $('ipl-summary').textContent = `${found.length} producto${found.length !== 1 ? 's' : ''} encontrado${found.length !== 1 ? 's' : ''} para actualizar.`;
+
+    const nfEl = $('ipl-not-found');
+    if (notFound.length) {
+      $('ipl-not-found-list').textContent = notFound.join(', ');
+      nfEl.classList.remove('hidden');
+    } else { nfEl.classList.add('hidden'); }
+
+    $('ipl-preview').classList.remove('hidden');
+    if (found.length) $('btn-import-pl-confirm').classList.remove('hidden');
+  } catch (err) {
+    $('ipl-error').textContent = 'No se pudo leer el archivo: ' + err.message;
+    $('ipl-error').classList.remove('hidden');
+  }
+});
+
+$('btn-import-pl-confirm').addEventListener('click', async () => {
+  const nombre = $('inp-ipl-nombre').value.trim();
+  const fecha  = $('inp-ipl-fecha').value;
+  if (!nombre) { toast('El nombre de la lista es requerido', 'error'); $('inp-ipl-nombre').focus(); return; }
+  if (!fecha)  { toast('La fecha de vigencia es requerida', 'error'); $('inp-ipl-fecha').focus(); return; }
+  if (!_iplData.length) return;
+
+  const btn = $('btn-import-pl-confirm');
+  btn.disabled = true;
+  try {
+    const result = await api('POST', '/price-lists', { nombre, fecha_vigencia: fecha, items: _iplData });
+    toast(`Lista "${result.nombre}" guardada con ${_iplData.length} precios`, 'success');
+    $('import-price-list-modal').classList.add('hidden');
+    loadCatalog();
+    await loadProductCatalog();
+    await loadPriceLists();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
 function stockBadge(stock, stock_min) {
   if (stock === 0)
     return `<span class="badge badge-stock-out">Sin stock</span>`;

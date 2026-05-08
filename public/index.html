@@ -566,6 +566,10 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             Nueva lista de precios
           </button>
+          <button class="btn btn-secondary btn-sm admin-only" id="btn-import-price-list">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Importar lista
+          </button>
           <button class="btn btn-secondary btn-sm admin-only" id="btn-import-products">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Importar
@@ -2276,6 +2280,52 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-note-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-note-save">Guardar nota</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== MODAL: IMPORTAR LISTA DE PRECIOS -->
+<div id="import-price-list-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:680px;width:95%">
+    <div class="modal-header">
+      <h3>Importar lista de precios</h3>
+      <button class="modal-close" id="btn-import-pl-cancel">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+        El Excel debe tener dos columnas: <strong>nombre</strong> (del producto) y <strong>precio</strong>. Solo se actualizan productos existentes.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="field">
+          <label class="label required">Nombre de la lista</label>
+          <input type="text" id="inp-ipl-nombre" class="input" placeholder="Ej: Lista Mayo 2026">
+        </div>
+        <div class="field">
+          <label class="label required">Fecha de vigencia</label>
+          <input type="date" id="inp-ipl-fecha" class="input">
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label class="label required">Archivo Excel (.xlsx / .csv)</label>
+        <input type="file" id="inp-ipl-file" accept=".xlsx,.csv" class="input" style="padding:6px">
+      </div>
+      <div id="ipl-preview" class="hidden">
+        <p id="ipl-summary" style="font-size:.85rem;margin-bottom:8px"></p>
+        <div style="max-height:260px;overflow-y:auto">
+          <table class="table">
+            <thead><tr><th>Producto</th><th class="text-right" style="width:130px">Precio nuevo</th><th style="width:90px">Estado</th></tr></thead>
+            <tbody id="ipl-tbody"></tbody>
+          </table>
+        </div>
+        <div id="ipl-not-found" class="hidden" style="margin-top:8px;padding:8px 12px;background:var(--warning-bg,#fffbeb);border-radius:6px;font-size:.83rem;color:var(--warning-txt,#92400e)">
+          <strong>No encontrados:</strong> <span id="ipl-not-found-list"></span>
+        </div>
+      </div>
+      <div id="ipl-error" class="hidden" style="color:var(--danger);font-size:.85rem;margin-top:8px"></div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
+      <button class="btn btn-ghost" id="btn-import-pl-cancel2">Cancelar</button>
+      <button class="btn btn-primary hidden" id="btn-import-pl-confirm">Guardar y activar lista</button>
     </div>
   </div>
 </div>
