@@ -739,6 +739,42 @@ if ($('btn-price-list-save')) {
   });
 }
 
+// ── Importar Excel en lista de precios ──
+if ($('inp-pl-import-file')) {
+  $('inp-pl-import-file').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const rows = await parseFileRows(file);
+      const data = rows.map(r => ({
+        nombre: normalizeKey(r, ['nombre','name','producto','product','descripcion','description']),
+        precio: normalizeKey(r, ['precio','price','base_price','precio_base','valor','value','importe'])
+      })).filter(r => r.nombre);
+
+      if (!data.length) { toast('No se encontraron filas con nombre de producto', 'error'); return; }
+
+      // Mapear por nombre a los inputs de la tabla
+      const inputs = Array.from($('pl-items-tbody').querySelectorAll('.pl-price-inp'));
+      let matched = 0;
+      for (const d of data) {
+        const normD = d.nombre.toLowerCase().trim();
+        const inp = inputs.find(i => {
+          const row = i.closest('tr');
+          const tdName = row ? row.querySelector('td:first-child') : null;
+          return tdName && tdName.textContent.toLowerCase().trim() === normD;
+        });
+        if (inp) {
+          const precio = parseFloat(String(d.precio).replace(',', '.')) || 0;
+          inp.value = precio;
+          matched++;
+        }
+      }
+      toast(`${matched} precio${matched !== 1 ? 's' : ''} actualizado${matched !== 1 ? 's' : ''} desde el archivo`, matched > 0 ? 'success' : 'error');
+    } catch (err) { toast('Error al leer el archivo: ' + err.message, 'error'); }
+  });
+}
+
 let _priceLists   = [];
 let _activePriceListItems = {};
 
@@ -1916,8 +1952,65 @@ $('btn-import-products-confirm').addEventListener('click', async () => {
       }))
     });
     $('import-products-modal').classList.add('hidden');
-    toast(`${result.imported} producto${result.imported !== 1 ? 's' : ''} importado${result.imported !== 1 ? 's' : ''} correctamente`, 'success');
+    const nuevos = result.imported || 0;
+    const actualizados = result.updated || 0;
+    const partes = [];
+    if (nuevos > 0) partes.push(`${nuevos} nuevo${nuevos !== 1 ? 's' : ''}`);
+    if (actualizados > 0) partes.push(`${actualizados} actualizado${actualizados !== 1 ? 's' : ''}`);
+    toast(partes.length ? partes.join(', ') + ' correctamente' : 'Sin cambios', 'success');
     if (result.errors && result.errors.length) console.warn('Errores de importación:', result.errors);
+    await loadProductCatalog();
+    loadCatalog();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+// ── Limpiar duplicados ──
+
+$('btn-dedup-products').addEventListener('click', async () => {
+  $('dedup-loading').classList.remove('hidden');
+  $('dedup-none').classList.add('hidden');
+  $('dedup-found').classList.add('hidden');
+  $('btn-dedup-confirm').classList.add('hidden');
+  $('dedup-products-modal').classList.remove('hidden');
+  try {
+    const groups = await api('GET', '/products/duplicates');
+    $('dedup-loading').classList.add('hidden');
+    if (!groups.length) {
+      $('dedup-none').classList.remove('hidden');
+    } else {
+      const totalRemove = groups.reduce((s, g) => s + g.qty - 1, 0);
+      $('dedup-tbody').innerHTML = groups.map(g => `
+        <tr>
+          <td>${esc(g.name)}</td>
+          <td class="text-right" style="color:var(--success)">${fmtMoney(g.min_price)}</td>
+          <td class="text-right" style="color:var(--danger)">${fmtMoney(g.max_price)}</td>
+          <td class="text-center">${g.qty}</td>
+        </tr>
+      `).join('');
+      $('dedup-summary').textContent = `Se eliminarán ${totalRemove} producto${totalRemove !== 1 ? 's' : ''} duplicado${totalRemove !== 1 ? 's' : ''} (en ${groups.length} grupo${groups.length !== 1 ? 's' : ''}).`;
+      $('dedup-found').classList.remove('hidden');
+      $('btn-dedup-confirm').classList.remove('hidden');
+    }
+  } catch (err) {
+    $('dedup-loading').classList.add('hidden');
+    toast(err.message, 'error');
+    $('dedup-products-modal').classList.add('hidden');
+  }
+});
+
+$('btn-dedup-cancel').addEventListener('click', () => $('dedup-products-modal').classList.add('hidden'));
+$('dedup-products-modal').addEventListener('click', e => {
+  if (e.target === $('dedup-products-modal')) $('dedup-products-modal').classList.add('hidden');
+});
+
+$('btn-dedup-confirm').addEventListener('click', async () => {
+  const btn = $('btn-dedup-confirm');
+  btn.disabled = true;
+  try {
+    const result = await api('POST', '/products/deduplicate');
+    $('dedup-products-modal').classList.add('hidden');
+    toast(`${result.removed} duplicado${result.removed !== 1 ? 's' : ''} eliminado${result.removed !== 1 ? 's' : ''} correctamente`, 'success');
     await loadProductCatalog();
     loadCatalog();
   } catch (err) { toast(err.message, 'error'); }

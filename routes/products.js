@@ -67,16 +67,18 @@ router.delete('/:id', requireAdmin, (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/products/import — solo admin
+// POST /api/products/import — solo admin (upsert por nombre)
 router.post('/import', requireAdmin, (req, res) => {
   try {
     const { products } = req.body;
     if (!Array.isArray(products) || !products.length)
       return res.status(400).json({ error: 'No hay productos para importar' });
 
-    let imported = 0;
+    let imported = 0, updated = 0;
     const errors = [];
-    const ins = db.prepare('INSERT INTO products (name, base_price) VALUES (?, ?)');
+    const ins  = db.prepare('INSERT INTO products (name, base_price) VALUES (?, ?)');
+    const upd  = db.prepare('UPDATE products SET base_price=?, active=1 WHERE id=?');
+    const find = db.prepare('SELECT id FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1');
 
     withTransaction(() => {
       for (let i = 0; i < products.length; i++) {
@@ -85,12 +87,84 @@ router.post('/import', requireAdmin, (req, res) => {
         if (!name) { errors.push(`Fila ${i + 2}: nombre requerido`); continue; }
         const rawPrice = String(p.precio || p.price || p.base_price || p.precio_base || 0);
         const price = parseFloat(rawPrice.replace(',', '.')) || 0;
-        ins.run(name, price);
-        imported++;
+        const existing = find.get(name);
+        if (existing) {
+          upd.run(price, existing.id);
+          updated++;
+        } else {
+          ins.run(name, price);
+          imported++;
+        }
       }
     });
 
-    res.json({ imported, errors });
+    res.json({ imported, updated, errors });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/products/duplicates — vista previa de duplicados
+router.get('/duplicates', requireAdmin, (req, res) => {
+  try {
+    const groups = db.prepare(`
+      SELECT name, COUNT(*) AS qty,
+             MIN(base_price) AS min_price, MAX(base_price) AS max_price,
+             MIN(id) AS keep_id
+      FROM products WHERE active = 1
+      GROUP BY LOWER(TRIM(name))
+      HAVING COUNT(*) > 1
+      ORDER BY name
+    `).all();
+    res.json(groups);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/products/deduplicate — conserva el de menor precio, elimina el resto
+router.post('/deduplicate', requireAdmin, (req, res) => {
+  try {
+    const groups = db.prepare(`
+      SELECT LOWER(TRIM(name)) AS norm_name
+      FROM products WHERE active = 1
+      GROUP BY LOWER(TRIM(name))
+      HAVING COUNT(*) > 1
+    `).all();
+
+    if (!groups.length) return res.json({ removed: 0 });
+
+    let removed = 0;
+
+    withTransaction(() => {
+      for (const { norm_name } of groups) {
+        const dupes = db.prepare(`
+          SELECT * FROM products
+          WHERE LOWER(TRIM(name)) = ? AND active = 1
+          ORDER BY base_price ASC, id ASC
+        `).all(norm_name);
+
+        if (dupes.length < 2) continue;
+
+        const keep = dupes[0];
+        for (const dup of dupes.slice(1)) {
+          // Reasignar referencias en order_items
+          db.prepare('UPDATE order_items SET product_id=? WHERE product_id=?').run(keep.id, dup.id);
+          // Reasignar referencias en stock_movements
+          db.prepare('UPDATE stock_movements SET product_id=? WHERE product_id=?').run(keep.id, dup.id);
+          // En price_list_items: eliminar los del duplicado donde ya existe el producto a conservar
+          db.prepare(`
+            DELETE FROM price_list_items
+            WHERE product_id=? AND price_list_id IN (
+              SELECT price_list_id FROM price_list_items WHERE product_id=?
+            )
+          `).run(dup.id, keep.id);
+          // Reasignar los restantes
+          db.prepare('UPDATE price_list_items SET product_id=? WHERE product_id=?').run(keep.id, dup.id);
+          // Desactivar el duplicado
+          db.prepare('UPDATE products SET active=0 WHERE id=?').run(dup.id);
+          removed++;
+        }
+      }
+    });
+
+    res.json({ removed, groups: groups.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

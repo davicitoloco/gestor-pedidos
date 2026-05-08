@@ -570,6 +570,10 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Importar
           </button>
+          <button class="btn btn-secondary btn-sm admin-only" id="btn-dedup-products" title="Eliminar productos duplicados conservando el de menor precio">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+            Limpiar duplicados
+          </button>
           <button class="btn btn-primary admin-only" id="btn-new-product">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Nuevo producto
@@ -1860,6 +1864,36 @@
   </div>
 </div>
 
+<!-- ===================================================== MODAL: Limpiar Duplicados -->
+<div id="dedup-products-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header">Limpiar productos duplicados</div>
+    <div class="modal-form-body">
+      <div id="dedup-loading" style="text-align:center;padding:24px;color:var(--text-muted)">Buscando duplicados…</div>
+      <div id="dedup-none" class="hidden" style="text-align:center;padding:24px;color:var(--text-muted)">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5" style="display:block;margin:0 auto 8px"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        No se encontraron productos duplicados
+      </div>
+      <div id="dedup-found" class="hidden">
+        <p style="font-size:.88rem;color:var(--text-muted);margin-bottom:12px">
+          Se encontraron productos con el mismo nombre. Se conservará el de <strong>menor precio</strong> y se eliminarán los demás.
+        </p>
+        <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+          <table class="table" style="font-size:.85rem">
+            <thead><tr><th>Producto</th><th class="text-right" style="width:120px">Precio menor</th><th class="text-right" style="width:120px">Precio mayor</th><th class="text-center" style="width:80px">Copias</th></tr></thead>
+            <tbody id="dedup-tbody"></tbody>
+          </table>
+        </div>
+        <p id="dedup-summary" style="font-size:.84rem;margin-top:10px;color:var(--text-muted)"></p>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-dedup-cancel">Cancelar</button>
+      <button class="btn btn-danger hidden" id="btn-dedup-confirm">Eliminar duplicados</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===================================================== MODAL: Importar Clientes -->
 <div id="import-clients-modal" class="modal-overlay hidden">
   <div class="modal" style="max-width:700px">
@@ -2264,7 +2298,14 @@
           <input type="date" id="inp-pl-fecha" class="input">
         </div>
       </div>
-      <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:8px">Modificá los precios que necesites. Los demás se mantienen igual.</p>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <p style="font-size:.85rem;color:var(--text-muted);margin:0">Modificá los precios que necesites o importá desde Excel.</p>
+        <label class="btn btn-secondary btn-sm" style="cursor:pointer;margin:0" title="Importar precios desde Excel (.xlsx) o CSV">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Cargar desde Excel
+          <input type="file" id="inp-pl-import-file" accept=".xlsx,.xls,.csv" style="display:none">
+        </label>
+      </div>
       <div style="max-height:400px;overflow-y:auto">
         <table class="table">
           <thead><tr><th>Producto</th><th style="width:160px" class="text-right">Precio</th></tr></thead>
