@@ -10,7 +10,7 @@ function requireAuth(req, res, next) {
 router.use(requireAuth);
 
 function isAdmin(req)   { return req.session.role === 'admin'; }
-function isFabrica(req) { return req.session.role === 'fabrica'; }
+function isFabrica(req) { return req.session.role === 'mp'; }
 function canAccessMP(req) { return isAdmin(req) || isFabrica(req); }
 
 function requireMP(req, res, next) {

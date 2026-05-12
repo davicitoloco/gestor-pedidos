@@ -470,6 +470,8 @@ if (userCount.c === 0) {
 }
 // Asegurar que admin tenga rol admin
 db.exec("UPDATE users SET role = 'admin' WHERE username = 'admin' AND role = 'vendedor'");
+// Migrar rol fabrica → mp
+db.exec("UPDATE users SET role = 'mp' WHERE role = 'fabrica'");
 
 function withTransaction(fn) {
   db.exec('BEGIN');

@@ -116,7 +116,7 @@ async function showApp() {
 
   // Aplicar visibilidad según rol
   $('sidebar-username').textContent = state.user.username;
-  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor', fabrica: 'Fábrica' };
+  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor', mp: 'MP / Fábrica' };
   $('sidebar-role').textContent = roleLabels[state.user.role] || 'Vendedor';
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.admin-only-col').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
@@ -4216,7 +4216,7 @@ window.deleteNote = async function(id, entityType, entityId) {
 
 /* ================================================================ MÓDULO PEDIDOS MP */
 
-function isFabrica()  { return state.user && state.user.role === 'fabrica'; }
+function isFabrica()  { return state.user && state.user.role === 'mp'; }
 function canAccessMP(){ return isAdmin() || isFabrica(); }
 
 const MP_SECTIONS = [
