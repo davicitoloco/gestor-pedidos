@@ -4216,8 +4216,8 @@ window.deleteNote = async function(id, entityType, entityId) {
 
 /* ================================================================ MÓDULO PEDIDOS MP */
 
-function isFabrica() { return state.user && state.user.role === 'fabrica'; }
-function canAccessMP() { return isAdmin() || isFabrica(); }
+function isFabrica()  { return state.user && state.user.role === 'fabrica'; }
+function canAccessMP(){ return isAdmin() || isFabrica(); }
 
 const MP_SECTIONS = [
   { num: 1, name: 'C/Frnts', unidad: 'kg', items: [
@@ -4361,24 +4361,33 @@ const MP_SECTIONS = [
 ];
 
 const MP_ESTADO_LABELS = { pendiente: 'Pendiente', realizado: 'Realizado', entregado: 'Entregado' };
-const MP_ESTADO_BADGE = {
-  pendiente:  'badge-warning',
-  realizado:  'badge-info',
-  entregado:  'badge-success',
-};
+const MP_ESTADO_BADGE  = { pendiente: 'badge-warning', realizado: 'badge-info', entregado: 'badge-success' };
 
 let _mpEstadoFilter = 'todos';
 let _mpCurrentId    = null;
+let _mpSuppliers    = [];
 
 function mpBadge(estado) {
   return `<span class="badge ${MP_ESTADO_BADGE[estado] || 'badge-default'}">${MP_ESTADO_LABELS[estado] || estado}</span>`;
 }
 
 function showMpView(view) {
-  ['mp-list-view','mp-form-view','mp-detail-view'].forEach(id => {
-    const el = $(id);
-    if (el) el.classList.toggle('hidden', id !== `mp-${view}-view`);
+  ['mp-list-view','mp-form-view','mp-detail-view','mp-report-view'].forEach(id => {
+    const el = $(id); if (el) el.classList.toggle('hidden', id !== `mp-${view}-view`);
   });
+}
+
+async function loadMpSuppliers() {
+  try {
+    const list = await api('GET', '/suppliers');
+    _mpSuppliers = list.filter(s => s.active);
+  } catch { _mpSuppliers = []; }
+}
+
+function populateMpSupplierSelect(selId, includeAll = false) {
+  const sel = $(selId); if (!sel) return;
+  sel.innerHTML = (includeAll ? '<option value="">Todos</option>' : '<option value="">— Seleccioná —</option>') +
+    _mpSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
 }
 
 async function loadMpOrders() {
@@ -4390,8 +4399,7 @@ async function loadMpOrders() {
 }
 
 function renderMpOrders(orders) {
-  const tbody = $('mp-tbody');
-  const noEl  = $('no-mp');
+  const tbody = $('mp-tbody'), noEl = $('no-mp');
   $('mp-count').textContent = `${orders.length} pedido${orders.length !== 1 ? 's' : ''}`;
   if (!orders.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
   noEl.classList.add('hidden');
@@ -4399,7 +4407,7 @@ function renderMpOrders(orders) {
     <tr style="cursor:pointer" onclick="openMpDetail(${o.id})">
       <td style="font-family:monospace">#${o.id}</td>
       <td>${fmtDate(o.fecha)}</td>
-      <td style="font-weight:500">${esc(o.proveedor)}</td>
+      <td style="font-weight:500">${esc(o.supplier_name || o.proveedor || '—')}</td>
       <td>${mpBadge(o.estado)}</td>
       <td style="font-size:.83rem;color:var(--text-muted)">${esc(o.created_by_name || '—')}</td>
       <td class="text-center" style="white-space:nowrap" onclick="event.stopPropagation()">
@@ -4427,7 +4435,8 @@ window.openMpDetail = async function(id) {
   _mpCurrentId = id;
   try {
     const o = await api('GET', `/mp-orders/${id}`);
-    $('mp-detail-title').textContent = `Pedido MP #${id} — ${esc(o.proveedor)}`;
+    const provName = o.supplier_name || o.proveedor || '—';
+    $('mp-detail-title').textContent = `Pedido MP #${id} — ${provName}`;
 
     const bySection = {};
     for (const it of (o.items || [])) {
@@ -4438,7 +4447,7 @@ window.openMpDetail = async function(id) {
     let html = `<div class="card" style="padding:16px;margin-bottom:12px">
       <div style="display:flex;gap:24px;flex-wrap:wrap">
         <div><label style="font-size:.8rem;color:var(--text-muted)">Fecha</label><p style="margin:0;font-weight:600">${fmtDate(o.fecha)}</p></div>
-        <div><label style="font-size:.8rem;color:var(--text-muted)">Proveedor</label><p style="margin:0;font-weight:600">${esc(o.proveedor)}</p></div>
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Proveedor</label><p style="margin:0;font-weight:600">${esc(provName)}</p></div>
         <div><label style="font-size:.8rem;color:var(--text-muted)">Estado</label><p style="margin:0">${mpBadge(o.estado)}</p></div>
         <div><label style="font-size:.8rem;color:var(--text-muted)">Creado por</label><p style="margin:0;font-size:.85rem">${esc(o.created_by_name || '—')}</p></div>
       </div>
@@ -4466,6 +4475,18 @@ window.openMpDetail = async function(id) {
   } catch (err) { toast(err.message, 'error'); }
 };
 
+// Eliminar pedido MP (admin only)
+$('btn-mp-delete').addEventListener('click', async () => {
+  if (!_mpCurrentId) return;
+  if (!await confirm(`¿Eliminar el pedido MP #${_mpCurrentId}? Se eliminarán también todos sus ítems. Esta acción no se puede deshacer.`)) return;
+  try {
+    await api('DELETE', `/mp-orders/${_mpCurrentId}`);
+    toast('Pedido MP eliminado', 'success');
+    showMpView('list');
+    loadMpOrders();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
 // RENDER FORM SECTIONS
 function renderMpFormSections() {
   const container = $('mp-sections-container');
@@ -4491,9 +4512,7 @@ function renderMpFormSections() {
         <span>${sec.num}. ${esc(sec.name)}</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </summary>
-      <div style="padding:12px 14px;background:var(--white)">
-        ${itemRows}
-      </div>
+      <div style="padding:12px 14px;background:var(--white)">${itemRows}</div>
     </details>`;
   }).join('');
 }
@@ -4511,36 +4530,28 @@ window.addMpLibreRow = function(secNum) {
 
 function collectMpItems() {
   const items = [];
-  // Secciones fijas
   document.querySelectorAll('.mp-item-qty').forEach(inp => {
     const val = inp.value.trim();
     if (!val) return;
-    items.push({
-      seccion:     Number(inp.dataset.sec),
-      descripcion: inp.dataset.desc,
-      cantidad:    parseFloat(val) || 0,
-      unidad:      inp.dataset.unidad || 'kg',
-      notas:       '',
-    });
+    items.push({ seccion: Number(inp.dataset.sec), descripcion: inp.dataset.desc,
+      cantidad: parseFloat(val) || 0, unidad: inp.dataset.unidad || 'kg', notas: '' });
   });
-  // Sección libre (10)
   document.querySelectorAll('.mp-libre-row').forEach(row => {
     const desc = row.querySelector('.mp-libre-desc').value.trim();
     const qty  = row.querySelector('.mp-libre-qty').value.trim();
     const unit = row.querySelector('.mp-libre-unit').value.trim() || 'u';
-    if (desc && qty) {
-      items.push({ seccion: 10, descripcion: desc, cantidad: parseFloat(qty) || 0, unidad: unit, notas: '' });
-    }
+    if (desc && qty) items.push({ seccion: 10, descripcion: desc, cantidad: parseFloat(qty)||0, unidad: unit, notas: '' });
   });
   return items;
 }
 
-// EVENT LISTENERS MP
-$('btn-new-mp').addEventListener('click', () => {
+// EVENT LISTENERS
+$('btn-new-mp').addEventListener('click', async () => {
   $('mp-form-title').textContent = 'Nuevo Pedido MP';
-  $('inp-mp-fecha').value     = new Date().toISOString().slice(0,10);
-  $('inp-mp-proveedor').value = '';
-  $('inp-mp-notas').value     = '';
+  $('inp-mp-fecha').value  = new Date().toISOString().slice(0,10);
+  $('inp-mp-notas').value  = '';
+  await loadMpSuppliers();
+  populateMpSupplierSelect('inp-mp-supplier');
   renderMpFormSections();
   showMpView('form');
 });
@@ -4557,10 +4568,10 @@ $('btn-mp-print').addEventListener('click', () => {
 
 $('mp-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const fecha     = $('inp-mp-fecha').value;
-  const proveedor = $('inp-mp-proveedor').value.trim();
-  if (!fecha)     { toast('La fecha es requerida', 'error'); $('inp-mp-fecha').focus(); return; }
-  if (!proveedor) { toast('El proveedor es requerido', 'error'); $('inp-mp-proveedor').focus(); return; }
+  const fecha       = $('inp-mp-fecha').value;
+  const supplier_id = $('inp-mp-supplier').value;
+  if (!fecha)       { toast('La fecha es requerida', 'error'); $('inp-mp-fecha').focus(); return; }
+  if (!supplier_id) { toast('El proveedor es requerido', 'error'); $('inp-mp-supplier').focus(); return; }
 
   const items = collectMpItems();
   if (!items.length) { toast('Completá al menos un ítem antes de guardar', 'error'); return; }
@@ -4568,11 +4579,8 @@ $('mp-form').addEventListener('submit', async e => {
   const btn = $('btn-mp-save');
   btn.disabled = true;
   try {
-    const result = await api('POST', '/mp-orders', {
-      fecha, proveedor,
-      notas: $('inp-mp-notas').value.trim(),
-      items
-    });
+    await api('POST', '/mp-orders', { fecha, supplier_id: Number(supplier_id),
+      notas: $('inp-mp-notas').value.trim(), items });
     toast('Pedido MP guardado', 'success');
     showMpView('list');
     loadMpOrders();
@@ -4588,6 +4596,69 @@ document.querySelectorAll('.mp-filter-btn').forEach(btn => {
     loadMpOrders();
   });
 });
+
+// REPORTE MP
+if ($('btn-mp-reporte')) {
+  $('btn-mp-reporte').addEventListener('click', async () => {
+    await loadMpSuppliers();
+    populateMpSupplierSelect('inp-mp-report-supplier', true);
+    // Rango de fechas: mes actual
+    const now = new Date();
+    $('inp-mp-report-desde').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    $('inp-mp-report-hasta').value = now.toISOString().slice(0,10);
+    showMpView('report');
+    loadMpReport();
+  });
+}
+
+$('btn-mp-report-back').addEventListener('click', () => { showMpView('list'); loadMpOrders(); });
+
+$('btn-mp-report-filter').addEventListener('click', loadMpReport);
+
+$('btn-mp-report-print').addEventListener('click', () => {
+  const desde       = $('inp-mp-report-desde').value;
+  const hasta       = $('inp-mp-report-hasta').value;
+  const supplier_id = $('inp-mp-report-supplier').value;
+  const params = new URLSearchParams();
+  if (desde)       params.set('desde', desde);
+  if (hasta)       params.set('hasta', hasta);
+  if (supplier_id) params.set('supplier_id', supplier_id);
+  window.open(`/api/mp-orders/report/print?${params}`, '_blank');
+});
+
+async function loadMpReport() {
+  try {
+    const desde       = $('inp-mp-report-desde').value;
+    const hasta       = $('inp-mp-report-hasta').value;
+    const supplier_id = $('inp-mp-report-supplier').value;
+    const params = new URLSearchParams();
+    if (desde)       params.set('desde', desde);
+    if (hasta)       params.set('hasta', hasta);
+    if (supplier_id) params.set('supplier_id', supplier_id);
+    const orders = await api('GET', `/mp-orders/report?${params}`);
+    renderMpReport(orders);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderMpReport(orders) {
+  const tbody = $('mp-report-tbody'), noEl = $('no-mp-report');
+  $('mp-report-count').textContent = `${orders.length} pedido${orders.length!==1?'s':''} entregado${orders.length!==1?'s':''}`;
+  if (!orders.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
+  noEl.classList.add('hidden');
+  const SECNAMES = ['C/Frnts','Frentes','Cremallera','Sup. Cremallera','Cajas','Tapas','Palanca','Combinaciones','Ac. Inox/Varios','Varios'];
+  tbody.innerHTML = orders.map(o => {
+    const secResumen = Object.entries(o.seccionMap || {})
+      .map(([s,c]) => `${SECNAMES[Number(s)-1]||'Sec.'+s} (${c} ítem${c!==1?'s':''})`)
+      .join(', ') || '—';
+    return `<tr>
+      <td style="font-family:monospace">#${o.id}</td>
+      <td>${fmtDate(o.fecha)}</td>
+      <td style="font-weight:500">${esc(o.supplier_name||o.proveedor||'—')}</td>
+      <td style="font-size:.82rem;color:var(--text-muted)">${esc(secResumen)}</td>
+      <td style="font-size:.83rem;color:var(--text-muted)">${esc(o.created_by_name||'—')}</td>
+    </tr>`;
+  }).join('');
+}
 
 /* ================================================================ INIT */
 checkAuth();

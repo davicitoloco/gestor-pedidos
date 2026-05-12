@@ -1784,11 +1784,17 @@
             Nuevo pedido MP
           </button>
         </div>
-        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-          <button class="btn btn-sm mp-filter-btn active" data-estado="todos">Todos</button>
-          <button class="btn btn-sm mp-filter-btn" data-estado="pendiente">Pendiente</button>
-          <button class="btn btn-sm mp-filter-btn" data-estado="realizado">Realizado</button>
-          <button class="btn btn-sm mp-filter-btn" data-estado="entregado">Entregado</button>
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm mp-filter-btn active" data-estado="todos">Todos</button>
+            <button class="btn btn-sm mp-filter-btn" data-estado="pendiente">Pendiente</button>
+            <button class="btn btn-sm mp-filter-btn" data-estado="realizado">Realizado</button>
+            <button class="btn btn-sm mp-filter-btn" data-estado="entregado">Entregado</button>
+          </div>
+          <button class="btn btn-secondary btn-sm admin-only hidden" id="btn-mp-reporte">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            Reporte entregados
+          </button>
         </div>
         <div class="table-wrap" style="overflow-x:auto">
           <table class="table">
@@ -1823,7 +1829,9 @@
               </div>
               <div class="field">
                 <label class="label required">Proveedor</label>
-                <input type="text" id="inp-mp-proveedor" class="input" placeholder="Nombre del proveedor" required>
+                <select id="inp-mp-supplier" class="input select" required>
+                  <option value="">— Seleccioná un proveedor —</option>
+                </select>
               </div>
               <div class="field">
                 <label class="label">Notas generales</label>
@@ -1848,10 +1856,61 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
               Exportar PDF
             </button>
+            <button class="btn btn-danger btn-sm admin-only hidden" id="btn-mp-delete">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+              Eliminar
+            </button>
             <button class="btn btn-ghost" id="btn-mp-back">← Volver</button>
           </div>
         </div>
         <div id="mp-detail-content"></div>
+      </div>
+
+      <!-- VISTA REPORTE -->
+      <div id="mp-report-view" class="hidden">
+        <div class="page-header">
+          <h2 class="page-title">Reporte MP — Entregados</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="btn-mp-report-print">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              Exportar PDF
+            </button>
+            <button class="btn btn-ghost" id="btn-mp-report-back">← Volver</button>
+          </div>
+        </div>
+        <div class="card" style="padding:14px;margin-bottom:12px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+            <div class="field" style="margin:0">
+              <label class="label">Desde</label>
+              <input type="date" id="inp-mp-report-desde" class="input" style="width:150px">
+            </div>
+            <div class="field" style="margin:0">
+              <label class="label">Hasta</label>
+              <input type="date" id="inp-mp-report-hasta" class="input" style="width:150px">
+            </div>
+            <div class="field" style="margin:0">
+              <label class="label">Proveedor</label>
+              <select id="inp-mp-report-supplier" class="input select" style="width:200px">
+                <option value="">Todos</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btn-mp-report-filter">Filtrar</button>
+          </div>
+        </div>
+        <p id="mp-report-count" style="font-size:.85rem;color:var(--text-muted);margin-bottom:8px"></p>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table class="table">
+            <thead><tr>
+              <th style="width:50px">#</th>
+              <th style="width:100px">Fecha</th>
+              <th>Proveedor</th>
+              <th>Secciones con ítems</th>
+              <th style="width:130px">Creado por</th>
+            </tr></thead>
+            <tbody id="mp-report-tbody"></tbody>
+          </table>
+          <div id="no-mp-report" class="empty-state hidden"><p>No hay pedidos entregados en el período</p></div>
+        </div>
       </div>
 
     </div><!-- /section-mp -->
