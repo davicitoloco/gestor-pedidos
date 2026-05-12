@@ -427,7 +427,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
     </div>
     <div class="banner">USO INTERNO — DEPÓSITO</div>
     <div class="header">
-      <h1>SOIFER SRL HERRAJES</h1>
+      <h1>${esc(order.customer_name)}</h1>
       <h2>Orden de Preparación — ${esc(company)}</h2>
     </div>
     <div class="info-grid">
