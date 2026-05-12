@@ -491,4 +491,133 @@ tr:nth-child(even) td{background:#f8fafc}
   } catch (err) { res.status(500).send(err.message); }
 });
 
+// ── GET /api/reports/purchases ── Reporte de compras de materia prima ─────────
+router.get('/purchases', (req, res) => {
+  try {
+    const from = validateDate(req.query.from);
+    const to   = validateDate(req.query.to);
+
+    const dateClause = [];
+    const params = [];
+    if (from) { dateClause.push("p.created_at >= ?"); params.push(from); }
+    if (to)   { dateClause.push("p.created_at <= ?"); params.push(to + ' 23:59:59'); }
+    const where = dateClause.length ? 'WHERE ' + dateClause.join(' AND ') : '';
+
+    const purchases = db.prepare(`
+      SELECT p.*, printf('C-%04d', p.purchase_sequence) AS purchase_number,
+             s.name AS supplier_name
+      FROM purchases p JOIN suppliers s ON p.supplier_id = s.id
+      ${where}
+      ORDER BY p.purchase_sequence DESC
+    `).all(...params);
+
+    const bySupplier = db.prepare(`
+      SELECT s.name AS supplier_name, COUNT(*) AS qty, SUM(p.total) AS total
+      FROM purchases p JOIN suppliers s ON p.supplier_id = s.id
+      ${where}
+      GROUP BY p.supplier_id ORDER BY total DESC
+    `).all(...params);
+
+    const byProduct = db.prepare(`
+      SELECT pi.product_name, SUM(pi.quantity) AS total_qty, SUM(pi.quantity * pi.unit_price) AS total_amount
+      FROM purchase_items pi
+      JOIN purchases p ON pi.purchase_id = p.id
+      ${where}
+      GROUP BY LOWER(TRIM(pi.product_name))
+      ORDER BY total_amount DESC
+      LIMIT 50
+    `).all(...params);
+
+    const total      = purchases.reduce((s, p) => s + p.total, 0);
+    const supplierCount = new Set(purchases.map(p => p.supplier_id)).size;
+    const productCount  = byProduct.length;
+
+    res.json({ purchases, bySupplier, byProduct, total, count: purchases.length, supplierCount, productCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/purchases/excel ── Excel de compras ─────────────────────
+router.get('/purchases/excel', async (req, res) => {
+  try {
+    const ExcelJS = require('exceljs');
+    const from = validateDate(req.query.from);
+    const to   = validateDate(req.query.to);
+
+    const dateClause = [];
+    const params = [];
+    if (from) { dateClause.push("p.created_at >= ?"); params.push(from); }
+    if (to)   { dateClause.push("p.created_at <= ?"); params.push(to + ' 23:59:59'); }
+    const where = dateClause.length ? 'WHERE ' + dateClause.join(' AND ') : '';
+
+    const purchases = db.prepare(`
+      SELECT p.*, printf('C-%04d', p.purchase_sequence) AS purchase_number,
+             s.name AS supplier_name
+      FROM purchases p JOIN suppliers s ON p.supplier_id = s.id
+      ${where} ORDER BY p.purchase_sequence DESC
+    `).all(...params);
+
+    const items = db.prepare(`
+      SELECT pi.*, p.purchase_sequence, printf('C-%04d', p.purchase_sequence) AS purchase_number,
+             s.name AS supplier_name, p.doc_date, p.doc_type
+      FROM purchase_items pi
+      JOIN purchases p ON pi.purchase_id = p.id
+      JOIN suppliers s ON p.supplier_id = s.id
+      ${where} ORDER BY p.purchase_sequence DESC, pi.id ASC
+    `).all(...params);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Candex Pro';
+    const hdrFill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF2563EB' } };
+    const hdrFont = { color:{ argb:'FFFFFFFF' }, bold:true };
+
+    // Hoja 1: Comprobantes
+    const ws1 = workbook.addWorksheet('Comprobantes');
+    ws1.columns = [
+      { header:'N°',          key:'num',      width:10 },
+      { header:'Proveedor',   key:'supplier', width:30 },
+      { header:'Tipo',        key:'doc_type', width:14 },
+      { header:'N° Doc.',     key:'doc_num',  width:16 },
+      { header:'Fecha',       key:'date',     width:14 },
+      { header:'Total ($)',   key:'total',    width:16 },
+    ];
+    ws1.getRow(1).eachCell(c => { c.fill = hdrFill; c.font = hdrFont; c.alignment = { horizontal:'center' }; });
+    for (const p of purchases) {
+      ws1.addRow({ num: p.purchase_number, supplier: p.supplier_name, doc_type: p.doc_type,
+        doc_num: p.doc_number || '', date: p.doc_date || p.created_at?.slice(0,10) || '', total: p.total });
+    }
+    // Totals row
+    ws1.addRow({});
+    const totRow = ws1.addRow({ supplier: 'TOTAL', total: purchases.reduce((s,p)=>s+p.total,0) });
+    totRow.font = { bold: true };
+    ws1.getColumn('total').numFmt = '#,##0.00';
+
+    // Hoja 2: Detalle ítems
+    const ws2 = workbook.addWorksheet('Ítems de compra');
+    ws2.columns = [
+      { header:'Comprobante', key:'num',      width:12 },
+      { header:'Proveedor',   key:'supplier', width:28 },
+      { header:'Fecha',       key:'date',     width:14 },
+      { header:'Producto',    key:'product',  width:32 },
+      { header:'Cantidad',    key:'qty',      width:12 },
+      { header:'Precio unit.',key:'price',    width:16 },
+      { header:'Subtotal',    key:'subtotal', width:16 },
+    ];
+    ws2.getRow(1).eachCell(c => { c.fill = hdrFill; c.font = hdrFont; c.alignment = { horizontal:'center' }; });
+    for (const it of items) {
+      ws2.addRow({ num: it.purchase_number, supplier: it.supplier_name,
+        date: it.doc_date || '', product: it.product_name,
+        qty: it.quantity, price: it.unit_price, subtotal: it.quantity * it.unit_price });
+    }
+    ws2.getColumn('price').numFmt   = '#,##0.00';
+    ws2.getColumn('subtotal').numFmt = '#,##0.00';
+
+    const d = new Date();
+    const dateStr = `${d.getDate()}-${d.getMonth()+1}-${d.getFullYear()}`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="compras-${dateStr}.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;

@@ -1209,6 +1209,9 @@ async function loadReports() {
   } catch (err) { toast(err.message, 'error'); }
 
   loadRankings();
+  // Cargar reporte de compras con el mes actual
+  const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
+  loadPurchasesReport(`${y}-${m}-01`, new Date(y, now.getMonth()+1, 0).toISOString().slice(0,10));
 }
 
 function rankingQS(key) {
@@ -1426,6 +1429,97 @@ function renderTopProducts(products) {
 
 $('btn-report-pdf').addEventListener('click', () => window.open('/api/reports/print', '_blank'));
 $('btn-report-excel').addEventListener('click', () => { window.location.href = '/api/reports/excel'; });
+
+// ── Reportes de Compras de Materia Prima ──────────────────────────────────────
+async function loadPurchasesReport(from, to) {
+  try {
+    let url = '/reports/purchases';
+    const params = [];
+    if (from) params.push(`from=${from}`);
+    if (to)   params.push(`to=${to}`);
+    if (params.length) url += '?' + params.join('&');
+
+    const d = await api('GET', url);
+
+    // Cards
+    $('rpt-pur-count').textContent     = d.count;
+    $('rpt-pur-total').textContent     = fmtMoney(d.total);
+    $('rpt-pur-suppliers').textContent = d.supplierCount;
+    $('rpt-pur-products').textContent  = d.productCount;
+
+    // Tabla comprobantes
+    if (d.purchases.length) {
+      $('rpt-pur-tbody').innerHTML = d.purchases.map(p => `
+        <tr>
+          <td><a href="#" onclick="openPurchaseDetail(${p.id});showComprasTab('comprobantes');return false;" style="font-weight:600">${esc(p.purchase_number)}</a></td>
+          <td>${esc(p.supplier_name)}</td>
+          <td>${esc(p.doc_type)}</td>
+          <td>${esc(p.doc_number || '—')}</td>
+          <td>${fmtDate(p.doc_date || p.created_at)}</td>
+          <td class="text-right">${fmtMoney(p.total)}</td>
+        </tr>`).join('');
+      $('rpt-pur-empty').classList.add('hidden');
+    } else {
+      $('rpt-pur-tbody').innerHTML = '';
+      $('rpt-pur-empty').classList.remove('hidden');
+    }
+
+    // Por proveedor
+    if (d.bySupplier.length) {
+      $('rpt-pur-by-supplier-tbody').innerHTML = d.bySupplier.map((s, i) => `
+        <tr>
+          <td>${esc(s.supplier_name)}</td>
+          <td class="text-right">${s.qty}</td>
+          <td class="text-right">${fmtMoney(s.total)}</td>
+        </tr>`).join('');
+      $('rpt-pur-by-supplier-empty').classList.add('hidden');
+    } else {
+      $('rpt-pur-by-supplier-tbody').innerHTML = '';
+      $('rpt-pur-by-supplier-empty').classList.remove('hidden');
+    }
+
+    // Por producto
+    if (d.byProduct.length) {
+      $('rpt-pur-by-product-tbody').innerHTML = d.byProduct.map(p => `
+        <tr>
+          <td>${esc(p.product_name)}</td>
+          <td class="text-right">${p.total_qty % 1 === 0 ? p.total_qty : p.total_qty.toFixed(2)}</td>
+          <td class="text-right">${fmtMoney(p.total_amount)}</td>
+        </tr>`).join('');
+      $('rpt-pur-by-product-empty').classList.add('hidden');
+    } else {
+      $('rpt-pur-by-product-tbody').innerHTML = '';
+      $('rpt-pur-by-product-empty').classList.remove('hidden');
+    }
+  } catch (err) { console.error('Error reporte compras:', err.message); }
+}
+
+// Inicializar fechas del reporte de compras (mes actual)
+{
+  const now = new Date();
+  const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
+  const from = `${y}-${m}-01`;
+  const to   = new Date(y, now.getMonth()+1, 0).toISOString().slice(0,10);
+  if ($('rpt-pur-from')) $('rpt-pur-from').value = from;
+  if ($('rpt-pur-to'))   $('rpt-pur-to').value   = to;
+}
+
+$('btn-rpt-pur-filter').addEventListener('click', () => {
+  loadPurchasesReport($('rpt-pur-from').value, $('rpt-pur-to').value);
+});
+$('btn-rpt-pur-reset').addEventListener('click', () => {
+  $('rpt-pur-from').value = '';
+  $('rpt-pur-to').value = '';
+  loadPurchasesReport();
+});
+$('btn-rpt-pur-excel').addEventListener('click', () => {
+  const from = $('rpt-pur-from').value;
+  const to   = $('rpt-pur-to').value;
+  const params = [];
+  if (from) params.push(`from=${from}`);
+  if (to)   params.push(`to=${to}`);
+  window.location.href = '/api/reports/purchases/excel' + (params.length ? '?' + params.join('&') : '');
+});
 
 /* ================================================================ CUSTOMERS */
 function showClientsSubview(view) {
@@ -2855,6 +2949,20 @@ $('btn-new-purchase').addEventListener('click', async () => {
 $('btn-back-purchases').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
 $('btn-pur-form-cancel').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
 $('btn-back-purchase-detail').addEventListener('click', () => { currentPurchaseId = null; showComprobantesSubview('list'); loadPurchases(); });
+
+// Eliminar desde el detalle del comprobante
+$('btn-delete-purchase-detail').addEventListener('click', async () => {
+  if (!currentPurchaseId) return;
+  const title = $('pur-detail-title').textContent;
+  if (!await confirm(`¿Eliminar comprobante ${title}? El stock ingresado se va a descontar.`)) return;
+  try {
+    await api('DELETE', `/purchases/${currentPurchaseId}`);
+    toast('Comprobante eliminado', 'success');
+    currentPurchaseId = null;
+    showComprobantesSubview('list');
+    loadPurchases();
+  } catch (err) { toast(err.message, 'error'); }
+});
 
 $('btn-new-purchase-payment').addEventListener('click', async () => {
   if (!currentPurchaseId) return;

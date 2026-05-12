@@ -930,6 +930,74 @@
         </div>
 
       </div><!-- /rankings-grid -->
+
+      <!-- ── Reportes de Compras de Materia Prima ── -->
+      <div style="margin-top:28px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="font-size:1.05rem;font-weight:700;margin:0">Compras de Materia Prima</h3>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <input type="date" id="rpt-pur-from" class="input" style="width:145px;padding:5px 8px">
+            <span style="color:var(--text-muted);font-size:.85rem">—</span>
+            <input type="date" id="rpt-pur-to" class="input" style="width:145px;padding:5px 8px">
+            <button class="btn btn-secondary btn-sm" id="btn-rpt-pur-filter">Aplicar</button>
+            <button class="btn btn-ghost btn-sm" id="btn-rpt-pur-reset">Limpiar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-rpt-pur-excel">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+              Excel
+            </button>
+          </div>
+        </div>
+
+        <!-- Cards resumen -->
+        <div class="stats-grid" style="margin-bottom:16px">
+          <div class="stat-card"><div class="stat-value" id="rpt-pur-count">—</div><div class="stat-label">Comprobantes</div></div>
+          <div class="stat-card"><div class="stat-value" id="rpt-pur-total">—</div><div class="stat-label">Total comprado</div></div>
+          <div class="stat-card"><div class="stat-value" id="rpt-pur-suppliers">—</div><div class="stat-label">Proveedores distintos</div></div>
+          <div class="stat-card"><div class="stat-value" id="rpt-pur-products">—</div><div class="stat-label">Productos distintos</div></div>
+        </div>
+
+        <!-- Tabla comprobantes -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header">Comprobantes de compra</div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrap">
+              <table class="table" style="font-size:.88rem">
+                <thead><tr>
+                  <th>N°</th><th>Proveedor</th><th>Tipo</th><th>N° Doc.</th><th>Fecha</th><th class="text-right">Total</th>
+                </tr></thead>
+                <tbody id="rpt-pur-tbody"></tbody>
+              </table>
+            </div>
+            <div id="rpt-pur-empty" class="empty-state hidden"><p>Sin compras en el período</p></div>
+          </div>
+        </div>
+
+        <!-- Por proveedor -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;flex-wrap:wrap">
+          <div class="card">
+            <div class="card-header">Por proveedor</div>
+            <div class="card-body" style="padding:0">
+              <table class="table" style="font-size:.88rem">
+                <thead><tr><th>Proveedor</th><th class="text-right">Comprobantes</th><th class="text-right">Total</th></tr></thead>
+                <tbody id="rpt-pur-by-supplier-tbody"></tbody>
+              </table>
+              <div id="rpt-pur-by-supplier-empty" class="empty-state hidden"><p>Sin datos</p></div>
+            </div>
+          </div>
+          <!-- Por producto -->
+          <div class="card">
+            <div class="card-header">Materiales más comprados</div>
+            <div class="card-body" style="padding:0">
+              <table class="table" style="font-size:.88rem">
+                <thead><tr><th>Producto</th><th class="text-right">Cant.</th><th class="text-right">Total $</th></tr></thead>
+                <tbody id="rpt-pur-by-product-tbody"></tbody>
+              </table>
+              <div id="rpt-pur-by-product-empty" class="empty-state hidden"><p>Sin datos</p></div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /compras materia prima -->
+
     </div><!-- /section-reportes -->
 
     <!-- ======================== SECCIÓN: COMPRAS -->
@@ -1107,6 +1175,7 @@
             <div style="display:flex;gap:8px">
               <button class="btn btn-ghost" id="btn-back-purchase-detail">← Volver</button>
               <a id="pur-detail-print-link" href="#" target="_blank" class="btn btn-secondary">PDF</a>
+              <button class="btn btn-danger btn-sm" id="btn-delete-purchase-detail">Eliminar comprobante</button>
             </div>
           </div>
           <!-- Items table -->
