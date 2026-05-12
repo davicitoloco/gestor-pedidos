@@ -1069,7 +1069,9 @@ function renderUsers(users) {
         ? '<span class="badge badge-admin">Admin</span>'
         : u.role === 'subadmin'
           ? '<span class="badge badge-info">Subadmin</span>'
-          : '<span class="badge badge-vendor">Vendedor</span>'}</td>
+          : u.role === 'mp'
+            ? '<span class="badge" style="background:#7c3aed;color:#fff">MP / Fábrica</span>'
+            : '<span class="badge badge-vendor">Vendedor</span>'}</td>
       <td style="font-size:.82rem;color:var(--text-muted)">${(u.sucursales||[]).map(s=>esc(s.name)).join(', ') || '—'}</td>
       <td class="text-center">
         ${u.active
