@@ -126,6 +126,11 @@ async function showApp() {
   document.querySelectorAll('.mp-visible').forEach(el => el.classList.toggle('hidden', !canAccessMP()));
   if (isFabrica()) {
     document.querySelectorAll('.nav-item:not(.mp-visible)').forEach(el => el.classList.add('hidden'));
+  } else {
+    // Restaurar módulos base para roles no-mp (pueden haber quedado ocultos si antes
+    // había una sesión mp activa en la misma pestaña)
+    document.querySelectorAll('.nav-item:not(.mp-visible):not(.admin-only):not(.strict-admin-only)')
+      .forEach(el => el.classList.remove('hidden'));
   }
 
   // Renderizar selector de sucursal
