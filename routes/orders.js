@@ -46,11 +46,11 @@ router.get('/', (req, res) => {
     const { status, search } = req.query;
     const vendorFilter = isVendor(req) ? `AND o.created_by = ${req.session.userId}` : '';
     const statusFilter = (status && status !== 'Todos') ? `AND o.status = ?` : '';
-    const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ?)` : '';
+    const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ? OR LOWER(COALESCE(u.full_name, u.username)) LIKE ?)` : '';
     const sf = getSucursalFilter(req, 'o');
     const params = [];
     if (status && status !== 'Todos') params.push(status);
-    if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q); }
+    if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q, q); }
     params.push(...sf.params);
 
     const sql = `
