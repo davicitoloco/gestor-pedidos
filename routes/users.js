@@ -41,7 +41,7 @@ router.post('/', (req, res) => {
       const result = db.prepare(`
         INSERT INTO users (username, password_hash, full_name, role)
         VALUES (?, ?, ?, ?)
-      `).run(username.trim(), hash, (full_name || '').trim(), ['admin','subadmin'].includes(role) ? role : 'vendedor');
+      `).run(username.trim(), hash, (full_name || '').trim(), ['admin','subadmin','fabrica'].includes(role) ? role : 'vendedor');
       const uid = Number(result.lastInsertRowid);
       const ids = Array.isArray(sucursal_ids) ? sucursal_ids : [];
       const ins = db.prepare('INSERT OR IGNORE INTO user_sucursales (user_id, sucursal_id) VALUES (?,?)');
@@ -76,7 +76,7 @@ router.put('/:id', (req, res) => {
       `).run(
         newHash,
         full_name !== undefined ? full_name.trim() : existing.full_name,
-        role !== undefined ? (['admin','subadmin'].includes(role) ? role : 'vendedor') : existing.role,
+        role !== undefined ? (['admin','subadmin','fabrica'].includes(role) ? role : 'vendedor') : existing.role,
         active !== undefined ? (active ? 1 : 0) : existing.active,
         id
       );
