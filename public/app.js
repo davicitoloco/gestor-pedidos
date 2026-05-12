@@ -116,12 +116,17 @@ async function showApp() {
 
   // Aplicar visibilidad según rol
   $('sidebar-username').textContent = state.user.username;
-  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor' };
+  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor', fabrica: 'Fábrica' };
   $('sidebar-role').textContent = roleLabels[state.user.role] || 'Vendedor';
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.admin-only-col').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.admin-only-field').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.strict-admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
+  // MP nav visible para admin y fabrica; resto del nav oculto para fabrica
+  document.querySelectorAll('.mp-visible').forEach(el => el.classList.toggle('hidden', !canAccessMP()));
+  if (isFabrica()) {
+    document.querySelectorAll('.nav-item:not(.mp-visible)').forEach(el => el.classList.add('hidden'));
+  }
 
   // Renderizar selector de sucursal
   renderSucursalSelector();
@@ -137,7 +142,7 @@ async function showApp() {
   // Cargar catálogo de productos para el formulario
   await loadProductCatalog();
 
-  navigate('pedidos');
+  navigate(isFabrica() ? 'mp' : 'pedidos');
 }
 
 $('login-form').addEventListener('submit', async e => {
@@ -219,6 +224,10 @@ function navigate(section) {
     toast('Sin acceso a esta sección', 'error');
     return;
   }
+  if (isFabrica() && section !== 'mp') {
+    toast('Sin acceso a esta sección', 'error');
+    return;
+  }
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.section === section)
   );
@@ -235,6 +244,7 @@ function navigate(section) {
   if (section === 'reportes')  loadReports();
   if (section === 'compras')   { showComprasTab('proveedores'); showProveedoresSubview('list'); loadSuppliers(); }
   if (section === 'contable')  { showContableTab('resumen'); loadFinanceSummary(); }
+  if (section === 'mp')        { showMpView('list'); loadMpOrders(); }
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -4095,6 +4105,381 @@ window.deleteNote = async function(id, entityType, entityId) {
     else openSupplierAccount(entityId);
   } catch (err) { toast(err.message, 'error'); }
 };
+
+/* ================================================================ MÓDULO PEDIDOS MP */
+
+function isFabrica() { return state.user && state.user.role === 'fabrica'; }
+function canAccessMP() { return isAdmin() || isFabrica(); }
+
+const MP_SECTIONS = [
+  { num: 1, name: 'C/Frnts', unidad: 'kg', items: [
+    '28x1.5x2400 (108/104)',
+    '1.25x118.5 (109 p/c ó 109 p/L)',
+    '1.5x200x240 (100/111/120)',
+    '1.25x89 (112)',
+    '1.5x67x240 (113)',
+    '1.25x140x5x240 (115/116)',
+    '1.5x39x2400 (118/117/114)',
+    '1.25x79.5 (119 emb)',
+    '1.5x69 (119 corr/emb)',
+    '1.5x79.5 (119 c/arr)',
+    '1.25x25 (122/127/127 p/r /121 nuevo)',
+    '1.25x32.5x2400 (124/125/126/901/902)',
+    '1.57x27 (128)',
+    '1.5x40 (117/117p/r)',
+  ], campoLabel: 'CANTIDAD KG C/F' },
+  { num: 2, name: 'Frentes', unidad: 'kg', items: [
+    '(102/103/106/107) 3x28 Bronce',
+    '(112 Bronce/112 CIVE) 2x98',
+    '(100/104/108/111) 3x28x300=2',
+    '(109 P/L / 109 P/C) 3x100',
+    '(112) 2x110',
+    '(113) 2x71x240=2.8',
+    '(114) 2.5x25x3000=1.5',
+    '(115/124/due/901) 2x25x3000=1.2',
+    '(116/125/902) 2x20x3000=0.955',
+    '(117/117 p/r /122/2000mp) 2.25x25x3000=1.4',
+    '(118/128) 3x26.5x3000=1.895',
+    '(119emb/ 119C/emb) 1.5x95.5x2.4=2.73',
+    '(119 C/Arr) 1.5x51',
+    '(120/123 y C/F123) 2.5x23.5x3000=1.35',
+    '(121/127/127P) 2.5x20x3000=1.2',
+  ], campoLabel: 'CANTIDAD KG Frnts' },
+  { num: 3, name: 'Cremallera', unidad: 'kg', items: [
+    '(108/111/114/112/117p/r) 2.45x59x3000=3.5',
+    '(115/116/117/118/124/126/127p/R/100 2000mp) 2.45x55x3000=3.2',
+    '(119todas/110) 2.45x36x3000=2.1 crem 119',
+    '(120) 2.22x59x300=3.2',
+    '(121/127) 2.45x46x3000=2.8',
+    '(123) 2.50x133.5x3000',
+    '(901/902) 2.95x30x3000=2.1',
+    '(901/902 TRABA) 2.5x42x3000=2.72',
+    '(2000mp TRABA) 2.45x64',
+  ], campoLabel: 'CANTIDAD KG Cremallera' },
+  { num: 4, name: 'Sup. Cremallera', unidad: 'kg', items: [
+    '(120) 3x45x300=3.5',
+    '(115x116) 3x42x3000=3.1',
+    '(114) 1.89x53.5=2.45',
+    '(121/127) 3x80x3000=6.05',
+    '(DUE/126) 2.5x48x240=2.4',
+    '(110) 2x53x240=2.65 Y LEVA',
+    '(119) 1.25x41',
+    '(110 Falleva) 2x88x240',
+    '(124/125) 1.57x48',
+    '(110 sup/Falleva) 2.5x53',
+    '(2000mp GuíatornilloC) 2x22',
+    '(118/128 PortaPerno) 2.5x70x2.240=3.4',
+    '(111 porta perno) 2x62',
+    '(117) 3x45',
+  ], campoLabel: 'CANTIDAD KG Sup. Cremallera' },
+  { num: 5, name: 'Cajas', unidad: 'kg', items: [
+    '(100/102/103/111) 1.57x182',
+    '(108/104/105/109p/C p/L 106/128) 96.5x1.57',
+    '(110) 1.57x200',
+    '(112/113) 1.25x94.5x2.4=2.5',
+    '(114) 1.57x169.5=5.27',
+    '(115/116) 1.57x150x2400=6.608',
+    '(117/117p/R/2000mp) 1.57x167.5x240=5.1',
+    '(118) 1.57x107.5',
+    '(119 emb) 1.25x72.5',
+    '(119 Arr) 1.25x93',
+    '(119 1/2Emb) 1.25x71',
+    '(120) 1.57x173 120 tapa',
+    '(121) 1.25x54x2400',
+    '(122) 98.5x1.57',
+    '(124/125) 1.25x150',
+    '(126) 1.25x167.5',
+    '(127/127 p/R) 1.50x95',
+    '(DUE BASE Y TAPA) 1.25x155',
+    '(DUE CERROJO Base y Tapa) 98x1.25',
+    '(123) 1.57x54x2400=1.64',
+  ], campoLabel: 'CANTIDAD KG Cajas' },
+  { num: 6, name: 'Tapas', unidad: 'kg', items: [
+    '(104/108/109/128) 1.57x68x2400=2.25',
+    '(100/111) 1.57x146x2.4=4.5',
+    '(110) 1.57x158.5',
+    '(112/113) 1.25x67',
+    '(115/116) 1.57x131 3.9kgrs',
+    '(117/114/117 p/R) 1.57x140.5',
+    '(118) 1.57x145',
+    '(119emb-Arr/dr/iz Crrd-ArrCrrd-emb) 1.25x49x2400=1.2',
+    '(119-1/2emb) 1.25x73',
+    '(121) 1.25x45x2400',
+    '(122) 1.57x72x240=2.2',
+    '(124/125 T 901/902 BaseyTapa) 1.25x136x2400=3.25',
+    '(127/127 p/R) 1.50x78 2.25',
+    '(123) 1.57x45x2400 1.45',
+  ], campoLabel: 'CANTIDAD KG Tapas' },
+  { num: 7, name: 'Palanca', unidad: 'kg', items: [
+    '(115/116/124/125) 109.5x2x240=4.25',
+    '(117/117p/R / 111/100) 128x2x2460=4.95',
+    '(118) 2x133.5',
+    '(120) 1.25x124.5x2400=3.03',
+    '(121) 1.80x66=2.35',
+    '(2000mp) 1.57x115',
+    '(108/111/117/otros) 1.95x62',
+    '(112/113/114/115/124) 1.45x62',
+    '(119/123) 1.45x43.5',
+    '(120) 1.45x76',
+    '(121/127) 1.45x68',
+    '(100 110 varios) 1.95x62x2.5=2.55 Bronce',
+  ], campoLabel: 'CANTIDAD KG Palanca' },
+  { num: 8, name: 'Combinaciones', unidad: 'kg', items: [
+    '(115/120/123) 0.6x74.5',
+    '(111/117/114/2000mp) 0.6x84',
+    '(108/119/128/122) 0.6x59.5=83.25',
+    '(112/127/127 P/R) 113 .6x49.5=8.6grs',
+    '(121) 0.6x29',
+    'Disco Bocallaves 34x0.6',
+    '(118 Rollos Ac Inoxid) 0.6x93 23grs 43 kgrs',
+    'chapa inox 1x2 0.7',
+  ], campoLabel: 'CANTIDAD KG Combinaciones' },
+  { num: 9, name: 'Ac. Inox / Varios', unidad: 'kg', items: [
+    '(109 capuchón) 1.25x156x2.4=4',
+    '(113 capuchón) 1.25x124',
+    '(124/125/126 Bocallaves) 0.80x74.5',
+    '(109 dr/Izq Bocallaves) 1.25x133',
+    '(110 Bocallaves) 1.25x175',
+    '(120/123 Cuad Crema) 2.85x44.5x3000=3.5',
+    '(121/127/127p/R Cuad crema) 2.75x44x3000=3',
+    'HIERRO4mCad.Crem (108/11/114/112/118/128)',
+    'Cuad.crem4mBronce (111/108/114/112/118 otr)',
+    'Cuad crem 3x33x3000 (115/116/124/125/117/122/126)=2.4',
+    '(119) Cuadcrem 2.45x36 IDEM CREMALLERA 119',
+    'cuadcrem5m HIERRO p/resorte nuez',
+    'Bronce/discos/bocallaves (102/103/106/107)',
+  ], campoLabel: 'CANTIDAD KG Varios' },
+  { num: 10, name: 'Varios', unidad: 'u', items: [], campoLabel: 'CANTIDAD Varios', esLibre: true },
+];
+
+const MP_ESTADO_LABELS = { pendiente: 'Pendiente', realizado: 'Realizado', entregado: 'Entregado' };
+const MP_ESTADO_BADGE = {
+  pendiente:  'badge-warning',
+  realizado:  'badge-info',
+  entregado:  'badge-success',
+};
+
+let _mpEstadoFilter = 'todos';
+let _mpCurrentId    = null;
+
+function mpBadge(estado) {
+  return `<span class="badge ${MP_ESTADO_BADGE[estado] || 'badge-default'}">${MP_ESTADO_LABELS[estado] || estado}</span>`;
+}
+
+function showMpView(view) {
+  ['mp-list-view','mp-form-view','mp-detail-view'].forEach(id => {
+    const el = $(id);
+    if (el) el.classList.toggle('hidden', id !== `mp-${view}-view`);
+  });
+}
+
+async function loadMpOrders() {
+  try {
+    const params = _mpEstadoFilter !== 'todos' ? `?estado=${_mpEstadoFilter}` : '';
+    const orders = await api('GET', `/mp-orders${params}`);
+    renderMpOrders(orders);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderMpOrders(orders) {
+  const tbody = $('mp-tbody');
+  const noEl  = $('no-mp');
+  $('mp-count').textContent = `${orders.length} pedido${orders.length !== 1 ? 's' : ''}`;
+  if (!orders.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
+  noEl.classList.add('hidden');
+  tbody.innerHTML = orders.map(o => `
+    <tr style="cursor:pointer" onclick="openMpDetail(${o.id})">
+      <td style="font-family:monospace">#${o.id}</td>
+      <td>${fmtDate(o.fecha)}</td>
+      <td style="font-weight:500">${esc(o.proveedor)}</td>
+      <td>${mpBadge(o.estado)}</td>
+      <td style="font-size:.83rem;color:var(--text-muted)">${esc(o.created_by_name || '—')}</td>
+      <td class="text-center" style="white-space:nowrap" onclick="event.stopPropagation()">
+        ${isAdmin() ? `<select class="input select" style="font-size:.8rem;padding:2px 4px;width:auto" onchange="changeMpEstado(${o.id},this.value)">
+          ${['pendiente','realizado','entregado'].map(e =>
+            `<option value="${e}" ${o.estado===e?'selected':''}>${MP_ESTADO_LABELS[e]}</option>`
+          ).join('')}
+        </select>` : ''}
+        <button class="btn-icon" onclick="openMpDetail(${o.id})" title="Ver detalle">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+window.changeMpEstado = async function(id, estado) {
+  try {
+    await api('PUT', `/mp-orders/${id}/estado`, { estado });
+    loadMpOrders();
+    toast('Estado actualizado', 'success');
+  } catch (err) { toast(err.message, 'error'); loadMpOrders(); }
+};
+
+window.openMpDetail = async function(id) {
+  _mpCurrentId = id;
+  try {
+    const o = await api('GET', `/mp-orders/${id}`);
+    $('mp-detail-title').textContent = `Pedido MP #${id} — ${esc(o.proveedor)}`;
+
+    const bySection = {};
+    for (const it of (o.items || [])) {
+      if (!bySection[it.seccion]) bySection[it.seccion] = [];
+      bySection[it.seccion].push(it);
+    }
+
+    let html = `<div class="card" style="padding:16px;margin-bottom:12px">
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Fecha</label><p style="margin:0;font-weight:600">${fmtDate(o.fecha)}</p></div>
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Proveedor</label><p style="margin:0;font-weight:600">${esc(o.proveedor)}</p></div>
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Estado</label><p style="margin:0">${mpBadge(o.estado)}</p></div>
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Creado por</label><p style="margin:0;font-size:.85rem">${esc(o.created_by_name || '—')}</p></div>
+      </div>
+      ${o.notas ? `<p style="margin:10px 0 0;font-size:.85rem;color:var(--text-muted)"><strong>Notas:</strong> ${esc(o.notas)}</p>` : ''}
+    </div>`;
+
+    for (const sec of MP_SECTIONS) {
+      const items = bySection[sec.num] || [];
+      if (!items.length) continue;
+      html += `<div class="card" style="padding:12px 16px;margin-bottom:8px">
+        <div style="font-weight:700;margin-bottom:8px;font-size:.9rem">${sec.num}. ${esc(sec.name)}</div>
+        <table class="table" style="font-size:.83rem">
+          <thead><tr><th>Descripción</th><th style="width:80px" class="text-right">Cantidad</th><th style="width:60px" class="text-right">Unidad</th></tr></thead>
+          <tbody>${items.map(it => `<tr>
+            <td>${esc(it.descripcion)}</td>
+            <td class="text-right" style="font-weight:600">${it.cantidad != null ? it.cantidad : '—'}</td>
+            <td class="text-right" style="color:var(--text-muted)">${esc(it.unidad)}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+    }
+
+    $('mp-detail-content').innerHTML = html;
+    showMpView('detail');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+// RENDER FORM SECTIONS
+function renderMpFormSections() {
+  const container = $('mp-sections-container');
+  container.innerHTML = MP_SECTIONS.map(sec => {
+    const itemRows = sec.esLibre
+      ? `<div id="mp-sec-${sec.num}-libre">
+          <div class="mp-libre-row" style="display:flex;gap:8px;margin-bottom:6px">
+            <input type="text" class="input mp-libre-desc" placeholder="Descripción" style="flex:1">
+            <input type="number" class="input mp-libre-qty" placeholder="Cantidad" min="0" step="any" style="width:100px">
+            <input type="text" class="input mp-libre-unit" placeholder="Unid." style="width:70px" value="${sec.unidad}">
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="addMpLibreRow(${sec.num})">+ Agregar ítem</button>`
+      : sec.items.map((item, idx) => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <label style="flex:1;font-size:.82rem;color:var(--text)">${esc(item)}</label>
+          <input type="number" class="input mp-item-qty" data-sec="${sec.num}" data-idx="${idx}" data-desc="${esc(item)}" data-unidad="${esc(sec.unidad)}"
+            placeholder="kg" min="0" step="any" style="width:100px;text-align:right">
+        </div>`).join('');
+
+    return `<details class="mp-section-card" style="margin-bottom:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <summary style="padding:10px 14px;font-weight:700;cursor:pointer;background:var(--bg);user-select:none;list-style:none;display:flex;justify-content:space-between;align-items:center">
+        <span>${sec.num}. ${esc(sec.name)}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </summary>
+      <div style="padding:12px 14px;background:var(--white)">
+        ${itemRows}
+      </div>
+    </details>`;
+  }).join('');
+}
+
+window.addMpLibreRow = function(secNum) {
+  const container = $(`mp-sec-${secNum}-libre`);
+  const row = document.createElement('div');
+  row.className = 'mp-libre-row';
+  row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px';
+  row.innerHTML = `<input type="text" class="input mp-libre-desc" placeholder="Descripción" style="flex:1">
+    <input type="number" class="input mp-libre-qty" placeholder="Cantidad" min="0" step="any" style="width:100px">
+    <input type="text" class="input mp-libre-unit" placeholder="Unid." style="width:70px" value="u">`;
+  container.appendChild(row);
+};
+
+function collectMpItems() {
+  const items = [];
+  // Secciones fijas
+  document.querySelectorAll('.mp-item-qty').forEach(inp => {
+    const val = inp.value.trim();
+    if (!val) return;
+    items.push({
+      seccion:     Number(inp.dataset.sec),
+      descripcion: inp.dataset.desc,
+      cantidad:    parseFloat(val) || 0,
+      unidad:      inp.dataset.unidad || 'kg',
+      notas:       '',
+    });
+  });
+  // Sección libre (10)
+  document.querySelectorAll('.mp-libre-row').forEach(row => {
+    const desc = row.querySelector('.mp-libre-desc').value.trim();
+    const qty  = row.querySelector('.mp-libre-qty').value.trim();
+    const unit = row.querySelector('.mp-libre-unit').value.trim() || 'u';
+    if (desc && qty) {
+      items.push({ seccion: 10, descripcion: desc, cantidad: parseFloat(qty) || 0, unidad: unit, notas: '' });
+    }
+  });
+  return items;
+}
+
+// EVENT LISTENERS MP
+$('btn-new-mp').addEventListener('click', () => {
+  $('mp-form-title').textContent = 'Nuevo Pedido MP';
+  $('inp-mp-fecha').value     = new Date().toISOString().slice(0,10);
+  $('inp-mp-proveedor').value = '';
+  $('inp-mp-notas').value     = '';
+  renderMpFormSections();
+  showMpView('form');
+});
+
+['btn-mp-cancel','btn-mp-cancel2'].forEach(id => {
+  if ($(id)) $(id).addEventListener('click', () => { showMpView('list'); loadMpOrders(); });
+});
+
+$('btn-mp-back').addEventListener('click', () => { showMpView('list'); loadMpOrders(); });
+
+$('btn-mp-print').addEventListener('click', () => {
+  if (_mpCurrentId) window.open(`/api/mp-orders/${_mpCurrentId}/print`, '_blank');
+});
+
+$('mp-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const fecha     = $('inp-mp-fecha').value;
+  const proveedor = $('inp-mp-proveedor').value.trim();
+  if (!fecha)     { toast('La fecha es requerida', 'error'); $('inp-mp-fecha').focus(); return; }
+  if (!proveedor) { toast('El proveedor es requerido', 'error'); $('inp-mp-proveedor').focus(); return; }
+
+  const items = collectMpItems();
+  if (!items.length) { toast('Completá al menos un ítem antes de guardar', 'error'); return; }
+
+  const btn = $('btn-mp-save');
+  btn.disabled = true;
+  try {
+    const result = await api('POST', '/mp-orders', {
+      fecha, proveedor,
+      notas: $('inp-mp-notas').value.trim(),
+      items
+    });
+    toast('Pedido MP guardado', 'success');
+    showMpView('list');
+    loadMpOrders();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+// Filtros de estado
+document.querySelectorAll('.mp-filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    _mpEstadoFilter = btn.dataset.estado;
+    document.querySelectorAll('.mp-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+    loadMpOrders();
+  });
+});
 
 /* ================================================================ INIT */
 checkAuth();

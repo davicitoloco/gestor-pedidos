@@ -309,6 +309,24 @@ db.exec(`
     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     precio REAL NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS mp_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    proveedor TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'pendiente',
+    notas TEXT NOT NULL DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS mp_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mp_order_id INTEGER NOT NULL REFERENCES mp_orders(id) ON DELETE CASCADE,
+    seccion INTEGER NOT NULL,
+    descripcion TEXT NOT NULL,
+    cantidad REAL,
+    unidad TEXT NOT NULL DEFAULT 'kg',
+    notas TEXT NOT NULL DEFAULT ''
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)

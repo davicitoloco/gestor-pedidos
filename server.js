@@ -49,6 +49,7 @@ app.use('/api/cheques',           require('./routes/cheques'));
 app.use('/api/finance',           require('./routes/finance'));
 app.use('/api/accounting',        require('./routes/accounting'));
 app.use('/api/price-lists',       require('./routes/price_lists'));
+app.use('/api/mp-orders',         require('./routes/mp_orders'));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
