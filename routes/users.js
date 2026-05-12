@@ -22,7 +22,10 @@ router.get('/sucursales', (req, res) => {
 router.get('/', (req, res) => {
   try {
     const users = db.prepare('SELECT id, username, full_name, role, active, created_at FROM users ORDER BY id ASC').all();
-    const result = users.map(u => ({ ...u, sucursales: getUserSucursales(u.id) }));
+    const vis = db.prepare('SELECT user_id, supplier_id FROM supplier_visibility').all();
+    const visMap = {};
+    for (const r of vis) { if (!visMap[r.user_id]) visMap[r.user_id] = []; visMap[r.user_id].push(r.supplier_id); }
+    const result = users.map(u => ({ ...u, sucursales: getUserSucursales(u.id), mp_supplier_ids: visMap[u.id] || [] }));
     res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -30,7 +33,7 @@ router.get('/', (req, res) => {
 // POST /api/users — crear usuario
 router.post('/', (req, res) => {
   try {
-    const { username, password, full_name, role, sucursal_ids } = req.body;
+    const { username, password, full_name, role, sucursal_ids, mp_supplier_ids } = req.body;
     if (!username || !username.trim()) return res.status(400).json({ error: 'Usuario requerido' });
     if (!password || password.length < 4) return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
     const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim());
@@ -46,6 +49,10 @@ router.post('/', (req, res) => {
       const ids = Array.isArray(sucursal_ids) ? sucursal_ids : [];
       const ins = db.prepare('INSERT OR IGNORE INTO user_sucursales (user_id, sucursal_id) VALUES (?,?)');
       for (const sid of ids) ins.run(uid, Number(sid));
+      if (Array.isArray(mp_supplier_ids)) {
+        const insV = db.prepare('INSERT OR IGNORE INTO supplier_visibility (supplier_id, user_id) VALUES (?,?)');
+        for (const sid of mp_supplier_ids) insV.run(Number(sid), uid);
+      }
       return uid;
     });
 
@@ -60,7 +67,7 @@ router.put('/:id', (req, res) => {
     const id = Number(req.params.id);
     const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'Usuario no encontrado' });
-    const { password, full_name, role, active, sucursal_ids } = req.body;
+    const { password, full_name, role, active, sucursal_ids, mp_supplier_ids } = req.body;
 
     if (id === req.session.userId && active === 0)
       return res.status(400).json({ error: 'No podés desactivarte a vos mismo' });
@@ -84,6 +91,11 @@ router.put('/:id', (req, res) => {
         db.prepare('DELETE FROM user_sucursales WHERE user_id=?').run(id);
         const ins = db.prepare('INSERT OR IGNORE INTO user_sucursales (user_id, sucursal_id) VALUES (?,?)');
         for (const sid of sucursal_ids) ins.run(id, Number(sid));
+      }
+      if (Array.isArray(mp_supplier_ids)) {
+        db.prepare('DELETE FROM supplier_visibility WHERE user_id=?').run(id);
+        const insV = db.prepare('INSERT OR IGNORE INTO supplier_visibility (supplier_id, user_id) VALUES (?,?)');
+        for (const sid of mp_supplier_ids) insV.run(Number(sid), id);
       }
     });
 

@@ -1105,6 +1105,15 @@ window.toggleUser = async function(id, active) {
 $('btn-new-user').addEventListener('click', () => openUserForm(null));
 $('btn-users-back').addEventListener('click', () => { showUsersSubview('list'); loadUsers(); });
 $('btn-user-cancel').addEventListener('click', () => { showUsersSubview('list'); loadUsers(); });
+$('inp-user-role').addEventListener('change', function() {
+  const sec = $('user-mp-suppliers-section');
+  if (this.value === 'mp') {
+    renderUserMpSupplierCheckboxes(_mpFormSuppliers, new Set());
+    sec.classList.remove('hidden');
+  } else {
+    sec.classList.add('hidden');
+  }
+});
 
 function renderUserSucursalCheckboxes(assignedIds) {
   const container = $('user-sucursal-checkboxes');
@@ -1121,7 +1130,20 @@ function getSelectedSucursalIds() {
     .map(cb => Number(cb.value));
 }
 
-window.openUserForm = function(id) {
+let _mpFormSuppliers = [];
+
+function renderUserMpSupplierCheckboxes(suppliers, assignedIds) {
+  const container = $('user-mp-supplier-checkboxes');
+  container.innerHTML = suppliers.length === 0
+    ? '<span style="color:var(--text-muted);font-size:.88rem">No hay proveedores registrados</span>'
+    : suppliers.map(s => `
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:.9rem">
+          <input type="checkbox" class="user-mp-sup-cb" value="${s.id}" ${assignedIds.has(s.id) ? 'checked' : ''}>
+          ${esc(s.name)}
+        </label>`).join('');
+}
+
+window.openUserForm = async function(id) {
   state.editingUserId = id || null;
   $('user-form-title').textContent = id ? 'Editar Usuario' : 'Nuevo Usuario';
   $('inp-user-fullname').value  = '';
@@ -1130,28 +1152,37 @@ window.openUserForm = function(id) {
   $('inp-user-role').value      = 'vendedor';
   $('inp-user-username').disabled = false;
   $('pwd-label').textContent = id ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña *';
-
-  // Load sucursales list then render checkboxes
-  api('GET', '/users/sucursales').then(subs => {
+  $('user-mp-suppliers-section').classList.add('hidden');
+  $('user-mp-supplier-checkboxes').innerHTML = '<span style="color:var(--text-muted);font-size:.88rem">Cargando...</span>';
+  showUsersSubview('form');
+  setTimeout(() => $('inp-user-fullname').focus(), 50);
+  try {
+    const [subs, allUsers, allSuppliers] = await Promise.all([
+      api('GET', '/users/sucursales'),
+      api('GET', '/users'),
+      api('GET', '/suppliers')
+    ]);
     state.allSucursales = subs;
+    _mpFormSuppliers = allSuppliers.filter(s => s.active);
+    let assignedMpIds = new Set();
     if (id) {
-      api('GET', '/users').then(list => {
-        const u = list.find(x => x.id === id);
-        if (u) {
-          $('inp-user-fullname').value  = u.full_name;
-          $('inp-user-username').value  = u.username;
-          $('inp-user-role').value      = u.role;
-          $('inp-user-username').disabled = true;
-          renderUserSucursalCheckboxes((u.sucursales || []).map(s => s.id));
-        }
-      });
+      const u = allUsers.find(x => x.id === id);
+      if (u) {
+        $('inp-user-fullname').value  = u.full_name;
+        $('inp-user-username').value  = u.username;
+        $('inp-user-role').value      = u.role;
+        $('inp-user-username').disabled = true;
+        renderUserSucursalCheckboxes((u.sucursales || []).map(s => s.id));
+        assignedMpIds = new Set(u.mp_supplier_ids || []);
+      }
     } else {
       renderUserSucursalCheckboxes([]);
     }
-  });
-
-  showUsersSubview('form');
-  setTimeout(() => $('inp-user-fullname').focus(), 50);
+    if ($('inp-user-role').value === 'mp') {
+      renderUserMpSupplierCheckboxes(_mpFormSuppliers, assignedMpIds);
+      $('user-mp-suppliers-section').classList.remove('hidden');
+    }
+  } catch (err) { toast(err.message, 'error'); }
 };
 
 $('user-form').addEventListener('submit', async e => {
@@ -1161,6 +1192,9 @@ $('user-form').addEventListener('submit', async e => {
   const password     = $('inp-user-password').value;
   const role         = $('inp-user-role').value;
   const sucursal_ids = getSelectedSucursalIds();
+  const mp_supplier_ids = role === 'mp'
+    ? [...document.querySelectorAll('.user-mp-sup-cb:checked')].map(cb => Number(cb.value))
+    : [];
 
   if (!fullname) { toast('El nombre completo es requerido', 'error'); return; }
   if (!state.editingUserId && !username) { toast('El nombre de usuario es requerido', 'error'); return; }
@@ -1171,12 +1205,12 @@ $('user-form').addEventListener('submit', async e => {
   btn.disabled = true;
   try {
     if (state.editingUserId) {
-      const body = { full_name: fullname, role, sucursal_ids };
+      const body = { full_name: fullname, role, sucursal_ids, mp_supplier_ids };
       if (password) body.password = password;
       await api('PUT', `/users/${state.editingUserId}`, body);
       toast('Usuario actualizado', 'success');
     } else {
-      await api('POST', '/users', { username, password, full_name: fullname, role, sucursal_ids });
+      await api('POST', '/users', { username, password, full_name: fullname, role, sucursal_ids, mp_supplier_ids });
       toast('Usuario creado', 'success');
     }
     showUsersSubview('list');
@@ -4377,6 +4411,11 @@ const MP_SECTIONS = [
     'Bronce/discos/bocallaves (102/103/106/107)',
   ], campoLabel: 'CANTIDAD KG Varios' },
   { num: 10, name: 'Varios', unidad: 'u', items: [], campoLabel: 'CANTIDAD Varios', esLibre: true },
+  { num: 11, name: 'Bronce', esBronce: true, subsections: [
+    { num: 11, name: 'Nuez' },
+    { num: 12, name: 'Pestillo' },
+    { num: 13, name: 'Llaves' }
+  ]},
 ];
 
 const MP_ESTADO_LABELS = { pendiente: 'Pendiente', realizado: 'Realizado', entregado: 'Entregado' };
@@ -4477,6 +4516,28 @@ window.openMpDetail = async function(id) {
     </div>`;
 
     for (const sec of MP_SECTIONS) {
+      if (sec.esBronce) {
+        const hasAny = sec.subsections.some(sub => (bySection[sub.num] || []).length > 0);
+        if (!hasAny) continue;
+        html += `<div class="card" style="padding:12px 16px;margin-bottom:8px">
+          <div style="font-weight:700;margin-bottom:10px;font-size:.9rem">${sec.num}. ${esc(sec.name)}</div>
+          ${sec.subsections.map(sub => {
+            const subItems = bySection[sub.num] || [];
+            if (!subItems.length) return '';
+            return `<div style="margin-bottom:10px">
+              <div style="font-size:.8rem;font-weight:700;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase">${esc(sub.name)}</div>
+              <table class="table" style="font-size:.83rem">
+                <thead><tr><th>Modelo</th><th style="width:80px" class="text-right">Cantidad</th></tr></thead>
+                <tbody>${subItems.map(it => `<tr>
+                  <td>${esc(it.descripcion)}</td>
+                  <td class="text-right" style="font-weight:600">${it.cantidad != null ? it.cantidad : '—'}</td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </div>`;
+          }).join('')}
+        </div>`;
+        continue;
+      }
       const items = bySection[sec.num] || [];
       if (!items.length) continue;
       html += `<div class="card" style="padding:12px 16px;margin-bottom:8px">
@@ -4513,21 +4574,36 @@ $('btn-mp-delete').addEventListener('click', async () => {
 function renderMpFormSections() {
   const container = $('mp-sections-container');
   container.innerHTML = MP_SECTIONS.map(sec => {
-    const itemRows = sec.esLibre
-      ? `<div id="mp-sec-${sec.num}-libre">
+    let itemRows;
+    if (sec.esBronce) {
+      itemRows = sec.subsections.map(sub => `
+        <div style="margin-bottom:14px">
+          <div style="font-size:.82rem;font-weight:700;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em">${esc(sub.name)}</div>
+          <div id="mp-bronce-${sub.num}">
+            <div class="mp-bronce-row" data-sub="${sub.num}" style="display:flex;gap:8px;margin-bottom:6px">
+              <input type="text" class="input mp-bronce-model" placeholder="Modelo" style="flex:1">
+              <input type="number" class="input mp-bronce-qty" placeholder="Cantidad" min="0" step="any" style="width:110px">
+            </div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:2px" onclick="addMpBronceRow(${sub.num})">+ Agregar</button>
+        </div>`).join('');
+    } else if (sec.esLibre) {
+      itemRows = `<div id="mp-sec-${sec.num}-libre">
           <div class="mp-libre-row" style="display:flex;gap:8px;margin-bottom:6px">
             <input type="text" class="input mp-libre-desc" placeholder="Descripción" style="flex:1">
             <input type="number" class="input mp-libre-qty" placeholder="Cantidad" min="0" step="any" style="width:100px">
             <input type="text" class="input mp-libre-unit" placeholder="Unid." style="width:70px" value="${sec.unidad}">
           </div>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="addMpLibreRow(${sec.num})">+ Agregar ítem</button>`
-      : sec.items.map((item, idx) => `
+        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="addMpLibreRow(${sec.num})">+ Agregar ítem</button>`;
+    } else {
+      itemRows = sec.items.map((item, idx) => `
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
           <label style="flex:1;font-size:.82rem;color:var(--text)">${esc(item)}</label>
           <input type="number" class="input mp-item-qty" data-sec="${sec.num}" data-idx="${idx}" data-desc="${esc(item)}" data-unidad="${esc(sec.unidad)}"
             placeholder="kg" min="0" step="any" style="width:100px;text-align:right">
         </div>`).join('');
+    }
 
     return `<details class="mp-section-card" style="margin-bottom:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
       <summary style="padding:10px 14px;font-weight:700;cursor:pointer;background:var(--bg);user-select:none;list-style:none;display:flex;justify-content:space-between;align-items:center">
@@ -4550,6 +4626,17 @@ window.addMpLibreRow = function(secNum) {
   container.appendChild(row);
 };
 
+window.addMpBronceRow = function(subNum) {
+  const container = $(`mp-bronce-${subNum}`);
+  const row = document.createElement('div');
+  row.className = 'mp-bronce-row';
+  row.dataset.sub = subNum;
+  row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px';
+  row.innerHTML = `<input type="text" class="input mp-bronce-model" placeholder="Modelo" style="flex:1">
+    <input type="number" class="input mp-bronce-qty" placeholder="Cantidad" min="0" step="any" style="width:110px">`;
+  container.appendChild(row);
+};
+
 function collectMpItems() {
   const items = [];
   document.querySelectorAll('.mp-item-qty').forEach(inp => {
@@ -4563,6 +4650,12 @@ function collectMpItems() {
     const qty  = row.querySelector('.mp-libre-qty').value.trim();
     const unit = row.querySelector('.mp-libre-unit').value.trim() || 'u';
     if (desc && qty) items.push({ seccion: 10, descripcion: desc, cantidad: parseFloat(qty)||0, unidad: unit, notas: '' });
+  });
+  document.querySelectorAll('.mp-bronce-row').forEach(row => {
+    const model = row.querySelector('.mp-bronce-model').value.trim();
+    const qty   = row.querySelector('.mp-bronce-qty').value.trim();
+    const subNum = Number(row.dataset.sub);
+    if (model && qty) items.push({ seccion: subNum, descripcion: model, cantidad: parseFloat(qty)||0, unidad: 'u', notas: '' });
   });
   return items;
 }

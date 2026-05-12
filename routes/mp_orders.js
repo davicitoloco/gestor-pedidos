@@ -181,8 +181,10 @@ function fmtDate(d) { if (!d) return '—'; const [y,m,day] = String(d).split('-
 
 const SECTION_NAMES = [
   'C/Frnts', 'Frentes', 'Cremallera', 'Sup. Cremallera', 'Cajas',
-  'Tapas', 'Palanca', 'Combinaciones', 'Ac. Inox / Varios', 'Varios'
+  'Tapas', 'Palanca', 'Combinaciones', 'Ac. Inox / Varios', 'Varios',
+  'Bronce — Nuez', 'Bronce — Pestillo', 'Bronce — Llaves'
 ];
+const BRONCE_SUBSECTIONS = { 11: 'Nuez', 12: 'Pestillo', 13: 'Llaves' };
 const ESTADO_LABELS = { pendiente: 'Pendiente', realizado: 'Realizado', entregado: 'Entregado' };
 
 function buildPrintHtml(orders, title, isReport = false) {
@@ -193,8 +195,27 @@ function buildPrintHtml(orders, title, isReport = false) {
       grouped[it.seccion].push(it);
     }
     let sectionsHtml = '';
+    const bronceNums = new Set([11, 12, 13]);
+    let bronceAdded = false;
     for (const [secNum, secItems] of Object.entries(grouped)) {
-      const name = SECTION_NAMES[Number(secNum) - 1] || `Sección ${secNum}`;
+      const n = Number(secNum);
+      if (bronceNums.has(n)) {
+        if (!bronceAdded) {
+          bronceAdded = true;
+          const bronceSubs = [11, 12, 13].map(bn => {
+            const items = grouped[bn] || [];
+            if (!items.length) return '';
+            return `<div style="margin-bottom:8px">
+              <div style="font-size:10px;font-weight:700;padding:3px 0 3px 4px;color:#555;border-left:2px solid #bbb;margin-bottom:3px">${BRONCE_SUBSECTIONS[bn]}</div>
+              <table><thead><tr><th>Modelo</th><th class="qty">Cantidad</th></tr></thead>
+              <tbody>${items.map(it => `<tr><td>${esc(it.descripcion)}</td><td class="qty">${it.cantidad != null ? it.cantidad : '—'}</td></tr>`).join('')}</tbody></table>
+            </div>`;
+          }).join('');
+          sectionsHtml += `<div class="section"><div class="section-title">Bronce</div>${bronceSubs}</div>`;
+        }
+        continue;
+      }
+      const name = SECTION_NAMES[n - 1] || `Sección ${secNum}`;
       sectionsHtml += `<div class="section">
         <div class="section-title">${esc(name)}</div>
         <table><thead><tr><th>Descripción</th><th class="qty">Cantidad</th><th class="qty">Unidad</th></tr></thead>
