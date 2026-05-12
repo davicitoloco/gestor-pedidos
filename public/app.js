@@ -2691,22 +2691,37 @@ $('btn-new-supplier').addEventListener('click', () => openSupplierForm(null));
 $('btn-back-suppliers').addEventListener('click', () => { showProveedoresSubview('list'); loadSuppliers(); });
 $('btn-sup-form-cancel').addEventListener('click', () => showProveedoresSubview('list'));
 
-window.openSupplierForm = function(id) {
+window.openSupplierForm = async function(id) {
   editingSupplierId = id;
   $('supplier-form-title').textContent = id ? 'Editar Proveedor' : 'Nuevo Proveedor';
   $('supplier-form').reset();
-  if (id) {
-    api('GET', `/suppliers/${id}`).then(s => {
-      $('inp-sup-name').value    = s.name;
-      $('inp-sup-cuit').value    = s.cuit || '';
-      $('inp-sup-iva').value     = s.iva_condition;
-      $('inp-sup-phone').value   = s.phone || '';
-      $('inp-sup-email').value   = s.email || '';
-      $('inp-sup-address').value = s.address || '';
-      $('inp-sup-notes').value   = s.notes || '';
-    }).catch(err => toast(err.message, 'error'));
-  }
   showProveedoresSubview('form');
+  const mpCbs = $('sup-mp-users-checkboxes');
+  mpCbs.innerHTML = '<span style="color:var(--text-muted);font-size:.88rem">Cargando...</span>';
+  try {
+    const [allUsers, supplier] = await Promise.all([
+      api('GET', '/users'),
+      id ? api('GET', `/suppliers/${id}`) : Promise.resolve({ mp_user_ids: [] })
+    ]);
+    if (id && supplier) {
+      $('inp-sup-name').value    = supplier.name;
+      $('inp-sup-cuit').value    = supplier.cuit || '';
+      $('inp-sup-iva').value     = supplier.iva_condition;
+      $('inp-sup-phone').value   = supplier.phone || '';
+      $('inp-sup-email').value   = supplier.email || '';
+      $('inp-sup-address').value = supplier.address || '';
+      $('inp-sup-notes').value   = supplier.notes || '';
+    }
+    const mpUsers = allUsers.filter(u => u.role === 'mp' && u.active);
+    const assigned = new Set(supplier.mp_user_ids || []);
+    mpCbs.innerHTML = mpUsers.length === 0
+      ? '<span style="color:var(--text-muted);font-size:.88rem">No hay usuarios con rol MP registrados</span>'
+      : mpUsers.map(u => `
+          <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:.9rem">
+            <input type="checkbox" class="sup-mp-user-cb" value="${u.id}" ${assigned.has(u.id) ? 'checked' : ''}>
+            ${esc(u.full_name || u.username)}
+          </label>`).join('');
+  } catch (err) { toast(err.message, 'error'); }
 };
 
 $('supplier-form').addEventListener('submit', async e => {
@@ -2714,6 +2729,7 @@ $('supplier-form').addEventListener('submit', async e => {
   const btn = $('btn-sup-form-save');
   btn.disabled = true;
   try {
+    const mp_user_ids = [...document.querySelectorAll('.sup-mp-user-cb:checked')].map(cb => Number(cb.value));
     const data = {
       name: $('inp-sup-name').value.trim(),
       cuit: $('inp-sup-cuit').value.trim(),
@@ -2721,7 +2737,8 @@ $('supplier-form').addEventListener('submit', async e => {
       phone: $('inp-sup-phone').value.trim(),
       email: $('inp-sup-email').value.trim(),
       address: $('inp-sup-address').value.trim(),
-      notes: $('inp-sup-notes').value.trim()
+      notes: $('inp-sup-notes').value.trim(),
+      mp_user_ids
     };
     if (editingSupplierId) await api('PUT', `/suppliers/${editingSupplierId}`, data);
     else await api('POST', '/suppliers', data);
@@ -4381,13 +4398,16 @@ function showMpView(view) {
 
 async function loadMpSuppliers() {
   try {
-    const list = await api('GET', '/suppliers');
-    _mpSuppliers = list.filter(s => s.active);
+    _mpSuppliers = await api('GET', '/suppliers/for-mp');
   } catch { _mpSuppliers = []; }
 }
 
 function populateMpSupplierSelect(selId, includeAll = false) {
   const sel = $(selId); if (!sel) return;
+  if (!includeAll && isFabrica() && _mpSuppliers.length === 0) {
+    sel.innerHTML = '<option value="">No tenés proveedores asignados, contactá al administrador</option>';
+    return;
+  }
   sel.innerHTML = (includeAll ? '<option value="">Todos</option>' : '<option value="">— Seleccioná —</option>') +
     _mpSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
 }
