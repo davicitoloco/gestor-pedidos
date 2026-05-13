@@ -1634,6 +1634,62 @@ function renderClients(clients, searchQuery) {
   }).join('');
 }
 
+$('btn-clients-export-pdf').addEventListener('click', () => {
+  if (!_allClients.length) { toast('No hay clientes para exportar', 'error'); return; }
+  const fecha = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  const rows = _allClients.map(c => `
+    <tr>
+      <td>${esc(c.name)}</td>
+      <td>${esc(formatCuit(c.cuit)||'')}</td>
+      <td>${esc(c.phone||'')}</td>
+      <td>${esc(c.email||'')}</td>
+      <td>${esc(c.address||'')}</td>
+      <td>${esc(c.localidad||'')}</td>
+      <td>${esc(c.provincia||'')}</td>
+      <td>${esc(c.vendor_name||'')}</td>
+    </tr>`).join('');
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+    <title>Clientes</title>
+    <style>
+      body{font-family:Arial,sans-serif;font-size:11px;margin:20px}
+      h1{font-size:16px;margin:0 0 4px}
+      .sub{font-size:11px;color:#666;margin-bottom:14px}
+      table{width:100%;border-collapse:collapse}
+      th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
+      td{padding:5px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top}
+      tr:nth-child(even) td{background:#f8fafc}
+      tfoot td{font-weight:600;background:#f1f5f9;border-top:2px solid #cbd5e1}
+      @media print{body{margin:10mm}}
+    </style>
+  </head><body>
+    <h1>Lista de Clientes</h1>
+    <div class="sub">Exportado el ${fecha}</div>
+    <table>
+      <thead><tr><th>Nombre</th><th>CUIT</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Localidad</th><th>Provincia</th><th>Vendedor</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="8">Total: ${_allClients.length} cliente${_allClients.length!==1?'s':''}</td></tr></tfoot>
+    </table>
+    <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+});
+
+$('btn-clients-export-excel').addEventListener('click', () => {
+  if (!_allClients.length) { toast('No hay clientes para exportar', 'error'); return; }
+  const headers = ['Nombre','CUIT','Teléfono','Email','Dirección','Localidad','Provincia','Vendedor'];
+  const data = [headers, ..._allClients.map(c => [
+    c.name, formatCuit(c.cuit)||'', c.phone||'', c.email||'', c.address||'', c.localidad||'', c.provincia||'', c.vendor_name||''
+  ])];
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [30,16,14,28,30,20,16,18].map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+  const fecha = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  XLSX.writeFile(wb, `clientes_${fecha}.xlsx`);
+});
+
 $('btn-new-client').addEventListener('click', () => openClientForm(null));
 $('btn-clients-back').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
 $('btn-client-cancel').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
