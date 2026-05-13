@@ -3047,15 +3047,31 @@ function renderPurchaseItems() {
   c.innerHTML = purchaseItems.map((it, i) => `
     <div class="purchase-item-row" data-i="${i}">
       <input type="text"   class="input pi-name"  value="${esc(it.name)}"  placeholder="Producto" style="flex:2">
-      <input type="number" class="input pi-qty"   value="${it.qty}"   min="0.001" step="any" placeholder="Cant." style="width:90px">
-      <input type="number" class="input pi-price" value="${it.price}" min="0"     step="any" placeholder="Precio unit." style="width:120px">
-      <span style="width:90px;text-align:right;font-size:.9rem;color:var(--text-muted)">$${((it.qty||0)*(it.price||0)).toFixed(2)}</span>
+      <input type="number" class="input pi-qty"   value="${it.qty === '' ? '' : it.qty}"   min="0.001" step="any" placeholder="Cant." style="width:90px">
+      <input type="number" class="input pi-price" value="${it.price === '' ? '' : it.price}" min="0"     step="any" placeholder="Precio unit." style="width:120px">
+      <span class="pi-subtotal" style="width:90px;text-align:right;font-size:.9rem;color:var(--text-muted)">$${((parseFloat(it.qty)||0)*(parseFloat(it.price)||0)).toFixed(2)}</span>
       <button type="button" class="btn btn-ghost btn-sm pi-remove" style="color:var(--error);padding:4px 8px">✕</button>
     </div>`).join('');
   // events
   c.querySelectorAll('.pi-name').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].name = el.value; updatePurchaseTotal(); }));
-  c.querySelectorAll('.pi-qty').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].qty = parseFloat(el.value)||0; renderPurchaseItems(); }));
-  c.querySelectorAll('.pi-price').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].price = parseFloat(el.value)||0; renderPurchaseItems(); }));
+  c.querySelectorAll('.pi-qty').forEach((el, i) => {
+    el.addEventListener('focus', () => el.select());
+    el.addEventListener('input', () => {
+      purchaseItems[i].qty = el.value;
+      el.closest('.purchase-item-row').querySelector('.pi-subtotal').textContent =
+        '$' + ((parseFloat(el.value)||0) * (parseFloat(purchaseItems[i].price)||0)).toFixed(2);
+      updatePurchaseTotal();
+    });
+  });
+  c.querySelectorAll('.pi-price').forEach((el, i) => {
+    el.addEventListener('focus', () => el.select());
+    el.addEventListener('input', () => {
+      purchaseItems[i].price = el.value;
+      el.closest('.purchase-item-row').querySelector('.pi-subtotal').textContent =
+        '$' + ((parseFloat(purchaseItems[i].qty)||0) * (parseFloat(el.value)||0)).toFixed(2);
+      updatePurchaseTotal();
+    });
+  });
   c.querySelectorAll('.pi-remove').forEach((el, i) => el.addEventListener('click', () => { purchaseItems.splice(i,1); renderPurchaseItems(); }));
   updatePurchaseTotal();
 }
@@ -3066,7 +3082,7 @@ function addPurchaseItemRow() {
 }
 
 function updatePurchaseTotal() {
-  const total = purchaseItems.reduce((s, it) => s + (it.qty||0)*(it.price||0), 0);
+  const total = purchaseItems.reduce((s, it) => s + (parseFloat(it.qty)||0)*(parseFloat(it.price)||0), 0);
   $('purchase-total-display').textContent = total.toFixed(2);
 }
 
@@ -3088,8 +3104,8 @@ $('purchase-form').addEventListener('submit', async e => {
       notes:      $('inp-pur-notes').value.trim(),
       items: purchaseItems.filter(it => it.name.trim()).map(it => ({
         product_name: it.name.trim(),
-        quantity:     it.qty,
-        unit_price:   it.price
+        quantity:     parseFloat(it.qty)  || 0,
+        unit_price:   parseFloat(it.price) || 0
       }))
     });
     toast('Comprobante registrado y stock actualizado', 'success');
@@ -4489,13 +4505,74 @@ function renderMpOrders(orders) {
     </tr>`).join('');
 }
 
+let _mpReceiptOrderId = null;
+
 window.changeMpEstado = async function(id, estado) {
+  if (estado === 'entregado') {
+    _mpReceiptOrderId = id;
+    await openMpReceiptModal();
+    return;
+  }
   try {
     await api('PUT', `/mp-orders/${id}/estado`, { estado });
     loadMpOrders();
     toast('Estado actualizado', 'success');
   } catch (err) { toast(err.message, 'error'); loadMpOrders(); }
 };
+
+async function openMpReceiptModal() {
+  $('inp-mpr-fecha').value = new Date().toISOString().slice(0, 10);
+  $('inp-mpr-numero').value = '';
+  $('inp-mpr-monto').value = '';
+  $('inp-mpr-notas').value = '';
+  $('inp-mpr-tipo').value = 'Factura A';
+  $('inp-mpr-iva').value = '21%';
+  // Load sucursales
+  try {
+    const subs = await api('GET', '/users/sucursales');
+    $('inp-mpr-sucursal').innerHTML = '<option value="">— Seleccioná —</option>' +
+      subs.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
+  } catch {
+    $('inp-mpr-sucursal').innerHTML = '<option value="">Error cargando sucursales</option>';
+  }
+  $('mp-receipt-modal').classList.remove('hidden');
+}
+
+$('btn-mpr-cancel').addEventListener('click', () => {
+  $('mp-receipt-modal').classList.add('hidden');
+  _mpReceiptOrderId = null;
+  loadMpOrders();
+});
+
+$('btn-mpr-confirm').addEventListener('click', async () => {
+  const sucursal = $('inp-mpr-sucursal').value;
+  const monto    = $('inp-mpr-monto').value;
+  const fecha    = $('inp-mpr-fecha').value;
+  if (!sucursal) { toast('Seleccioná la sucursal', 'error'); return; }
+  if (!monto || parseFloat(monto) <= 0) { toast('Ingresá el monto total', 'error'); return; }
+  if (!fecha) { toast('Ingresá la fecha del comprobante', 'error'); return; }
+  const btn = $('btn-mpr-confirm');
+  btn.disabled = true;
+  try {
+    await api('PUT', `/mp-orders/${_mpReceiptOrderId}/estado`, {
+      estado: 'entregado',
+      receipt: {
+        sucursal,
+        tipo_comprobante: $('inp-mpr-tipo').value,
+        numero_comprobante: $('inp-mpr-numero').value.trim(),
+        fecha_comprobante: fecha,
+        monto_total: parseFloat(monto),
+        iva: $('inp-mpr-iva').value,
+        notas: $('inp-mpr-notas').value.trim()
+      }
+    });
+    $('mp-receipt-modal').classList.add('hidden');
+    _mpReceiptOrderId = null;
+    toast('Pedido marcado como entregado y factura registrada', 'success');
+    loadMpOrders();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
 
 window.openMpDetail = async function(id) {
   _mpCurrentId = id;
@@ -4518,7 +4595,18 @@ window.openMpDetail = async function(id) {
         <div><label style="font-size:.8rem;color:var(--text-muted)">Creado por</label><p style="margin:0;font-size:.85rem">${esc(o.created_by_name || '—')}</p></div>
       </div>
       ${o.notas ? `<p style="margin:10px 0 0;font-size:.85rem;color:var(--text-muted)"><strong>Notas:</strong> ${esc(o.notas)}</p>` : ''}
-    </div>`;
+    </div>
+    ${o.receipt ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;background:#f0f7ff;border:1px solid #bbd4f0">
+      <div style="font-weight:700;font-size:.82rem;text-transform:uppercase;color:#2563eb;margin-bottom:8px">Comprobante de recepción</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:.85rem">
+        <div><label style="font-size:.75rem;color:var(--text-muted)">Sucursal</label><p style="margin:0;font-weight:600">${esc(o.receipt.sucursal)}</p></div>
+        <div><label style="font-size:.75rem;color:var(--text-muted)">Comprobante</label><p style="margin:0;font-weight:600">${esc(o.receipt.tipo_comprobante)} ${esc(o.receipt.numero_comprobante||'')}</p></div>
+        <div><label style="font-size:.75rem;color:var(--text-muted)">Fecha</label><p style="margin:0;font-weight:600">${fmtDate(o.receipt.fecha_comprobante)}</p></div>
+        <div><label style="font-size:.75rem;color:var(--text-muted)">Monto</label><p style="margin:0;font-weight:600">${fmtMoney(o.receipt.monto_total)}</p></div>
+        <div><label style="font-size:.75rem;color:var(--text-muted)">IVA</label><p style="margin:0;font-weight:600">${esc(o.receipt.iva)}</p></div>
+        ${o.receipt.notas ? `<div><label style="font-size:.75rem;color:var(--text-muted)">Notas</label><p style="margin:0">${esc(o.receipt.notas)}</p></div>` : ''}
+      </div>
+    </div>` : ''}`;
 
     for (const sec of MP_SECTIONS) {
       if (sec.esBronce) {
@@ -4770,12 +4858,16 @@ function renderMpReport(orders) {
     const secResumen = Object.entries(o.seccionMap || {})
       .map(([s,c]) => `${SECNAMES[Number(s)-1]||'Sec.'+s} (${c} ítem${c!==1?'s':''})`)
       .join(', ') || '—';
+    const r = o.receipt;
     return `<tr>
       <td style="font-family:monospace">#${o.id}</td>
       <td>${fmtDate(o.fecha)}</td>
       <td style="font-weight:500">${esc(o.supplier_name||o.proveedor||'—')}</td>
       <td style="font-size:.82rem;color:var(--text-muted)">${esc(secResumen)}</td>
       <td style="font-size:.83rem;color:var(--text-muted)">${esc(o.created_by_name||'—')}</td>
+      <td style="font-size:.83rem">${r ? esc(r.sucursal) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="font-size:.83rem">${r ? `${esc(r.tipo_comprobante)} ${esc(r.numero_comprobante||'')}`.trim() : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="text-right" style="font-size:.83rem">${r ? fmtMoney(r.monto_total) : '<span style="color:var(--text-muted)">—</span>'}</td>
     </tr>`;
   }).join('');
 }

@@ -380,6 +380,19 @@ db.exec(`CREATE TABLE IF NOT EXISTS supplier_visibility (
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   PRIMARY KEY (supplier_id, user_id)
 )`);
+db.exec(`CREATE TABLE IF NOT EXISTS mp_receipts (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  mp_order_id         INTEGER NOT NULL REFERENCES mp_orders(id) ON DELETE CASCADE,
+  sucursal            TEXT NOT NULL,
+  tipo_comprobante    TEXT NOT NULL DEFAULT 'Factura A',
+  numero_comprobante  TEXT NOT NULL DEFAULT '',
+  fecha_comprobante   TEXT NOT NULL,
+  monto_total         REAL NOT NULL DEFAULT 0,
+  iva                 TEXT NOT NULL DEFAULT '21%',
+  notas               TEXT NOT NULL DEFAULT '',
+  created_at          TEXT DEFAULT (datetime('now', 'localtime')),
+  created_by          INTEGER REFERENCES users(id)
+)`);
 
 // Seed sucursales
 {

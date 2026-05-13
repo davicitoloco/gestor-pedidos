@@ -1924,6 +1924,9 @@
               <th>Proveedor</th>
               <th>Secciones con ítems</th>
               <th style="width:130px">Creado por</th>
+              <th style="width:110px">Sucursal</th>
+              <th style="width:160px">Comprobante</th>
+              <th style="width:110px" class="text-right">Monto</th>
             </tr></thead>
             <tbody id="mp-report-tbody"></tbody>
           </table>
@@ -2601,6 +2604,60 @@
     <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
       <button class="btn btn-ghost" id="btn-price-list-cancel2">Cancelar</button>
       <button class="btn btn-primary" id="btn-price-list-save">Guardar y activar lista</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Factura recepción MP -->
+<div id="mp-receipt-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header"><h3>Registrar factura de recepción</h3></div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field" style="grid-column:1/-1">
+          <label class="label required">Sucursal que recibe</label>
+          <select id="inp-mpr-sucursal" class="input select" required>
+            <option value="">— Seleccioná —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label required">Tipo de comprobante</label>
+          <select id="inp-mpr-tipo" class="input select">
+            <option value="Factura A">Factura A</option>
+            <option value="Factura B">Factura B</option>
+            <option value="Factura C">Factura C</option>
+            <option value="Remito">Remito</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label">Número de comprobante</label>
+          <input type="text" id="inp-mpr-numero" class="input" placeholder="0001-00012345">
+        </div>
+        <div class="field">
+          <label class="label required">Fecha del comprobante</label>
+          <input type="date" id="inp-mpr-fecha" class="input" required>
+        </div>
+        <div class="field">
+          <label class="label required">Monto total</label>
+          <input type="number" id="inp-mpr-monto" class="input" min="0" step="0.01" placeholder="0.00" required>
+        </div>
+        <div class="field">
+          <label class="label">IVA</label>
+          <select id="inp-mpr-iva" class="input select">
+            <option value="21%">21%</option>
+            <option value="10.5%">10.5%</option>
+            <option value="Exento">Exento</option>
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-mpr-notas" class="input" placeholder="Observaciones opcionales">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-mpr-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-mpr-confirm">Registrar y marcar como entregado</button>
     </div>
   </div>
 </div>

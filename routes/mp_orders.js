@@ -60,7 +60,8 @@ router.get('/report', (req, res) => {
         if (!seccionMap[it.seccion]) seccionMap[it.seccion] = 0;
         seccionMap[it.seccion]++;
       }
-      return { ...o, items, seccionMap };
+      const receipt = db.prepare('SELECT * FROM mp_receipts WHERE mp_order_id=?').get(o.id) || null;
+      return { ...o, items, seccionMap, receipt };
     });
     res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -74,8 +75,9 @@ router.get('/:id', (req, res) => {
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
     if (isFabrica(req) && order.created_by !== req.session.userId)
       return res.status(403).json({ error: 'Sin acceso' });
-    const items = db.prepare('SELECT * FROM mp_order_items WHERE mp_order_id = ? ORDER BY seccion, id').all(id);
-    res.json({ ...order, items });
+    const items   = db.prepare('SELECT * FROM mp_order_items WHERE mp_order_id = ? ORDER BY seccion, id').all(id);
+    const receipt = db.prepare('SELECT * FROM mp_receipts WHERE mp_order_id=?').get(id) || null;
+    res.json({ ...order, items, receipt });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -117,12 +119,24 @@ router.put('/:id/estado', (req, res) => {
   try {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Solo el admin puede cambiar el estado' });
     const id = Number(req.params.id);
-    const { estado } = req.body;
+    const { estado, receipt } = req.body;
     const VALID = ['pendiente', 'realizado', 'entregado'];
     if (!VALID.includes(estado)) return res.status(400).json({ error: 'Estado inválido' });
     if (!db.prepare('SELECT id FROM mp_orders WHERE id=?').get(id))
       return res.status(404).json({ error: 'Pedido no encontrado' });
-    db.prepare(`UPDATE mp_orders SET estado=? WHERE id=?`).run(estado, id);
+    withTransaction(() => {
+      db.prepare(`UPDATE mp_orders SET estado=? WHERE id=?`).run(estado, id);
+      if (estado === 'entregado' && receipt) {
+        db.prepare('DELETE FROM mp_receipts WHERE mp_order_id=?').run(id);
+        db.prepare(`INSERT INTO mp_receipts
+          (mp_order_id, sucursal, tipo_comprobante, numero_comprobante, fecha_comprobante, monto_total, iva, notas, created_by)
+          VALUES (?,?,?,?,?,?,?,?,?)`)
+          .run(id, receipt.sucursal||'', receipt.tipo_comprobante||'Factura A',
+            receipt.numero_comprobante||'', receipt.fecha_comprobante||'',
+            parseFloat(receipt.monto_total)||0, receipt.iva||'21%',
+            receipt.notas||'', req.session.userId);
+      }
+    });
     res.json(db.prepare(`${ORDER_SELECT} WHERE o.id=?`).get(id));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -167,7 +181,8 @@ router.get('/report/print', (req, res) => {
     const orders = db.prepare(`${ORDER_SELECT} WHERE 1=1 ${filters} ORDER BY o.fecha DESC`).all(...params);
     const full = orders.map(o => ({
       ...o,
-      items: db.prepare('SELECT * FROM mp_order_items WHERE mp_order_id=? ORDER BY seccion,id').all(o.id)
+      items:   db.prepare('SELECT * FROM mp_order_items WHERE mp_order_id=? ORDER BY seccion,id').all(o.id),
+      receipt: db.prepare('SELECT * FROM mp_receipts WHERE mp_order_id=?').get(o.id) || null
     }));
     const title = `Reporte MP Entregados${desde||hasta ? ` (${desde||''}${hasta?' al '+hasta:''})` : ''}`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -226,6 +241,18 @@ function buildPrintHtml(orders, title, isReport = false) {
         </tr>`).join('')}</tbody></table></div>`;
     }
     const provName = order.supplier_name || order.proveedor || '—';
+    const r = order.receipt;
+    const receiptHtml = r ? `<div class="receipt-block">
+      <div style="font-weight:700;font-size:10px;text-transform:uppercase;color:#555;margin-bottom:4px">Comprobante de recepción</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:10px">
+        <span><strong>Sucursal:</strong> ${esc(r.sucursal)}</span>
+        <span><strong>Comprobante:</strong> ${esc(r.tipo_comprobante)} ${esc(r.numero_comprobante)}</span>
+        <span><strong>Fecha:</strong> ${fmtDate(r.fecha_comprobante)}</span>
+        <span><strong>Monto:</strong> $${Number(r.monto_total).toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
+        <span><strong>IVA:</strong> ${esc(r.iva)}</span>
+        ${r.notas ? `<span><strong>Notas:</strong> ${esc(r.notas)}</span>` : ''}
+      </div>
+    </div>` : '';
     return `${isReport ? `<div class="order-block">` : ''}
       <div class="meta">
         <div><label>N° Pedido</label><p>#${order.id}</p></div>
@@ -234,6 +261,7 @@ function buildPrintHtml(orders, title, isReport = false) {
         <div><label>Estado</label><p>${ESTADO_LABELS[order.estado] || esc(order.estado)}</p></div>
         <div><label>Creado por</label><p>${esc(order.created_by_name||'—')}</p></div>
       </div>
+      ${receiptHtml}
       ${sectionsHtml}
       ${order.notas ? `<div class="notes"><strong>Notas:</strong> ${esc(order.notas)}</div>` : ''}
       ${isReport ? `</div><hr class="page-sep">` : ''}`;
@@ -257,6 +285,7 @@ function buildPrintHtml(orders, title, isReport = false) {
   .order-block{margin-bottom:20px}
   .page-sep{border:none;border-top:2px dashed #bbb;margin:16px 0}
   .footer{margin-top:16px;font-size:9px;color:#888;border-top:1px solid #ddd;padding-top:6px;text-align:right}
+  .receipt-block{background:#f0f7ff;border:1px solid #bbd4f0;border-radius:4px;padding:6px 10px;margin-bottom:10px;font-size:10px}
   .no-print{text-align:center;margin-bottom:12px}
   .print-btn{padding:8px 20px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px}
   .summary{background:#f8f8f8;border:1px solid #ddd;padding:8px 12px;margin-bottom:14px;font-size:11px}
