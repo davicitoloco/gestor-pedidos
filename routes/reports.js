@@ -34,7 +34,14 @@ router.get('/stats', (req, res) => {
     const vc = vendorClause(req);
     const sc = sucursalClause(req);
     const now = new Date();
-    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+
+    // Accept from/to for month filter; default to current month
+    const fromQ = validateDate(req.query.from);
+    const toQ   = validateDate(req.query.to);
+    const monthStart = fromQ || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    const monthEnd   = toQ ? toQ + ' 23:59:59' : null;
+    const endClause  = monthEnd ? 'AND o.created_at <= ?' : '';
+    const endParam   = monthEnd ? [monthEnd] : [];
 
     const total = db.prepare(`SELECT COUNT(*) AS c FROM orders o WHERE 1=1 ${vc} ${sc.clause}`).get(...sc.params).c;
 
@@ -45,34 +52,25 @@ router.get('/stats', (req, res) => {
         SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
         FROM order_items GROUP BY order_id
       ) sub ON sub.order_id = o.id
-      WHERE o.created_at >= ? AND o.status != 'Cancelado' ${vc} ${sc.clause}
-    `).get(monthStart, ...sc.params);
+      WHERE o.created_at >= ? ${endClause}
+        AND o.status != 'Cancelado' ${vc} ${sc.clause}
+    `).get(monthStart, ...endParam, ...sc.params);
 
-    const totalSales = db.prepare(`
-      SELECT COALESCE(SUM(sub.t * ${DF}),0) AS s
-      FROM orders o
-      LEFT JOIN (
-        SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
-        FROM order_items GROUP BY order_id
-      ) sub ON sub.order_id = o.id
-      WHERE o.status != 'Cancelado' ${vc} ${sc.clause}
-    `).get(...sc.params).s;
+    const byStatus = db.prepare(`
+      SELECT status, COUNT(*) AS cnt FROM orders o
+      WHERE o.created_at >= ? ${endClause} ${vc} ${sc.clause}
+      GROUP BY status
+    `).all(monthStart, ...endParam, ...sc.params);
 
-    const monthSales = monthData.sales;
+    const monthSales  = monthData.sales;
     const monthOrders = monthData.cnt;
 
-    // Pedidos por estado
-    const byStatus = db.prepare(`
-      SELECT status, COUNT(*) AS cnt FROM orders o WHERE 1=1 ${vc} ${sc.clause} GROUP BY status
-    `).all(...sc.params);
-
     res.json({
-      total_orders: total,
-      total_sales: totalSales,
-      month_orders: monthOrders,
-      month_sales: monthSales,
-      avg_order: monthOrders > 0 ? monthSales / monthOrders : 0,
-      by_status: byStatus
+      total_orders:  total,
+      month_orders:  monthOrders,
+      month_sales:   monthSales,
+      avg_order:     monthOrders > 0 ? monthSales / monthOrders : 0,
+      by_status:     byStatus
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -120,21 +118,25 @@ router.get('/weekly', (req, res) => {
 // ── GET /api/reports/top-products ────────────────────────────────────────────
 router.get('/top-products', (req, res) => {
   try {
-    const vc = vendorClause(req);
-    const sc = sucursalClause(req);
+    const vc   = vendorClause(req);
+    const sc   = sucursalClause(req);
+    const from = validateDate(req.query.from);
+    const to   = validateDate(req.query.to);
     const rows = db.prepare(`
       SELECT
         oi.product_name,
-        SUM(oi.quantity)                                           AS total_qty,
-        COUNT(DISTINCT oi.order_id)                               AS order_count,
+        SUM(oi.quantity)                                            AS total_qty,
+        COUNT(DISTINCT oi.order_id)                                AS order_count,
         SUM(oi.quantity * oi.unit_price * (1.0-oi.discount/100.0)) AS revenue
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
-      WHERE o.status != 'Cancelado' ${vc} ${sc.clause}
+      WHERE o.status != 'Cancelado'
+        ${rangeClause('o', 'created_at', from, to)}
+        ${vc} ${sc.clause}
       GROUP BY LOWER(TRIM(oi.product_name))
-      ORDER BY revenue DESC
+      ORDER BY total_qty DESC
       LIMIT 15
-    `).all(...sc.params);
+    `).all(...rangeParams(from, to), ...sc.params);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

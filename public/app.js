@@ -1232,16 +1232,39 @@ const rankingState = {
   expanded: { customers: false, vendors: false, delivered: false, stocked: false, discounts: false }
 };
 
+const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
 async function loadReports() {
-  const months = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-  const now = new Date();
-  $('reports-period').textContent = `${months[now.getMonth()]} ${now.getFullYear()}`;
+  const now    = new Date();
+  const picker = $('rpt-month-picker');
+
+  // Initialize picker to current month if empty
+  if (picker && !picker.value) {
+    picker.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  }
+
+  const [yr, mo] = (picker ? picker.value : '').split('-').map(Number);
+  const year  = yr || now.getFullYear();
+  const month = mo || (now.getMonth() + 1);
+
+  const from = `${year}-${String(month).padStart(2,'0')}-01`;
+  const to   = new Date(year, month, 0).toISOString().slice(0,10);
+
+  const periodLabel = `${MONTHS_ES[month-1]} ${year}`;
+  $('reports-period').textContent = periodLabel;
+
+  // Update dynamic stat card labels
+  const labelMap = { 'stat-month-orders': 'Pedidos', 'stat-month-sales': 'Ventas', 'stat-avg': 'Ticket promedio' };
+  Object.entries(labelMap).forEach(([id, base]) => {
+    const card = $(id)?.closest?.('.stat-card');
+    if (card) card.querySelector('.stat-label').textContent = `${base} — ${periodLabel}`;
+  });
 
   try {
     const [stats, weekly, topProds] = await Promise.all([
-      api('GET', '/reports/stats'),
+      api('GET', `/reports/stats?from=${from}&to=${to}`),
       api('GET', '/reports/weekly'),
-      api('GET', '/reports/top-products')
+      api('GET', `/reports/top-products?from=${from}&to=${to}`)
     ]);
     renderStats(stats);
     renderWeeklyChart(weekly);
@@ -1250,9 +1273,11 @@ async function loadReports() {
   } catch (err) { toast(err.message, 'error'); }
 
   loadRankings();
-  // Cargar reporte de compras con el mes actual
-  const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
-  loadPurchasesReport(`${y}-${m}-01`, new Date(y, now.getMonth()+1, 0).toISOString().slice(0,10));
+  loadPurchasesReport(from, to);
+}
+
+if ($('rpt-month-picker')) {
+  $('rpt-month-picker').addEventListener('change', loadReports);
 }
 
 function rankingQS(key) {
