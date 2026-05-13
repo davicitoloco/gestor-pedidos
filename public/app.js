@@ -2707,22 +2707,26 @@ function showProveedoresSubview(v) {
   $(`${v === 'list' ? 'proveedores-list-view' : v === 'form' ? 'supplier-form-view' : 'supplier-account-view'}`)?.classList.remove('hidden');
 }
 
+let _suppliersData = [];
+
 async function loadSuppliers() {
   try {
     const rows = await api('GET', '/suppliers');
+    _suppliersData = rows;
     $('suppliers-tbody').innerHTML = rows.length ? rows.map(s => `
       <tr>
         <td>${esc(s.name)}</td>
         <td>${esc(s.cuit || '—')}</td>
         <td>${esc(s.iva_condition)}</td>
         <td>${esc(s.phone || '—')}</td>
+        <td>${esc(s.celular || '—')}</td>
         <td class="text-right" style="font-weight:600;color:${s.balance > 0 ? 'var(--error)' : 'var(--success)'}">${fmtMoney(s.balance)}</td>
         <td class="text-center">
           <button class="btn btn-ghost btn-sm" onclick="openSupplierAccount(${s.id})">Cuenta</button>
           <button class="btn btn-ghost btn-sm" onclick="openSupplierForm(${s.id})">Editar</button>
           <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteSupplier(${s.id},'${esc(s.name)}')">Eliminar</button>
         </td>
-      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin proveedores</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin proveedores</td></tr>';
   } catch (err) { toast(err.message, 'error'); }
 }
 
@@ -2747,6 +2751,7 @@ window.openSupplierForm = async function(id) {
       $('inp-sup-cuit').value    = supplier.cuit || '';
       $('inp-sup-iva').value     = supplier.iva_condition;
       $('inp-sup-phone').value   = supplier.phone || '';
+      $('inp-sup-celular').value = supplier.celular || '';
       $('inp-sup-email').value   = supplier.email || '';
       $('inp-sup-address').value = supplier.address || '';
       $('inp-sup-notes').value   = supplier.notes || '';
@@ -2773,8 +2778,9 @@ $('supplier-form').addEventListener('submit', async e => {
       name: $('inp-sup-name').value.trim(),
       cuit: $('inp-sup-cuit').value.trim(),
       iva_condition: $('inp-sup-iva').value,
-      phone: $('inp-sup-phone').value.trim(),
-      email: $('inp-sup-email').value.trim(),
+      phone:   $('inp-sup-phone').value.trim(),
+      celular: $('inp-sup-celular').value.trim(),
+      email:   $('inp-sup-email').value.trim(),
       address: $('inp-sup-address').value.trim(),
       notes: $('inp-sup-notes').value.trim(),
       mp_user_ids
@@ -2796,6 +2802,59 @@ window.deleteSupplier = async function(id, name) {
     loadSuppliers();
   } catch (err) { toast(err.message, 'error'); }
 };
+
+$('btn-sup-export-pdf').addEventListener('click', () => {
+  if (!_suppliersData.length) { toast('No hay proveedores para exportar', 'error'); return; }
+  const fecha = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  const rows = _suppliersData.map(s => `
+    <tr>
+      <td>${esc(s.name)}</td>
+      <td>${esc(s.cuit||'')}</td>
+      <td>${esc(s.phone||'')}</td>
+      <td>${esc(s.celular||'')}</td>
+      <td>${esc(s.email||'')}</td>
+      <td>${esc(s.address||'')}</td>
+      <td>${esc(s.notes||'')}</td>
+    </tr>`).join('');
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+    <title>Proveedores</title>
+    <style>
+      body{font-family:Arial,sans-serif;font-size:11px;margin:20px}
+      h1{font-size:16px;margin:0 0 4px}
+      .sub{font-size:11px;color:#666;margin-bottom:14px}
+      table{width:100%;border-collapse:collapse}
+      th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
+      td{padding:5px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top}
+      tr:nth-child(even) td{background:#f8fafc}
+      @media print{body{margin:10mm}}
+    </style>
+  </head><body>
+    <h1>Lista de Proveedores</h1>
+    <div class="sub">Exportado el ${fecha} &mdash; ${_suppliersData.length} proveedor${_suppliersData.length!==1?'es':''}</div>
+    <table>
+      <thead><tr><th>Nombre</th><th>CUIT</th><th>Teléfono</th><th>Celular</th><th>Email</th><th>Dirección</th><th>Notas</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+});
+
+$('btn-sup-export-excel').addEventListener('click', () => {
+  if (!_suppliersData.length) { toast('No hay proveedores para exportar', 'error'); return; }
+  const headers = ['Nombre','CUIT','Cond. IVA','Teléfono','Celular','Email','Dirección','Notas'];
+  const data = [headers, ..._suppliersData.map(s => [
+    s.name, s.cuit||'', s.iva_condition||'', s.phone||'', s.celular||'', s.email||'', s.address||'', s.notes||''
+  ])];
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [40,18,22,16,16,28,32,30].map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Proveedores');
+  const fecha = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  XLSX.writeFile(wb, `proveedores_${fecha}.xlsx`);
+});
 
 window.openSupplierAccount = async function(id) {
   currentSupplierId = id;

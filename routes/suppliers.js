@@ -106,13 +106,13 @@ router.get('/:id/account', (req, res) => {
 // POST /api/suppliers
 router.post('/', (req, res) => {
   try {
-    const { name, cuit, phone, email, address, iva_condition, notes, mp_user_ids } = req.body;
+    const { name, cuit, phone, celular, email, address, iva_condition, notes, mp_user_ids } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'El nombre es requerido' });
     const sid = withTransaction(() => {
       const r = db.prepare(`
-        INSERT INTO suppliers (name, cuit, phone, email, address, iva_condition, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(name.trim(), cuit||'', phone||'', email||'', address||'', iva_condition||'Responsable Inscripto', notes||'');
+        INSERT INTO suppliers (name, cuit, phone, celular, email, address, iva_condition, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(name.trim(), cuit||'', phone||'', celular||'', email||'', address||'', iva_condition||'Responsable Inscripto', notes||'');
       const newId = Number(r.lastInsertRowid);
       if (Array.isArray(mp_user_ids)) {
         const ins = db.prepare('INSERT OR IGNORE INTO supplier_visibility (supplier_id, user_id) VALUES (?,?)');
@@ -132,12 +132,13 @@ router.put('/:id', (req, res) => {
     const id = Number(req.params.id);
     const ex = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id);
     if (!ex) return res.status(404).json({ error: 'Proveedor no encontrado' });
-    const { name, cuit, phone, email, address, iva_condition, notes, active, mp_user_ids } = req.body;
+    const { name, cuit, phone, celular, email, address, iva_condition, notes, active, mp_user_ids } = req.body;
     withTransaction(() => {
-      db.prepare(`UPDATE suppliers SET name=?,cuit=?,phone=?,email=?,address=?,iva_condition=?,notes=?,active=? WHERE id=?`).run(
+      db.prepare(`UPDATE suppliers SET name=?,cuit=?,phone=?,celular=?,email=?,address=?,iva_condition=?,notes=?,active=? WHERE id=?`).run(
         name          !== undefined ? name.trim()   : ex.name,
         cuit          !== undefined ? cuit          : ex.cuit,
         phone         !== undefined ? phone         : ex.phone,
+        celular       !== undefined ? celular       : ex.celular,
         email         !== undefined ? email         : ex.email,
         address       !== undefined ? address       : ex.address,
         iva_condition !== undefined ? iva_condition : ex.iva_condition,

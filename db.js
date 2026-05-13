@@ -368,6 +368,7 @@ addColIfMissing('orders',           'sucursal_id', 'INTEGER REFERENCES sucursale
 addColIfMissing('orders',           'vendor_id',      'INTEGER REFERENCES users(id)');
 addColIfMissing('orders',           'price_list_id',  'INTEGER REFERENCES price_lists(id)');
 addColIfMissing('mp_orders',        'supplier_id',    'INTEGER REFERENCES suppliers(id)');
+addColIfMissing('suppliers',        'celular',        "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('remitos',          'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('cash_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('bank_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');

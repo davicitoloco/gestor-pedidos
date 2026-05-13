@@ -1025,12 +1025,16 @@
         <div id="proveedores-list-view">
           <div class="page-header">
             <h2 class="page-title">Proveedores</h2>
-            <button class="btn btn-primary" id="btn-new-supplier">+ Nuevo Proveedor</button>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-secondary btn-sm" id="btn-sup-export-pdf">Exportar PDF</button>
+              <button class="btn btn-secondary btn-sm" id="btn-sup-export-excel">Exportar Excel</button>
+              <button class="btn btn-primary" id="btn-new-supplier">+ Nuevo Proveedor</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table class="table">
               <thead><tr>
-                <th>Nombre</th><th>CUIT</th><th>Cond. IVA</th><th>Teléfono</th>
+                <th>Nombre</th><th>CUIT</th><th>Cond. IVA</th><th>Teléfono</th><th>Celular</th>
                 <th class="text-right">Saldo deuda</th><th class="text-center">Acciones</th>
               </tr></thead>
               <tbody id="suppliers-tbody"></tbody>
@@ -1064,6 +1068,10 @@
               <div class="field">
                 <label class="label">Teléfono</label>
                 <input type="text" id="inp-sup-phone" class="input">
+              </div>
+              <div class="field">
+                <label class="label">Celular</label>
+                <input type="text" id="inp-sup-celular" class="input">
               </div>
               <div class="field">
                 <label class="label">Email</label>
