@@ -3910,10 +3910,8 @@ $('am-filter-clear').addEventListener('click', () => {
 
 // ── Form ──────────────────────────────────────────────────────────────────────
 async function amOpenForm() {
-  if (!amAccountsList.length) {
-    try { amAccountsList = (await api('GET', '/accounting/accounts')).filter(a => a.accepts_movements); }
-    catch(e) { toast('Error al cargar cuentas', 'error'); return; }
-  }
+  try { amAccountsList = (await api('GET', '/accounting/accounts')).filter(a => a.accepts_movements); }
+  catch(e) { toast('Error al cargar cuentas', 'error'); return; }
   amLines = [
     { account_id: '', description: '', debit: 0, credit: 0 },
     { account_id: '', description: '', debit: 0, credit: 0 }
@@ -4024,7 +4022,6 @@ $('am-save').addEventListener('click', async () => {
     await api('POST', '/accounting/journal', { date, description: desc, reference: ref, lines });
     toast('Asiento guardado correctamente', 'success');
     $('am-form-section').classList.add('hidden');
-    amAccountsList = []; // Force refresh next open
     loadManualEntries(1);
   } catch (err) {
     toast(err.message, 'error');
