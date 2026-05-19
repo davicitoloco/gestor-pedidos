@@ -3635,7 +3635,7 @@ async function loadJournal(page = 1) {
         <td class="text-center">${!e.is_reversed ? `<button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="reverseEntry(${e.id})">Anular</button>` : ''}</td>
       </tr>
       <tr id="jrn-detail-${e.id}" class="hidden" style="background:var(--surface-2,#f9f9f9)">
-        <td colspan="6" style="padding:0 12px 10px 36px"><div id="jrn-detail-inner-${e.id}">Cargando...</div></td>
+        <td colspan="6" style="padding:10px 16px 14px 52px"><div id="jrn-detail-inner-${e.id}">Cargando…</div></td>
       </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin asientos en el período</td></tr>';
 
     // Pagination
@@ -3647,27 +3647,65 @@ async function loadJournal(page = 1) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+window.closeJournalDetail = function(id) {
+  const row = $(`jrn-detail-${id}`);
+  row.classList.add('hidden');
+  const prev = row.previousElementSibling;
+  if (prev) { const b = prev.querySelector('button[title="Ver líneas"]'); if (b) b.textContent = '▸'; }
+};
+
 window.toggleJournalDetail = async function(id, btn) {
   const row = $(`jrn-detail-${id}`);
-  const isHidden = row.classList.contains('hidden');
-  row.classList.toggle('hidden', !isHidden);
-  btn.textContent = isHidden ? '▾' : '▸';
-  if (isHidden) {
-    try {
-      const entry = await api('GET', `/accounting/journal/${id}`);
-      $(`jrn-detail-inner-${id}`).innerHTML = `
-        <table class="table" style="margin:4px 0">
-          <thead><tr><th>Cuenta</th><th class="text-right">Debe</th><th class="text-right">Haber</th></tr></thead>
-          <tbody>${entry.lines.map(l => `
-            <tr>
-              <td><span style="font-family:monospace;font-size:.82rem;color:var(--text-muted)">${esc(l.account_code)}</span> ${esc(l.account_name)}</td>
-              <td class="text-right">${l.debit  > 0 ? fmtMoney(l.debit)  : ''}</td>
-              <td class="text-right">${l.credit > 0 ? fmtMoney(l.credit) : ''}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>`;
-    } catch(e) { $(`jrn-detail-inner-${id}`).textContent = 'Error al cargar'; }
-  }
+  const wasHidden = row.classList.contains('hidden');
+  row.classList.toggle('hidden', !wasHidden);
+  btn.textContent = wasHidden ? '▾' : '▸';
+  if (!wasHidden) return;
+  const inner = $(`jrn-detail-inner-${id}`);
+  inner.textContent = 'Cargando…';
+  try {
+    const e = await api('GET', `/accounting/journal/${id}`);
+    const refLabels = {
+      manual: 'Manual', venta: 'Venta', cobro: 'Cobro', compra: 'Compra',
+      pago: 'Pago', caja: 'Caja', banco: 'Banco', cheque: 'Cheque',
+      reversal: 'Anulación', note_customer: 'Nota cliente', note_supplier: 'Nota proveedor'
+    };
+    const lines = e.lines || [];
+    inner.innerHTML =
+      `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:.83rem">
+          <span><b>Fecha:</b> ${fmtDate(e.date)}</span>
+          <span><b>Descripción:</b> ${esc(e.description)}</span>
+          <span><b>Tipo:</b> ${esc(refLabels[e.ref_type] || e.ref_type || '—')}</span>
+          ${e.reference ? `<span><b>Ref.:</b> ${esc(e.reference)}</span>` : ''}
+          <span><b>Estado:</b> ${e.is_reversed
+            ? '<span class="badge badge-default">Anulado</span>'
+            : '<span class="badge badge-success">Vigente</span>'}</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="closeJournalDetail(${id})">✕ Cerrar</button>
+      </div>
+      <table class="table" style="max-width:700px;margin:0">
+        <thead><tr>
+          <th style="width:110px">Código</th><th>Cuenta</th>
+          <th>Descripción línea</th>
+          <th class="text-right" style="width:120px">Debe</th>
+          <th class="text-right" style="width:120px">Haber</th>
+        </tr></thead>
+        <tbody>${lines.map(l => `
+          <tr>
+            <td style="font-family:monospace;font-size:.82rem">${esc(l.account_code)}</td>
+            <td>${esc(l.account_name)}</td>
+            <td style="font-size:.83rem;color:var(--text-muted)">${esc(l.line_description || '')}</td>
+            <td class="text-right">${l.debit  > 0 ? fmtMoney(l.debit)  : ''}</td>
+            <td class="text-right">${l.credit > 0 ? fmtMoney(l.credit) : ''}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr style="font-weight:700">
+          <td colspan="3" class="text-right">Totales</td>
+          <td class="text-right">${fmtMoney(lines.reduce((s,l)=>s+(l.debit||0),0))}</td>
+          <td class="text-right">${fmtMoney(lines.reduce((s,l)=>s+(l.credit||0),0))}</td>
+        </tr></tfoot>
+      </table>`;
+  } catch(err) { $(`jrn-detail-inner-${id}`).textContent = 'Error al cargar detalle'; }
 };
 
 window.reverseEntry = async function(id) {
