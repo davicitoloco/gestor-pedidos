@@ -65,10 +65,19 @@ router.get('/stats', (req, res) => {
     const monthSales  = monthData.sales;
     const monthOrders = monthData.cnt;
 
+    const unitsData = db.prepare(`
+      SELECT COALESCE(SUM(oi.quantity), 0) AS units
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.created_at >= ? ${endClause}
+        AND o.status != 'Cancelado' ${vc} ${sc.clause}
+    `).get(monthStart, ...endParam, ...sc.params);
+
     res.json({
       total_orders:  total,
       month_orders:  monthOrders,
       month_sales:   monthSales,
+      month_units:   unitsData.units,
       avg_order:     monthOrders > 0 ? monthSales / monthOrders : 0,
       by_status:     byStatus
     });
@@ -488,6 +497,176 @@ tr:nth-child(even) td{background:#f8fafc}
 <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));</script>
 </body></html>`;
 
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// ── GET /api/reports/units ── Unidades vendidas por período ──────────────────
+router.get('/units', (req, res) => {
+  try {
+    const vc   = vendorClause(req);
+    const sc   = sucursalClause(req);
+    const from = validateDate(req.query.from);
+    const to   = validateDate(req.query.to);
+    const rows = db.prepare(`
+      SELECT oi.product_name,
+             SUM(oi.quantity) AS total_qty,
+             COUNT(DISTINCT oi.order_id) AS order_count
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.status != 'Cancelado'
+        ${rangeClause('o', 'created_at', from, to)}
+        ${vc} ${sc.clause}
+      GROUP BY LOWER(TRIM(oi.product_name))
+      ORDER BY total_qty DESC
+    `).all(...rangeParams(from, to), ...sc.params);
+    const totalUnits = rows.reduce((s, r) => s + (r.total_qty || 0), 0);
+    const products = rows.map(r => ({
+      ...r,
+      pct: totalUnits > 0 ? Math.round(r.total_qty / totalUnits * 1000) / 10 : 0
+    }));
+    res.json({ products, total_units: totalUnits });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/units/excel ─────────────────────────────────────────────
+router.get('/units/excel', async (req, res) => {
+  try {
+    const ExcelJS = require('exceljs');
+    const vc   = vendorClause(req);
+    const sc   = sucursalClause(req);
+    const from = validateDate(req.query.from);
+    const to   = validateDate(req.query.to);
+    const rows = db.prepare(`
+      SELECT oi.product_name,
+             SUM(oi.quantity) AS total_qty,
+             COUNT(DISTINCT oi.order_id) AS order_count
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.status != 'Cancelado'
+        ${rangeClause('o', 'created_at', from, to)}
+        ${vc} ${sc.clause}
+      GROUP BY LOWER(TRIM(oi.product_name))
+      ORDER BY total_qty DESC
+    `).all(...rangeParams(from, to), ...sc.params);
+    const totalUnits = rows.reduce((s, r) => s + (r.total_qty || 0), 0);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Gestor de Pedidos';
+    const hdrFill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF2563EB' } };
+    const hdrFont = { bold:true, color:{ argb:'FFFFFFFF' }, size:11 };
+
+    const ws = workbook.addWorksheet('Unidades vendidas');
+    ws.columns = [
+      { header:'#',                key:'rank',    width:6  },
+      { header:'Producto',         key:'name',    width:36 },
+      { header:'Unidades vendidas',key:'qty',     width:20 },
+      { header:'% del total',      key:'pct',     width:14 },
+      { header:'Pedidos',          key:'orders',  width:12 },
+    ];
+    rows.forEach((r, i) => {
+      const pct = totalUnits > 0 ? Math.round(r.total_qty / totalUnits * 1000) / 10 : 0;
+      ws.addRow({ rank: i+1, name: r.product_name, qty: r.total_qty, pct: pct + '%', orders: r.order_count });
+    });
+    ws.addRow({});
+    const totRow = ws.addRow({ name: 'TOTAL', qty: totalUnits, pct: '100%' });
+    totRow.font = { bold: true };
+    ws.getRow(1).eachCell(c => { c.fill = hdrFill; c.font = hdrFont; c.alignment = { horizontal:'center' }; });
+    ws.views = [{ state:'frozen', ySplit:1 }];
+
+    const d = new Date();
+    const dateStr = `${d.getDate()}-${d.getMonth()+1}-${d.getFullYear()}`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="unidades-${dateStr}.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/units/print ─────────────────────────────────────────────
+router.get('/units/print', (req, res) => {
+  try {
+    const vc      = vendorClause(req);
+    const sc      = sucursalClause(req);
+    const from    = validateDate(req.query.from);
+    const to      = validateDate(req.query.to);
+    const company = getCompanyName();
+    const rows = db.prepare(`
+      SELECT oi.product_name,
+             SUM(oi.quantity) AS total_qty,
+             COUNT(DISTINCT oi.order_id) AS order_count
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.status != 'Cancelado'
+        ${rangeClause('o', 'created_at', from, to)}
+        ${vc} ${sc.clause}
+      GROUP BY LOWER(TRIM(oi.product_name))
+      ORDER BY total_qty DESC
+    `).all(...rangeParams(from, to), ...sc.params);
+    const totalUnits = rows.reduce((s, r) => s + (r.total_qty || 0), 0);
+    const periodLabel = from || to ? `${from || '…'} al ${to || '…'}` : 'Todo el período';
+    const genDate = (() => { const d = new Date(); return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`; })();
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>Unidades vendidas — ${esc(company)}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1e293b}
+.page{padding:32px 40px;max-width:720px;margin:0 auto}
+.no-print{text-align:right;margin-bottom:18px}
+.print-btn{padding:9px 22px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600}
+.header{text-align:center;padding-bottom:16px;border-bottom:2px solid #2563eb;margin-bottom:22px}
+.header h1{font-size:22px;color:#2563eb}
+.header p{color:#64748b;margin-top:4px}
+table{width:100%;border-collapse:collapse}
+thead th{background:#2563eb;color:#fff;padding:8px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;text-align:left}
+th.r,td.r{text-align:right}
+td{padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12.5px}
+tr:nth-child(even) td{background:#f8fafc}
+tfoot td{font-weight:700;border-top:2px solid #2563eb;padding-top:10px}
+.footer{margin-top:28px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:12px}
+@media print{.no-print{display:none}body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+</style></head><body>
+<div class="page">
+  <div class="no-print"><button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
+  <div class="header">
+    <h1>${esc(company)}</h1>
+    <p>Unidades vendidas — ${esc(periodLabel)}</p>
+  </div>
+  <table>
+    <thead><tr>
+      <th style="width:36px">#</th>
+      <th>Producto</th>
+      <th class="r" style="width:140px">Unidades</th>
+      <th class="r" style="width:90px">% del total</th>
+      <th class="r" style="width:80px">Pedidos</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map((r,i) => {
+        const pct = totalUnits > 0 ? (r.total_qty / totalUnits * 100).toFixed(1) : '0.0';
+        const qty = r.total_qty % 1 === 0 ? r.total_qty : r.total_qty.toFixed(2);
+        return `<tr>
+          <td>${i+1}</td>
+          <td>${esc(r.product_name)}</td>
+          <td class="r">${qty}</td>
+          <td class="r">${pct}%</td>
+          <td class="r">${r.order_count}</td>
+        </tr>`;
+      }).join('')}
+      ${rows.length === 0 ? '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px">Sin datos</td></tr>' : ''}
+    </tbody>
+    <tfoot><tr>
+      <td colspan="2" class="r">Total</td>
+      <td class="r">${totalUnits % 1 === 0 ? totalUnits : totalUnits.toFixed(2)}</td>
+      <td class="r">100%</td>
+      <td class="r">${rows.reduce((s,r)=>s+r.order_count,0)}</td>
+    </tr></tfoot>
+  </table>
+  <div class="footer">Generado el ${genDate} — ${esc(company)}</div>
+</div>
+<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));</script>
+</body></html>`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err) { res.status(500).send(err.message); }

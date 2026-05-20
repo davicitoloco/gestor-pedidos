@@ -305,7 +305,7 @@ function renderOrders(orders, searchQuery = '') {
       <td>${esc(o.customer_name)}</td>
       <td>${statusBadge(o.status)}</td>
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(o.vendor_name||'—')}</td>` : ''}
-      <td class="text-center col-mobile-hide">${o.item_count}</td>
+      <td class="text-center col-mobile-hide">${o.total_units % 1 === 0 ? o.total_units : (o.total_units || 0).toFixed(2)}</td>
       <td class="text-right" style="font-weight:600">${fmtMoney(o.total)}</td>
       <td class="col-mobile-hide">${fmtDate(o.delivery_date)}</td>
       <td class="col-mobile-hide" style="color:var(--text-muted);font-size:.82rem">${fmtDateTime(o.created_at)}</td>
@@ -1273,6 +1273,7 @@ async function loadReports() {
   } catch (err) { toast(err.message, 'error'); }
 
   loadRankings();
+  loadUnitsReport(from, to);
   loadPurchasesReport(from, to);
 }
 
@@ -1427,6 +1428,8 @@ function renderStats(stats) {
   $('stat-total-orders').textContent  = stats.total_orders;
   $('stat-month-orders').textContent  = stats.month_orders;
   $('stat-month-sales').textContent   = fmtMoney(stats.month_sales);
+  const u = stats.month_units || 0;
+  $('stat-month-units').textContent   = u % 1 === 0 ? u : u.toFixed(2);
   $('stat-avg').textContent           = fmtMoney(stats.avg_order);
 }
 
@@ -1486,7 +1489,7 @@ function renderTopProducts(products) {
     <tr>
       <td style="color:var(--text-muted);font-weight:600">${i + 1}</td>
       <td>${esc(p.product_name)}</td>
-      <td class="text-right">${p.total_qty}</td>
+      <td class="text-right" style="font-weight:600">${p.total_qty % 1 === 0 ? p.total_qty : p.total_qty.toFixed(2)}</td>
       <td class="text-center">${p.order_count}</td>
       <td class="text-right" style="font-weight:600;color:var(--primary)">${fmtMoney(p.revenue)}</td>
     </tr>
@@ -1495,6 +1498,62 @@ function renderTopProducts(products) {
 
 $('btn-report-pdf').addEventListener('click', () => window.open('/api/reports/print', '_blank'));
 $('btn-report-excel').addEventListener('click', () => { window.location.href = '/api/reports/excel'; });
+
+// ── Unidades vendidas por período ─────────────────────────────────────────────
+async function loadUnitsReport(from, to) {
+  try {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to)   params.set('to',   to);
+    const qs = params.toString() ? '?' + params.toString() : '';
+    const d = await api('GET', '/reports/units' + qs);
+    const tbody = $('units-tbody');
+    const tfoot = $('units-tfoot');
+    if (!d.products.length) {
+      tbody.innerHTML = '';
+      tfoot.innerHTML = '';
+      $('no-units').classList.remove('hidden');
+      return;
+    }
+    $('no-units').classList.add('hidden');
+    tbody.innerHTML = d.products.map((p, i) => `
+      <tr>
+        <td style="color:var(--text-muted);font-weight:600">${i + 1}</td>
+        <td>${esc(p.product_name)}</td>
+        <td class="text-right" style="font-weight:600">${p.total_qty % 1 === 0 ? p.total_qty : p.total_qty.toFixed(2)}</td>
+        <td class="text-right" style="color:var(--text-muted)">${p.pct.toFixed(1)}%</td>
+        <td class="text-right">${p.order_count}</td>
+      </tr>`).join('');
+    const tot = d.total_units;
+    tfoot.innerHTML = `<tr style="font-weight:700;border-top:2px solid var(--border)">
+      <td colspan="2" class="text-right" style="padding:8px 10px">Total</td>
+      <td class="text-right" style="padding:8px 10px">${tot % 1 === 0 ? tot : tot.toFixed(2)}</td>
+      <td class="text-right" style="padding:8px 10px">100%</td>
+      <td class="text-right" style="padding:8px 10px">${d.products.reduce((s,p)=>s+p.order_count,0)}</td>
+    </tr>`;
+  } catch (err) { console.error('Error unidades:', err.message); }
+}
+
+$('btn-units-filter').addEventListener('click', () => {
+  loadUnitsReport($('units-from').value, $('units-to').value);
+});
+$('btn-units-reset').addEventListener('click', () => {
+  $('units-from').value = '';
+  $('units-to').value   = '';
+  loadUnitsReport();
+});
+$('btn-units-excel').addEventListener('click', () => {
+  const p = [];
+  if ($('units-from').value) p.push('from=' + $('units-from').value);
+  if ($('units-to').value)   p.push('to='   + $('units-to').value);
+  window.location.href = '/api/reports/units/excel' + (p.length ? '?' + p.join('&') : '');
+});
+$('btn-units-pdf').addEventListener('click', () => {
+  const p = [];
+  if ($('units-from').value) p.push('from=' + $('units-from').value);
+  if ($('units-to').value)   p.push('to='   + $('units-to').value);
+  window.open('/api/reports/units/print' + (p.length ? '?' + p.join('&') : ''), '_blank');
+});
 
 // ── Reportes de Compras de Materia Prima ──────────────────────────────────────
 async function loadPurchasesReport(from, to) {

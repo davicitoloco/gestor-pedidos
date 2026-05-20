@@ -62,6 +62,7 @@ router.get('/', (req, res) => {
         o.created_at, o.updated_at,
         COALESCE(u.full_name, u.username)        AS vendor_name,
         COUNT(oi.id)                              AS item_count,
+        COALESCE(SUM(oi.quantity), 0)             AS total_units,
         COALESCE(SUM(oi.quantity * oi.unit_price * (1.0 - oi.discount/100.0)), 0) AS subtotal,
         COALESCE(SUM(oi.quantity * oi.unit_price * (1.0 - oi.discount/100.0)), 0)
           * (1.0 - o.discount/100.0)
