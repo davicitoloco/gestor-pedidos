@@ -73,54 +73,60 @@ router.get('/stats', (req, res) => {
         AND o.status != 'Cancelado' ${vc} ${sc.clause}
     `).get(monthStart, ...endParam, ...sc.params);
 
+    const totalUnitsData = db.prepare(`
+      SELECT COALESCE(SUM(oi.quantity), 0) AS units
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.status != 'Cancelado' ${vc} ${sc.clause}
+    `).get(...sc.params);
+
+    const deliveredUnitsData = db.prepare(`
+      SELECT COALESCE(SUM(oi.quantity), 0) AS units
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.created_at >= ? ${endClause}
+        AND o.status IN ('Entregado', 'Entrega parcial') ${vc} ${sc.clause}
+    `).get(monthStart, ...endParam, ...sc.params);
+
     res.json({
-      total_orders:  total,
-      month_orders:  monthOrders,
-      month_sales:   monthSales,
-      month_units:   unitsData.units,
-      avg_order:     monthOrders > 0 ? monthSales / monthOrders : 0,
-      by_status:     byStatus
+      total_orders:           total,
+      month_orders:           monthOrders,
+      month_sales:            monthSales,
+      month_units:            unitsData.units,
+      total_units:            totalUnitsData.units,
+      month_units_delivered:  deliveredUnitsData.units,
+      avg_order:              monthOrders > 0 ? monthSales / monthOrders : 0,
+      by_status:              byStatus
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── GET /api/reports/weekly ──────────────────────────────────────────────────
-router.get('/weekly', (req, res) => {
+// ── GET /api/reports/daily-units ────────────────────────────────────────────
+router.get('/daily-units', (req, res) => {
   try {
     const vc = vendorClause(req);
     const sc = sucursalClause(req);
     const now = new Date();
-    const dayOfWeek = now.getDay();
-    const daysToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const weeks = [];
+    const days = [];
+    const DAY_NAMES = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 
-    for (let i = 7; i >= 0; i--) {
-      const mon = new Date(now);
-      mon.setDate(now.getDate() - daysToMon - i * 7);
-      mon.setHours(0, 0, 0, 0);
-      const sun = new Date(mon);
-      sun.setDate(mon.getDate() + 6);
-      sun.setHours(23, 59, 59);
-
-      const start = localDateStr(mon);
-      const end   = localDateStr(sun) + ' 23:59:59';
-      const label = i === 0 ? 'Esta sem.' : `${mon.getDate()}/${mon.getMonth()+1}`;
+    for (let i = 27; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const dateStr = localDateStr(d);
+      const label = i === 0 ? 'Hoy' : `${DAY_NAMES[d.getDay()]} ${d.getDate()}/${d.getMonth()+1}`;
 
       const row = db.prepare(`
-        SELECT COUNT(DISTINCT o.id) AS cnt,
-               COALESCE(SUM(sub.t * ${DF}),0) AS total
-        FROM orders o
-        LEFT JOIN (
-          SELECT order_id, SUM(quantity*unit_price*(1.0-discount/100.0)) AS t
-          FROM order_items GROUP BY order_id
-        ) sub ON sub.order_id = o.id
+        SELECT COALESCE(SUM(oi.quantity), 0) AS units
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
         WHERE o.created_at >= ? AND o.created_at <= ?
           AND o.status != 'Cancelado' ${vc} ${sc.clause}
-      `).get(start, end, ...sc.params);
+      `).get(dateStr, dateStr + ' 23:59:59', ...sc.params);
 
-      weeks.push({ label, count: row.cnt, total: row.total });
+      days.push({ date: dateStr, label, units: row.units });
     }
-    res.json(weeks);
+    res.json(days);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

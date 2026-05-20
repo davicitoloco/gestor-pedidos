@@ -1254,20 +1254,26 @@ async function loadReports() {
   $('reports-period').textContent = periodLabel;
 
   // Update dynamic stat card labels
-  const labelMap = { 'stat-month-orders': 'Pedidos', 'stat-month-sales': 'Ventas', 'stat-avg': 'Ticket promedio' };
+  const labelMap = {
+    'stat-month-orders':          'Pedidos',
+    'stat-month-sales':           'Ventas',
+    'stat-avg':                   'Ticket promedio',
+    'stat-month-units':           'Unidades pedidas',
+    'stat-month-units-delivered': 'Unidades entregadas'
+  };
   Object.entries(labelMap).forEach(([id, base]) => {
     const card = $(id)?.closest?.('.stat-card');
     if (card) card.querySelector('.stat-label').textContent = `${base} — ${periodLabel}`;
   });
 
   try {
-    const [stats, weekly, topProds] = await Promise.all([
+    const [stats, dailyUnits, topProds] = await Promise.all([
       api('GET', `/reports/stats?from=${from}&to=${to}`),
-      api('GET', '/reports/weekly'),
+      api('GET', '/reports/daily-units'),
       api('GET', `/reports/top-products?from=${from}&to=${to}`)
     ]);
     renderStats(stats);
-    renderWeeklyChart(weekly);
+    renderDailyUnitsChart(dailyUnits);
     renderStatusChart(stats.by_status);
     renderTopProducts(topProds);
   } catch (err) { toast(err.message, 'error'); }
@@ -1424,28 +1430,31 @@ document.querySelectorAll('.ranking-more-btn').forEach(btn => {
   });
 });
 
+function fmtUnits(v) { const n = v || 0; return n % 1 === 0 ? n : n.toFixed(2); }
+
 function renderStats(stats) {
-  $('stat-total-orders').textContent  = stats.total_orders;
-  $('stat-month-orders').textContent  = stats.month_orders;
-  $('stat-month-sales').textContent   = fmtMoney(stats.month_sales);
-  const u = stats.month_units || 0;
-  $('stat-month-units').textContent   = u % 1 === 0 ? u : u.toFixed(2);
-  $('stat-avg').textContent           = fmtMoney(stats.avg_order);
+  $('stat-total-orders').textContent           = stats.total_orders;
+  $('stat-month-orders').textContent           = stats.month_orders;
+  $('stat-month-sales').textContent            = fmtMoney(stats.month_sales);
+  $('stat-avg').textContent                    = fmtMoney(stats.avg_order);
+  $('stat-total-units').textContent            = fmtUnits(stats.total_units);
+  $('stat-month-units').textContent            = fmtUnits(stats.month_units);
+  $('stat-month-units-delivered').textContent  = fmtUnits(stats.month_units_delivered);
 }
 
-function renderWeeklyChart(weeks) {
+function renderDailyUnitsChart(days) {
   const canvas = $('chart-weekly');
   if (!canvas || typeof Chart === 'undefined') return;
   if (state.charts.weekly) state.charts.weekly.destroy();
   state.charts.weekly = new Chart(canvas, {
     type: 'bar',
     data: {
-      labels: weeks.map(w => w.label),
+      labels: days.map(d => d.label),
       datasets: [{
-        label: 'Pedidos',
-        data: weeks.map(w => w.count),
-        backgroundColor: 'rgba(37,99,235,0.75)',
-        borderRadius: 5,
+        label: 'Unidades',
+        data: days.map(d => d.units),
+        backgroundColor: 'rgba(16,185,129,0.75)',
+        borderRadius: 4,
         borderSkipped: false
       }]
     },
@@ -1453,8 +1462,8 @@ function renderWeeklyChart(weeks) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
-        y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 }, grid: { color: '#f1f5f9' } },
-        x: { grid: { display: false } }
+        y: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 14, maxRotation: 45 } }
       }
     }
   });
