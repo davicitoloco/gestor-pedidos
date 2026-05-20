@@ -841,21 +841,27 @@
         </div>
       </div>
 
-      <!-- ── Unidades por período ── -->
+      <!-- ── Cantidades Vendidas ── -->
       <div class="card" style="margin-bottom:24px">
-        <div class="card-header card-header-flex">
-          <span>Unidades vendidas por período</span>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="date" id="units-from" class="input" style="width:145px;padding:5px 8px">
+        <div class="card-header">Cantidades Vendidas</div>
+        <div class="card-body" style="padding:12px 16px 0">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="today">Hoy</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="week">Esta semana</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="month">Este mes</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="prevmonth">Mes anterior</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="year">Este año</button>
+            <span style="color:var(--text-muted);margin:0 4px">|</span>
+            <input type="date" id="sold-from" class="input" style="width:140px;padding:5px 8px">
             <span style="color:var(--text-muted);font-size:.85rem">—</span>
-            <input type="date" id="units-to" class="input" style="width:145px;padding:5px 8px">
-            <button class="btn btn-secondary btn-sm" id="btn-units-filter">Aplicar</button>
-            <button class="btn btn-ghost btn-sm" id="btn-units-reset">Limpiar</button>
-            <button class="btn btn-secondary btn-sm" id="btn-units-excel">
+            <input type="date" id="sold-to" class="input" style="width:140px;padding:5px 8px">
+            <button class="btn btn-secondary btn-sm" id="btn-sold-apply">Aplicar</button>
+            <span style="color:var(--text-muted);margin:0 2px">|</span>
+            <button class="btn btn-secondary btn-sm" id="btn-sold-excel">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
               Excel
             </button>
-            <button class="btn btn-secondary btn-sm" id="btn-units-pdf">
+            <button class="btn btn-secondary btn-sm" id="btn-sold-pdf">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
               PDF
             </button>
@@ -866,14 +872,56 @@
             <thead><tr>
               <th style="width:36px">#</th>
               <th>Producto</th>
-              <th class="text-right" style="width:150px">Unidades vendidas</th>
+              <th class="text-right" style="width:160px">Unidades vendidas</th>
               <th class="text-right" style="width:100px">% del total</th>
               <th class="text-right" style="width:90px">Pedidos</th>
             </tr></thead>
-            <tbody id="units-tbody"></tbody>
-            <tfoot id="units-tfoot"></tfoot>
+            <tbody id="sold-tbody"></tbody>
+            <tfoot id="sold-tfoot"></tfoot>
           </table>
-          <div id="no-units" class="empty-state hidden"><p>Sin datos para el período</p></div>
+          <div id="no-sold" class="empty-state hidden"><p>Sin datos para el período seleccionado</p></div>
+        </div>
+      </div>
+
+      <!-- ── Cantidades Entregadas ── -->
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header">Cantidades Entregadas</div>
+        <div class="card-body" style="padding:12px 16px 0">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="today">Hoy</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="week">Esta semana</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="month">Este mes</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="prevmonth">Mes anterior</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="year">Este año</button>
+            <span style="color:var(--text-muted);margin:0 4px">|</span>
+            <input type="date" id="deliv-from" class="input" style="width:140px;padding:5px 8px">
+            <span style="color:var(--text-muted);font-size:.85rem">—</span>
+            <input type="date" id="deliv-to" class="input" style="width:140px;padding:5px 8px">
+            <button class="btn btn-secondary btn-sm" id="btn-deliv-apply">Aplicar</button>
+            <span style="color:var(--text-muted);margin:0 2px">|</span>
+            <button class="btn btn-secondary btn-sm" id="btn-deliv-excel">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+              Excel
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-deliv-pdf">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              PDF
+            </button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0">
+          <table class="table">
+            <thead><tr>
+              <th style="width:36px">#</th>
+              <th>Producto</th>
+              <th class="text-right" style="width:160px">Unidades entregadas</th>
+              <th class="text-right" style="width:100px">% del total</th>
+              <th class="text-right" style="width:90px">Pedidos</th>
+            </tr></thead>
+            <tbody id="deliv-tbody"></tbody>
+            <tfoot id="deliv-tfoot"></tfoot>
+          </table>
+          <div id="no-deliv" class="empty-state hidden"><p>Sin datos para el período seleccionado</p></div>
         </div>
       </div>
 

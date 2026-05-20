@@ -1279,7 +1279,8 @@ async function loadReports() {
   } catch (err) { toast(err.message, 'error'); }
 
   loadRankings();
-  loadUnitsReport(from, to);
+  initQtyReport('sold');
+  initQtyReport('delivered');
   loadPurchasesReport(from, to);
 }
 
@@ -1509,59 +1510,135 @@ $('btn-report-pdf').addEventListener('click', () => window.open('/api/reports/pr
 $('btn-report-excel').addEventListener('click', () => { window.location.href = '/api/reports/excel'; });
 
 // ── Unidades vendidas por período ─────────────────────────────────────────────
-async function loadUnitsReport(from, to) {
+// ── Helpers de fecha para botones rápidos ────────────────────────────────────
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function qtyRangeDates(range) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  if (range === 'today') {
+    const t = fmt(now); return { from: t, to: t };
+  }
+  if (range === 'week') {
+    const mon = new Date(now);
+    const dow = now.getDay() === 0 ? 6 : now.getDay() - 1;
+    mon.setDate(now.getDate() - dow);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    return { from: fmt(mon), to: fmt(sun) };
+  }
+  if (range === 'month') {
+    return { from: `${now.getFullYear()}-${pad(now.getMonth()+1)}-01`, to: fmt(now) };
+  }
+  if (range === 'prevmonth') {
+    const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const last  = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { from: fmt(first), to: fmt(last) };
+  }
+  if (range === 'year') {
+    return { from: `${now.getFullYear()}-01-01`, to: fmt(now) };
+  }
+  return { from: null, to: null };
+}
+
+// ── Reporte de cantidades (vendidas / entregadas) ─────────────────────────────
+const QTY_CFG = {
+  sold:      { fromId: 'sold-from',  toId: 'sold-to',  tbodyId: 'sold-tbody',  tfootId: 'sold-tfoot',  emptyId: 'no-sold'  },
+  delivered: { fromId: 'deliv-from', toId: 'deliv-to', tbodyId: 'deliv-tbody', tfootId: 'deliv-tfoot', emptyId: 'no-deliv' }
+};
+
+async function loadQtyReport(mode, from, to) {
+  const cfg = QTY_CFG[mode];
+  if (!cfg) return;
+  const resolvedFrom = from !== undefined ? from : $(`${cfg.fromId}`).value || null;
+  const resolvedTo   = to   !== undefined ? to   : $(`${cfg.toId}`).value   || null;
   try {
-    const params = new URLSearchParams();
-    if (from) params.set('from', from);
-    if (to)   params.set('to',   to);
-    const qs = params.toString() ? '?' + params.toString() : '';
-    const d = await api('GET', '/reports/units' + qs);
-    const tbody = $('units-tbody');
-    const tfoot = $('units-tfoot');
+    const params = new URLSearchParams({ mode });
+    if (resolvedFrom) params.set('from', resolvedFrom);
+    if (resolvedTo)   params.set('to',   resolvedTo);
+    const d = await api('GET', '/reports/units?' + params.toString());
+    const tbody = $(cfg.tbodyId);
+    const tfoot = $(cfg.tfootId);
     if (!d.products.length) {
       tbody.innerHTML = '';
       tfoot.innerHTML = '';
-      $('no-units').classList.remove('hidden');
+      $(cfg.emptyId).classList.remove('hidden');
       return;
     }
-    $('no-units').classList.add('hidden');
+    $(cfg.emptyId).classList.add('hidden');
     tbody.innerHTML = d.products.map((p, i) => `
       <tr>
         <td style="color:var(--text-muted);font-weight:600">${i + 1}</td>
         <td>${esc(p.product_name)}</td>
-        <td class="text-right" style="font-weight:600">${p.total_qty % 1 === 0 ? p.total_qty : p.total_qty.toFixed(2)}</td>
+        <td class="text-right" style="font-weight:600">${fmtUnits(p.total_qty)}</td>
         <td class="text-right" style="color:var(--text-muted)">${p.pct.toFixed(1)}%</td>
         <td class="text-right">${p.order_count}</td>
       </tr>`).join('');
     const tot = d.total_units;
     tfoot.innerHTML = `<tr style="font-weight:700;border-top:2px solid var(--border)">
       <td colspan="2" class="text-right" style="padding:8px 10px">Total</td>
-      <td class="text-right" style="padding:8px 10px">${tot % 1 === 0 ? tot : tot.toFixed(2)}</td>
+      <td class="text-right" style="padding:8px 10px">${fmtUnits(tot)}</td>
       <td class="text-right" style="padding:8px 10px">100%</td>
       <td class="text-right" style="padding:8px 10px">${d.products.reduce((s,p)=>s+p.order_count,0)}</td>
     </tr>`;
-  } catch (err) { console.error('Error unidades:', err.message); }
+  } catch (err) { console.error('Error cantidades:', err.message); }
 }
 
-$('btn-units-filter').addEventListener('click', () => {
-  loadUnitsReport($('units-from').value, $('units-to').value);
+function initQtyReport(mode) {
+  const cfg = QTY_CFG[mode];
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const monthFrom = `${now.getFullYear()}-${pad(now.getMonth()+1)}-01`;
+  const today     = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  $(cfg.fromId).value = monthFrom;
+  $(cfg.toId).value   = today;
+  loadQtyReport(mode, monthFrom, today);
+}
+
+// Quick-range buttons (both sections, data-mode + data-range attrs)
+document.querySelectorAll('.qty-quick').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const mode  = btn.dataset.mode;
+    const range = btn.dataset.range;
+    const cfg   = QTY_CFG[mode];
+    const { from, to } = qtyRangeDates(range);
+    if (from) $(cfg.fromId).value = from;
+    if (to)   $(cfg.toId).value   = to;
+    loadQtyReport(mode, from, to);
+    // highlight active quick button within this section
+    btn.closest('div').querySelectorAll('.qty-quick').forEach(b => b.classList.remove('btn-primary'));
+    btn.classList.add('btn-primary');
+  });
 });
-$('btn-units-reset').addEventListener('click', () => {
-  $('units-from').value = '';
-  $('units-to').value   = '';
-  loadUnitsReport();
+
+$('btn-sold-apply').addEventListener('click', () => loadQtyReport('sold'));
+$('btn-deliv-apply').addEventListener('click', () => loadQtyReport('delivered'));
+
+$('btn-sold-excel').addEventListener('click', () => {
+  const p = new URLSearchParams({ mode: 'sold' });
+  if ($('sold-from').value) p.set('from', $('sold-from').value);
+  if ($('sold-to').value)   p.set('to',   $('sold-to').value);
+  window.location.href = '/api/reports/units/excel?' + p.toString();
 });
-$('btn-units-excel').addEventListener('click', () => {
-  const p = [];
-  if ($('units-from').value) p.push('from=' + $('units-from').value);
-  if ($('units-to').value)   p.push('to='   + $('units-to').value);
-  window.location.href = '/api/reports/units/excel' + (p.length ? '?' + p.join('&') : '');
+$('btn-sold-pdf').addEventListener('click', () => {
+  const p = new URLSearchParams({ mode: 'sold' });
+  if ($('sold-from').value) p.set('from', $('sold-from').value);
+  if ($('sold-to').value)   p.set('to',   $('sold-to').value);
+  window.open('/api/reports/units/print?' + p.toString(), '_blank');
 });
-$('btn-units-pdf').addEventListener('click', () => {
-  const p = [];
-  if ($('units-from').value) p.push('from=' + $('units-from').value);
-  if ($('units-to').value)   p.push('to='   + $('units-to').value);
-  window.open('/api/reports/units/print' + (p.length ? '?' + p.join('&') : ''), '_blank');
+$('btn-deliv-excel').addEventListener('click', () => {
+  const p = new URLSearchParams({ mode: 'delivered' });
+  if ($('deliv-from').value) p.set('from', $('deliv-from').value);
+  if ($('deliv-to').value)   p.set('to',   $('deliv-to').value);
+  window.location.href = '/api/reports/units/excel?' + p.toString();
+});
+$('btn-deliv-pdf').addEventListener('click', () => {
+  const p = new URLSearchParams({ mode: 'delivered' });
+  if ($('deliv-from').value) p.set('from', $('deliv-from').value);
+  if ($('deliv-to').value)   p.set('to',   $('deliv-to').value);
+  window.open('/api/reports/units/print?' + p.toString(), '_blank');
 });
 
 // ── Reportes de Compras de Materia Prima ──────────────────────────────────────

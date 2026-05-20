@@ -508,20 +508,35 @@ tr:nth-child(even) td{background:#f8fafc}
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// ── GET /api/reports/units ── Unidades vendidas por período ──────────────────
+// ── GET /api/reports/units ── Unidades vendidas/entregadas por período ────────
+// mode=sold (default) → status != Cancelado
+// mode=delivered      → status IN ('Entregado','Entrega parcial')
+function unitsStatusClause(mode) {
+  return mode === 'delivered'
+    ? "o.status IN ('Entregado','Entrega parcial')"
+    : "o.status != 'Cancelado'";
+}
+function unitsReportLabel(mode) {
+  return mode === 'delivered' ? 'Cantidades entregadas' : 'Cantidades vendidas';
+}
+function unitsColLabel(mode) {
+  return mode === 'delivered' ? 'Unidades entregadas' : 'Unidades vendidas';
+}
+
 router.get('/units', (req, res) => {
   try {
     const vc   = vendorClause(req);
     const sc   = sucursalClause(req);
     const from = validateDate(req.query.from);
     const to   = validateDate(req.query.to);
+    const mode = req.query.mode === 'delivered' ? 'delivered' : 'sold';
     const rows = db.prepare(`
       SELECT oi.product_name,
              SUM(oi.quantity) AS total_qty,
              COUNT(DISTINCT oi.order_id) AS order_count
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
-      WHERE o.status != 'Cancelado'
+      WHERE ${unitsStatusClause(mode)}
         ${rangeClause('o', 'created_at', from, to)}
         ${vc} ${sc.clause}
       GROUP BY LOWER(TRIM(oi.product_name))
@@ -544,32 +559,36 @@ router.get('/units/excel', async (req, res) => {
     const sc   = sucursalClause(req);
     const from = validateDate(req.query.from);
     const to   = validateDate(req.query.to);
+    const mode = req.query.mode === 'delivered' ? 'delivered' : 'sold';
     const rows = db.prepare(`
       SELECT oi.product_name,
              SUM(oi.quantity) AS total_qty,
              COUNT(DISTINCT oi.order_id) AS order_count
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
-      WHERE o.status != 'Cancelado'
+      WHERE ${unitsStatusClause(mode)}
         ${rangeClause('o', 'created_at', from, to)}
         ${vc} ${sc.clause}
       GROUP BY LOWER(TRIM(oi.product_name))
       ORDER BY total_qty DESC
     `).all(...rangeParams(from, to), ...sc.params);
     const totalUnits = rows.reduce((s, r) => s + (r.total_qty || 0), 0);
+    const colLabel   = unitsColLabel(mode);
+    const sheetName  = mode === 'delivered' ? 'Unidades entregadas' : 'Unidades vendidas';
+    const fileSlug   = mode === 'delivered' ? 'entregadas' : 'vendidas';
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Gestor de Pedidos';
     const hdrFill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF2563EB' } };
     const hdrFont = { bold:true, color:{ argb:'FFFFFFFF' }, size:11 };
 
-    const ws = workbook.addWorksheet('Unidades vendidas');
+    const ws = workbook.addWorksheet(sheetName);
     ws.columns = [
-      { header:'#',                key:'rank',    width:6  },
-      { header:'Producto',         key:'name',    width:36 },
-      { header:'Unidades vendidas',key:'qty',     width:20 },
-      { header:'% del total',      key:'pct',     width:14 },
-      { header:'Pedidos',          key:'orders',  width:12 },
+      { header:'#',        key:'rank',   width:6  },
+      { header:'Producto', key:'name',   width:36 },
+      { header:colLabel,   key:'qty',    width:22 },
+      { header:'% del total', key:'pct', width:14 },
+      { header:'Pedidos',  key:'orders', width:12 },
     ];
     rows.forEach((r, i) => {
       const pct = totalUnits > 0 ? Math.round(r.total_qty / totalUnits * 1000) / 10 : 0;
@@ -584,7 +603,7 @@ router.get('/units/excel', async (req, res) => {
     const d = new Date();
     const dateStr = `${d.getDate()}-${d.getMonth()+1}-${d.getFullYear()}`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="unidades-${dateStr}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="unidades-${fileSlug}-${dateStr}.xlsx"`);
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -597,6 +616,7 @@ router.get('/units/print', (req, res) => {
     const sc      = sucursalClause(req);
     const from    = validateDate(req.query.from);
     const to      = validateDate(req.query.to);
+    const mode    = req.query.mode === 'delivered' ? 'delivered' : 'sold';
     const company = getCompanyName();
     const rows = db.prepare(`
       SELECT oi.product_name,
@@ -604,18 +624,20 @@ router.get('/units/print', (req, res) => {
              COUNT(DISTINCT oi.order_id) AS order_count
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
-      WHERE o.status != 'Cancelado'
+      WHERE ${unitsStatusClause(mode)}
         ${rangeClause('o', 'created_at', from, to)}
         ${vc} ${sc.clause}
       GROUP BY LOWER(TRIM(oi.product_name))
       ORDER BY total_qty DESC
     `).all(...rangeParams(from, to), ...sc.params);
-    const totalUnits = rows.reduce((s, r) => s + (r.total_qty || 0), 0);
-    const periodLabel = from || to ? `${from || '…'} al ${to || '…'}` : 'Todo el período';
+    const totalUnits  = rows.reduce((s, r) => s + (r.total_qty || 0), 0);
+    const reportLabel = unitsReportLabel(mode);
+    const colLabel    = unitsColLabel(mode);
+    const periodLabel = from || to ? `${fmtDate(from) || '…'} al ${fmtDate(to) || '…'}` : 'Todo el período';
     const genDate = (() => { const d = new Date(); return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`; })();
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Unidades vendidas — ${esc(company)}</title>
+<title>${esc(reportLabel)} — ${esc(company)}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1e293b}
@@ -638,13 +660,13 @@ tfoot td{font-weight:700;border-top:2px solid #2563eb;padding-top:10px}
   <div class="no-print"><button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
   <div class="header">
     <h1>${esc(company)}</h1>
-    <p>Unidades vendidas — ${esc(periodLabel)}</p>
+    <p>${esc(reportLabel)} — ${esc(periodLabel)}</p>
   </div>
   <table>
     <thead><tr>
       <th style="width:36px">#</th>
       <th>Producto</th>
-      <th class="r" style="width:140px">Unidades</th>
+      <th class="r" style="width:160px">${esc(colLabel)}</th>
       <th class="r" style="width:90px">% del total</th>
       <th class="r" style="width:80px">Pedidos</th>
     </tr></thead>
