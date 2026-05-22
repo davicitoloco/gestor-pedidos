@@ -521,6 +521,20 @@ function renderItems() {
         });
       }
     });
+    inp.addEventListener('blur', () => {
+      const i = inp.dataset.i;
+      const val = inp.value.trim();
+      if (!val) return;
+      const match = state.productCatalog.find(p => p.name.toLowerCase() === val.toLowerCase());
+      if (!match) {
+        state.items[i].product_name = '';
+        state.items[i].unit_price   = 0;
+        inp.value = '';
+        const priceInp = inp.closest('tr').querySelector('.item-inp-price');
+        if (priceInp) priceInp.value = 0;
+        refreshItem(i);
+      }
+    });
   });
   tbody.querySelectorAll('.item-inp-qty').forEach(inp => {
     inp.addEventListener('input', () => { state.items[inp.dataset.i].quantity = parseFloat(inp.value) || 0; refreshItem(inp.dataset.i); });
@@ -663,6 +677,11 @@ $('inp-payment-cheque').addEventListener('change', () => {
 $('order-form').addEventListener('submit', async e => {
   e.preventDefault();
   if (state.discountOver) { toast('El descuento máximo permitido es 20+5+5 (27.8%)', 'error'); return; }
+  const invalidItem = state.items.find(it => {
+    const name = (it.product_name || '').trim();
+    return name && !state.productCatalog.find(p => p.name.toLowerCase() === name.toLowerCase());
+  });
+  if (invalidItem) { toast('Todos los ítems deben tener un producto seleccionado de la lista', 'error'); return; }
   const customer = $('inp-customer').value.trim();
   if (!customer) { toast('El nombre del cliente es requerido', 'error'); $('inp-customer').focus(); return; }
   if (!findCustomerByName(customer)) { toast('El cliente debe estar registrado en el módulo Clientes', 'error'); $('inp-customer').focus(); return; }
