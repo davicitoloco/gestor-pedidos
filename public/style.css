@@ -70,6 +70,7 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .login-logo{display:flex;justify-content:center;color:var(--primary);margin-bottom:16px}
 .login-title{text-align:center;font-size:1.5rem;font-weight:700;margin-bottom:4px}
 .login-subtitle{text-align:center;color:var(--text-muted);font-size:.9rem;margin-bottom:28px}
+.login-welcome{text-align:center;font-size:1.6rem;font-weight:700;color:var(--primary);margin-bottom:20px;letter-spacing:.5px}
 
 /* ============================================================ APP LAYOUT */
 .app{display:flex;min-height:100vh}
