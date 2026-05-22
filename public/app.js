@@ -47,7 +47,8 @@ const state = {
   productCatalog:    [],
   customerList:      [],
   allSucursales:     [],
-  charts:            {}
+  charts:            {},
+  discountOver:      false
 };
 
 /* ================================================================ API */
@@ -349,6 +350,9 @@ async function deleteOrder(id, num) {
 async function openOrderForm(orderId, prefillCustomer = null) {
   state.editingOrderId = orderId || null;
   state.items = [];
+  state.discountOver = false;
+  $('disc-limit-error').classList.add('hidden');
+  $('btn-save').disabled = false;
 
   $('form-title').textContent = orderId ? 'Editar Pedido' : 'Nuevo Pedido';
   $('inp-order-number').value = '';
@@ -525,7 +529,11 @@ function renderItems() {
     inp.addEventListener('input', () => { state.items[inp.dataset.i].unit_price = parseFloat(inp.value) || 0; refreshItem(inp.dataset.i); });
   });
   tbody.querySelectorAll('.item-inp-disc').forEach(inp => {
-    inp.addEventListener('input', () => { state.items[inp.dataset.i].discount = parseFloat(inp.value) || 0; refreshItem(inp.dataset.i); });
+    inp.addEventListener('input', () => {
+      state.items[inp.dataset.i].discount = parseFloat(inp.value) || 0;
+      refreshItem(inp.dataset.i);
+      checkDiscountLimit({ type: 'item', index: parseInt(inp.dataset.i) });
+    });
   });
   tbody.querySelectorAll('.item-remove').forEach(btn => {
     btn.addEventListener('click', () => { state.items.splice(parseInt(btn.dataset.i), 1); renderItems(); calcTotals(); });
@@ -576,8 +584,72 @@ function calcTotals() {
   $('calc-iva').textContent        = ivaExempt ? '—' : fmtMoney(iva);
   $('calc-total').textContent      = fmtMoney(finalTotal);
 }
+// ── Validación de límite de descuento ─────────────────────────────────────────
+const DISC_LIMIT = 0.278; // 1 − 0.80 × 0.95 × 0.95
+
+function effDiscount(itemPct, d1, d2, d3, d4) {
+  return 1 - (1 - itemPct/100) * (1 - d1/100) * (1 - d2/100) * (1 - d3/100) * (1 - d4/100);
+}
+
+function maxItemDisc() {
+  return state.items.reduce((m, it) => Math.max(m, parseFloat(it.discount) || 0), 0);
+}
+
+// changedSpec: { type: 'general', id: 'inp-disc1' } | { type: 'item', index: N } | null
+function checkDiscountLimit(changedSpec) {
+  if (isAdmin()) {
+    $('disc-limit-error').classList.add('hidden');
+    state.discountOver = false;
+    return;
+  }
+
+  const d1 = parseFloat($('inp-disc1').value) || 0;
+  const d2 = parseFloat($('inp-disc2').value) || 0;
+  const d3 = parseFloat($('inp-disc3').value) || 0;
+  const d4 = parseFloat($('inp-disc4').value) || 0;
+  const maxI = maxItemDisc();
+  let eff = effDiscount(maxI, d1, d2, d3, d4);
+
+  if (eff > DISC_LIMIT + 1e-9 && changedSpec) {
+    const KEEP = 1 - DISC_LIMIT;
+    const d1f = 1 - d1/100, d2f = 1 - d2/100, d3f = 1 - d3/100, d4f = 1 - d4/100;
+    const itemF = 1 - maxI/100;
+
+    if (changedSpec.type === 'general') {
+      const cid = changedSpec.id;
+      let others;
+      if      (cid === 'inp-disc1') others = itemF * d2f * d3f * d4f;
+      else if (cid === 'inp-disc2') others = itemF * d1f * d3f * d4f;
+      else if (cid === 'inp-disc3') others = itemF * d1f * d2f * d4f;
+      else                          others = itemF * d1f * d2f * d3f;
+      const maxVal = others > 0 ? Math.max(0, 100 * (1 - KEEP / others)) : 0;
+      $(cid).value = maxVal.toFixed(2);
+      calcTotals();
+      const newD = parseFloat(maxVal.toFixed(2));
+      if      (cid === 'inp-disc1') eff = effDiscount(maxI, newD, d2, d3, d4);
+      else if (cid === 'inp-disc2') eff = effDiscount(maxI, d1, newD, d3, d4);
+      else if (cid === 'inp-disc3') eff = effDiscount(maxI, d1, d2, newD, d4);
+      else                          eff = effDiscount(maxI, d1, d2, d3, newD);
+    } else if (changedSpec.type === 'item') {
+      const idx = changedSpec.index;
+      const genF = d1f * d2f * d3f * d4f;
+      const maxItemVal = genF > 0 ? Math.max(0, 100 * (1 - KEEP / genF)) : 0;
+      state.items[idx].discount = parseFloat(maxItemVal.toFixed(2));
+      const inp = document.querySelector(`.item-inp-disc[data-i="${idx}"]`);
+      if (inp) inp.value = state.items[idx].discount;
+      refreshItem(idx);
+      eff = effDiscount(maxItemDisc(), d1, d2, d3, d4);
+    }
+  }
+
+  const exceeded = eff > DISC_LIMIT + 1e-9;
+  state.discountOver = exceeded;
+  $('disc-limit-error').classList.toggle('hidden', !exceeded);
+  $('btn-save').disabled = exceeded;
+}
+
 ['inp-disc1','inp-disc2','inp-disc3','inp-disc4'].forEach(id =>
-  $(id).addEventListener('input', calcTotals)
+  $(id).addEventListener('input', () => { calcTotals(); checkDiscountLimit({ type: 'general', id }); })
 );
 $('inp-iva-exempt').addEventListener('change', calcTotals);
 $('inp-payment-efectivo').addEventListener('change', () => {
@@ -590,6 +662,7 @@ $('inp-payment-cheque').addEventListener('change', () => {
 /* ================================================================ SAVE ORDER */
 $('order-form').addEventListener('submit', async e => {
   e.preventDefault();
+  if (state.discountOver) { toast('El descuento máximo permitido es 20+5+5 (27.8%)', 'error'); return; }
   const customer = $('inp-customer').value.trim();
   if (!customer) { toast('El nombre del cliente es requerido', 'error'); $('inp-customer').focus(); return; }
   if (!findCustomerByName(customer)) { toast('El cliente debe estar registrado en el módulo Clientes', 'error'); $('inp-customer').focus(); return; }

@@ -11,6 +11,17 @@ function requireAuth(req, res, next) {
 router.use(requireAuth);
 
 function isVendor(req) { return req.session.role === 'vendedor'; }
+function isAdmin(req)  { return req.session.role === 'admin'; }
+
+const DISC_LIMIT = 0.278 + 1e-9; // 1 − 0.80 × 0.95 × 0.95
+
+function exceedsDiscountLimit(d1, d2, d3, d4, items) {
+  const maxItem = (items && items.length)
+    ? Math.max(0, ...items.map(it => parseFloat(it.discount) || 0))
+    : 0;
+  const eff = 1 - (1 - maxItem/100) * (1 - d1/100) * (1 - d2/100) * (1 - d3/100) * (1 - d4/100);
+  return eff > DISC_LIMIT;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function fmtMoney(v) {
@@ -483,6 +494,12 @@ router.post('/', (req, res) => {
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
 
+    if (!isAdmin(req) && exceedsDiscountLimit(
+      parseFloat(discount) || 0, parseFloat(discount2) || 0,
+      parseFloat(discount3) || 0, parseFloat(discount4) || 0,
+      items
+    )) return res.status(403).json({ error: 'Descuento supera el máximo permitido (27.8%)' });
+
     const orderId = withTransaction(() => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
       const efe = payment_efectivo ? 1 : 0;
@@ -531,6 +548,18 @@ router.put('/:id', (req, res) => {
 
     if (isVendor(req) && status !== undefined && status !== 'Cancelado')
       return res.status(403).json({ error: 'Solo podés cambiar el estado a Cancelado' });
+
+    if (!isAdmin(req)) {
+      const fd1 = discount  !== undefined ? (parseFloat(discount)  || 0) : (existing.discount  || 0);
+      const fd2 = discount2 !== undefined ? (parseFloat(discount2) || 0) : (existing.discount2 || 0);
+      const fd3 = discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0);
+      const fd4 = discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0);
+      const checkItems = items !== undefined
+        ? items
+        : db.prepare('SELECT discount FROM order_items WHERE order_id = ?').all(id);
+      if (exceedsDiscountLimit(fd1, fd2, fd3, fd4, checkItems))
+        return res.status(403).json({ error: 'Descuento supera el máximo permitido (27.8%)' });
+    }
 
     withTransaction(() => {
       const efe = payment_efectivo !== undefined ? (payment_efectivo ? 1 : 0) : (existing.payment_efectivo || 0);
