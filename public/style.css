@@ -197,6 +197,22 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .delivery-complete-toggle input[type=checkbox]{width:16px;height:16px;accent-color:#ea580c;cursor:pointer;flex-shrink:0}
 .delivery-complete-toggle.active{background:#fed7aa;border-color:#ea580c}
 
+/* ============================================================ WELCOME BANNER */
+.welcome-card{background:var(--white);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.3);width:100%;max-width:460px;overflow:hidden;animation:scaleIn .22s ease}
+.welcome-card-header{background:linear-gradient(135deg,#1e293b 0%,#ea580c 100%);padding:36px 32px 30px;text-align:center;color:#fff}
+.welcome-logo-icon{display:inline-flex;align-items:center;justify-content:center;width:76px;height:76px;background:rgba(255,255,255,.15);border-radius:50%;margin-bottom:18px;color:#fff;backdrop-filter:blur(4px)}
+.welcome-title{font-size:1.8rem;font-weight:800;margin-bottom:6px;letter-spacing:-.02em}
+.welcome-greeting{font-size:1rem;opacity:.88;font-weight:500}
+.welcome-card-body{padding:24px 28px 18px}
+.welcome-features{display:flex;flex-direction:column;gap:10px}
+.welcome-feature{display:flex;align-items:center;gap:14px;padding:12px 14px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border);transition:border-color .15s}
+.welcome-feature:hover{border-color:#fed7aa}
+.welcome-feature-icon{flex-shrink:0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;background:var(--primary-light);color:var(--primary);border-radius:var(--radius-sm)}
+.welcome-feature-title{font-weight:600;font-size:.9rem;color:var(--text);margin-bottom:1px}
+.welcome-feature-desc{font-size:.8rem;color:var(--text-muted)}
+.welcome-card-footer{padding:6px 28px 28px}
+.welcome-card-footer .btn{padding:12px;font-size:.97rem;font-weight:600;letter-spacing:.01em}
+
 /* ============================================================ TOAST */
 .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:var(--radius);font-weight:500;font-size:.88rem;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:1000;animation:slideUp .2s ease;max-width:360px}
 .toast-success{background:#1a7a4a;color:#fff}

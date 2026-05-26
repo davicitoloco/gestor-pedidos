@@ -149,6 +149,7 @@ async function showApp() {
   await loadProductCatalog();
 
   navigate(isFabrica() ? 'mp' : 'pedidos');
+  showWelcomeBanner();
 }
 
 $('login-form').addEventListener('submit', async e => {
@@ -5283,6 +5284,26 @@ function renderMpReport(orders) {
     </tr>`;
   }).join('');
 }
+
+/* ================================================================ WELCOME BANNER */
+function showWelcomeBanner() {
+  if (sessionStorage.getItem('candex_welcome_shown')) return;
+  sessionStorage.setItem('candex_welcome_shown', '1');
+  const name = state.user ? state.user.username : '';
+  $('welcome-greeting').textContent = name ? `¡Bienvenido, ${name}!` : '¡Bienvenido!';
+  const companyEl = $('sidebar-company');
+  if (companyEl) $('welcome-company-name').textContent = companyEl.textContent || 'Candex Pro';
+  $('welcome-banner').classList.remove('hidden');
+}
+
+function closeWelcomeBanner() {
+  $('welcome-banner').classList.add('hidden');
+}
+
+$('btn-welcome-close').addEventListener('click', closeWelcomeBanner);
+$('welcome-banner').addEventListener('click', e => {
+  if (e.target === $('welcome-banner')) closeWelcomeBanner();
+});
 
 /* ================================================================ INIT */
 checkAuth();
