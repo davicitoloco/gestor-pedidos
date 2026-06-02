@@ -2032,6 +2032,16 @@ window.openAccountView = async function(customerId) {
 
 $('btn-account-back').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
 
+$('btn-composicion-saldos').addEventListener('click', () => {
+  if (!_accountCustomerId) return;
+  const a = document.createElement('a');
+  a.href = `/api/customers/${_accountCustomerId}/composicion-saldos`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+});
+
 async function loadAccount() {
   if (!_accountCustomerId) return;
   try {

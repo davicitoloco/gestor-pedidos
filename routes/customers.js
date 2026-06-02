@@ -1,6 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const { db, withTransaction } = require('../db');
+const PDFDocument = require('pdfkit');
+
+function fmtDatePdf(d) {
+  if (!d) return '';
+  const s = String(d).slice(0, 10);
+  const [y, m, day] = s.split('-');
+  return `${day}/${m}/${y}`;
+}
+
+function fmtArs(v) {
+  const n = Math.abs(parseFloat(v) || 0);
+  const parts = n.toFixed(2).split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return '$ ' + parts[0] + ',' + parts[1];
+}
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -182,6 +197,196 @@ router.post('/import', (req, res) => {
 
     res.json({ imported, errors });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/customers/:id/composicion-saldos — PDF composición de saldos
+router.get('/:id/composicion-saldos', (req, res) => {
+  try {
+    const cid = Number(req.params.id);
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(cid);
+    if (!customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+    const remitos = db.prepare(`
+      SELECT r.created_at, r.total,
+             printf('R-%03d', r.remito_sequence) AS remito_number,
+             printf('%03d', o.order_sequence)    AS order_number
+      FROM remitos r
+      JOIN orders o ON r.order_id = o.id
+      WHERE r.customer_id = ?
+      ORDER BY r.created_at ASC, r.remito_sequence ASC
+    `).all(cid);
+
+    const payments = db.prepare(`
+      SELECT amount, method, notes, reference,
+             COALESCE(payment_date, DATE(created_at)) AS date
+      FROM payments
+      WHERE customer_id = ?
+      ORDER BY COALESCE(payment_date, DATE(created_at)) ASC, id ASC
+    `).all(cid);
+
+    const notes = db.prepare(`
+      SELECT note_type, date, description, amount
+      FROM credit_debit_notes
+      WHERE entity_type='customer' AND entity_id=?
+      ORDER BY date ASC, id ASC
+    `).all(cid);
+
+    const movements = [];
+
+    remitos.forEach(r => movements.push({
+      date: String(r.created_at).slice(0, 10),
+      comprobante: `Remito ${r.remito_number} (Pedido #${r.order_number})`,
+      debe: r.total,
+      haber: 0,
+    }));
+
+    payments.forEach(p => {
+      const methodMap = { efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque', tarjeta: 'Tarjeta' };
+      const methodLabel = methodMap[p.method] || p.method;
+      const detail = (p.notes || p.reference || '').trim();
+      movements.push({
+        date: String(p.date).slice(0, 10),
+        comprobante: detail ? `Pago - ${methodLabel} - ${detail}` : `Pago - ${methodLabel}`,
+        debe: 0,
+        haber: p.amount,
+      });
+    });
+
+    notes.forEach(n => movements.push({
+      date: String(n.date).slice(0, 10),
+      comprobante: `${n.note_type === 'debito' ? 'Nota de Débito' : 'Nota de Crédito'} - ${n.description}`,
+      debe: n.note_type === 'debito' ? n.amount : 0,
+      haber: n.note_type === 'credito' ? n.amount : 0,
+    }));
+
+    movements.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+    let running = 0;
+    movements.forEach(m => { running += m.debe - m.haber; m.saldo = running; });
+
+    const totalDebe  = movements.reduce((s, m) => s + m.debe,  0);
+    const totalHaber = movements.reduce((s, m) => s + m.haber, 0);
+    const saldoFinal = totalDebe - totalHaber;
+
+    const today    = new Date();
+    const todayStr = fmtDatePdf(today.toISOString().slice(0, 10));
+    const fileDate = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const safeName = customer.name.replace(/[^\w\s]/g, '').trim().replace(/\s+/g, '_');
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="ComposicionSaldos_${safeName}_${fileDate}.pdf"`);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    doc.pipe(res);
+
+    const pageW   = doc.page.width;
+    const mL      = 40;
+    const mR      = 40;
+    const cW      = pageW - mL - mR;   // 515
+
+    // Column x positions and widths
+    const COL = {
+      fecha:       { x: mL,           w: 70  },
+      comprobante: { x: mL + 70,      w: 210 },
+      debe:        { x: mL + 280,     w: 75  },
+      haber:       { x: mL + 355,     w: 75  },
+      saldo:       { x: mL + 430,     w: 85  },
+    };
+    const ROW_H = 16;
+
+    function drawTableHeader(y) {
+      doc.rect(mL, y, cW, 18).fill('#1a4731');
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#ffffff');
+      doc.text('Fecha',       COL.fecha.x + 3,      y + 5, { width: COL.fecha.w,       lineBreak: false });
+      doc.text('Comprobante', COL.comprobante.x + 3, y + 5, { width: COL.comprobante.w,  lineBreak: false });
+      doc.text('Debe',        COL.debe.x,            y + 5, { width: COL.debe.w,  align: 'right', lineBreak: false });
+      doc.text('Haber',       COL.haber.x,           y + 5, { width: COL.haber.w, align: 'right', lineBreak: false });
+      doc.text('Saldo',       COL.saldo.x,           y + 5, { width: COL.saldo.w - 3, align: 'right', lineBreak: false });
+      return y + 18;
+    }
+
+    // ── HEADER ────────────────────────────────────────────────────────────────
+    doc.fontSize(18).font('Helvetica-Bold').fillColor('#1a1a1a')
+       .text('Candex', mL, 40, { width: cW / 3, lineBreak: false });
+
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a1a1a')
+       .text('COMPOSICIÓN DE SALDOS', mL, 45, { width: cW, align: 'center', lineBreak: false });
+
+    doc.moveTo(mL, 78).lineTo(pageW - mR, 78).strokeColor('#cccccc').lineWidth(0.5).stroke();
+
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#1a1a1a')
+       .text(customer.name, mL, 86, { lineBreak: false });
+
+    const ivaLabel = customer.iva_condition || 'Consumidor Final';
+    doc.fontSize(9).font('Helvetica').fillColor('#555555')
+       .text(`${ivaLabel}  |  Fecha de emisión: ${todayStr}`, mL, 102, { lineBreak: false });
+
+    doc.moveTo(mL, 118).lineTo(pageW - mR, 118).strokeColor('#cccccc').lineWidth(0.5).stroke();
+
+    // ── TABLE ─────────────────────────────────────────────────────────────────
+    let rowY = drawTableHeader(126);
+
+    if (movements.length === 0) {
+      doc.fontSize(9).font('Helvetica').fillColor('#888888')
+         .text('Sin movimientos registrados', mL + 3, rowY + 5);
+      rowY += ROW_H;
+    }
+
+    movements.forEach((m, i) => {
+      if (i % 2 === 0) doc.rect(mL, rowY, cW, ROW_H).fill('#f5f9f7');
+
+      const comp = m.comprobante.length > 45 ? m.comprobante.slice(0, 44) + '…' : m.comprobante;
+
+      doc.fontSize(8).font('Helvetica').fillColor('#1a1a1a');
+      doc.text(fmtDatePdf(m.date), COL.fecha.x + 3,      rowY + 4, { width: COL.fecha.w,      lineBreak: false });
+      doc.text(comp,               COL.comprobante.x + 3, rowY + 4, { width: COL.comprobante.w, lineBreak: false });
+      if (m.debe  > 0) doc.text(fmtArs(m.debe),  COL.debe.x,  rowY + 4, { width: COL.debe.w,  align: 'right', lineBreak: false });
+      if (m.haber > 0) doc.text(fmtArs(m.haber), COL.haber.x, rowY + 4, { width: COL.haber.w, align: 'right', lineBreak: false });
+
+      const saldoColor = m.saldo > 0.005 ? '#c0392b' : m.saldo < -0.005 ? '#27ae60' : '#1a1a1a';
+      doc.fillColor(saldoColor)
+         .text(fmtArs(Math.abs(m.saldo)), COL.saldo.x, rowY + 4, { width: COL.saldo.w - 3, align: 'right', lineBreak: false });
+
+      doc.moveTo(mL, rowY + ROW_H).lineTo(pageW - mR, rowY + ROW_H)
+         .strokeColor('#e0e0e0').lineWidth(0.3).stroke();
+
+      rowY += ROW_H;
+
+      if (rowY > doc.page.height - 110) {
+        doc.addPage();
+        rowY = drawTableHeader(40);
+      }
+    });
+
+    // ── FOOTER ────────────────────────────────────────────────────────────────
+    const footerY = rowY + 14;
+
+    doc.moveTo(mL, footerY).lineTo(pageW - mR, footerY)
+       .strokeColor('#1a4731').lineWidth(1).stroke();
+
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a1a1a')
+       .text('Total Facturado:', mL, footerY + 10, { lineBreak: false });
+    doc.font('Helvetica').text(fmtArs(totalDebe), mL + 105, footerY + 10, { lineBreak: false });
+
+    doc.font('Helvetica-Bold').text('Total Pagado:', mL + 215, footerY + 10, { lineBreak: false });
+    doc.font('Helvetica').text(fmtArs(totalHaber), mL + 305, footerY + 10, { lineBreak: false });
+
+    doc.font('Helvetica-Bold').fillColor(saldoFinal > 0.005 ? '#c0392b' : '#1a1a1a')
+       .text('Saldo Deudor:', mL + 390, footerY + 10, { lineBreak: false });
+    doc.font('Helvetica').fillColor(saldoFinal > 0.005 ? '#c0392b' : '#1a1a1a')
+       .text(fmtArs(saldoFinal), mL + 470, footerY + 10, { lineBreak: false });
+
+    doc.fontSize(7).font('Helvetica').fillColor('#999999')
+       .text(
+         `Documento no válido como factura. Emitido el ${todayStr} por el sistema Candex.`,
+         mL, footerY + 30, { width: cW, align: 'center', lineBreak: false }
+       );
+
+    doc.end();
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
