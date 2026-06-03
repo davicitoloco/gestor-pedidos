@@ -4,6 +4,17 @@ const { db, withTransaction } = require('../db');
 const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
 const { acctBySubtype, acctByCode, recordJournal } = require('../lib/accounting');
 
+// Fallback lookups que no requieren accepts_movements=1, para no fallar
+// silenciosamente en DBs donde el flag está en 0.
+function findAcctBySubtype(subtype) {
+  return acctBySubtype(subtype)
+      || db.prepare('SELECT id FROM accounts WHERE subtype=? LIMIT 1').get(subtype);
+}
+function findAcctByCode(code) {
+  return acctByCode(code)
+      || db.prepare('SELECT id FROM accounts WHERE code=? LIMIT 1').get(code);
+}
+
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
   next();
@@ -619,19 +630,27 @@ router.put('/:id', (req, res) => {
           const finalIvaExempt = iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0);
 
           if (total > 0.005) {
-            const deudores  = acctBySubtype('Clientes');
-            const ventas    = acctByCode('4.1.01');
-            const ivaVentas = acctByCode('2.1.03');
+            const deudores  = findAcctBySubtype('Clientes');
+            const ventas    = findAcctByCode('4.1.01');
+            const ivaVentas = findAcctByCode('2.1.03');
             if (deudores && ventas) {
               const orderNum = String(existing.order_sequence).padStart(3, '0');
-              const lines = [{ account_id: deudores.id, debit: total, credit: 0 }];
+              // total es el monto NETO (sin IVA) — los precios de la app son sin IVA.
+              // El cliente debe el BRUTO (neto + IVA), por eso DEBE Deudores = total * 1.21.
+              let lines;
               if (finalIvaExempt || !ivaVentas) {
-                lines.push({ account_id: ventas.id, debit: 0, credit: total });
+                lines = [
+                  { account_id: deudores.id, debit: total, credit: 0    },
+                  { account_id: ventas.id,   debit: 0,     credit: total },
+                ];
               } else {
-                const neto = total / 1.21;
-                const iva  = total - neto;
-                lines.push({ account_id: ventas.id,    debit: 0, credit: neto });
-                lines.push({ account_id: ivaVentas.id, debit: 0, credit: iva  });
+                const iva   = Math.round(total * 0.21 * 100) / 100;
+                const gross = total + iva;
+                lines = [
+                  { account_id: deudores.id,  debit: gross, credit: 0    },
+                  { account_id: ventas.id,    debit: 0,     credit: total },
+                  { account_id: ivaVentas.id, debit: 0,     credit: iva   },
+                ];
               }
               recordJournal({
                 date:     new Date().toISOString().slice(0, 10),
