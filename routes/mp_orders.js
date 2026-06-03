@@ -24,12 +24,18 @@ function findAcctBySubtype(subtype) {
 }
 
 function ivaDebitAcct(pct) {
+  if (pct <= 0) return null;
   const r = Math.round(pct * 10) / 10;
-  if (r === 21)  return findAcctByCode('1120411');
-  if (r === 27)  return findAcctByCode('1120412');
-  if (Math.abs(r - 10.5) < 0.1) return findAcctByCode('1120413');
-  if (r > 0)     return findAcctByCode('1120411');
-  return null;
+  let acct;
+  if (r === 21)                acct = findAcctByCode('1120411');
+  else if (r === 27)           acct = findAcctByCode('1120412');
+  else if (Math.abs(r - 10.5) < 0.1) acct = findAcctByCode('1120413');
+  else                         acct = findAcctByCode('1120411');
+  // Fallback: buscar por código-prefijo del grupo "IVA CREDITO FISCAL" (112041x)
+  // para DBs donde los códigos exactos difieren de los estándar.
+  return acct
+      || db.prepare("SELECT id, code, name FROM accounts WHERE code LIKE '112041%' AND accepts_movements=1 ORDER BY code LIMIT 1").get()
+      || db.prepare("SELECT id, code, name FROM accounts WHERE code LIKE '112041%' ORDER BY code LIMIT 1").get();
 }
 
 function requireAuth(req, res, next) {
@@ -171,7 +177,8 @@ router.put('/:id/estado', (req, res) => {
         const existing = db.prepare("SELECT id FROM purchases WHERE origin='pedido_mp' AND origin_id=?").get(id);
         if (!existing && orderRec.supplier_id) {
           const total    = parseFloat(receipt.monto_total) || 0;
-          const ivaPct   = parseIvaPct(receipt.iva);
+          const ivaStr   = receipt.iva || '21%';   // mismo default que el INSERT anterior
+          const ivaPct   = parseIvaPct(ivaStr);
           const ivaAmt   = ivaPct > 0 ? Math.round(total / (1 + ivaPct / 100) * (ivaPct / 100) * 100) / 100 : 0;
           const netAmt   = total - ivaAmt;
           const docDate  = receipt.fecha_comprobante || new Date().toISOString().slice(0, 10);
@@ -206,7 +213,7 @@ router.put('/:id/estado', (req, res) => {
                   jLines.push({ account_id: matAcct.id, debit: netAmt, credit: 0,
                     description: `${docType} ${docNum}`.trim() });
                   jLines.push({ account_id: ivaAcct.id, debit: ivaAmt, credit: 0,
-                    description: `IVA ${receipt.iva}` });
+                    description: `IVA ${ivaStr}` });
                 } else {
                   // Cuenta de IVA no encontrada: registrar monto completo en Mat. Primas
                   console.error(`[MP Journal] Cuenta IVA para tasa ${ivaPct}% no encontrada — IVA incluido en Materias Primas`);
