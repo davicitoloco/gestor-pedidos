@@ -3208,8 +3208,9 @@ window.openSupplierAccount = async function(id) {
         <td>${esc(p.method)}</td>
         <td class="text-right">${fmtMoney(p.amount)}</td>
         <td>${esc(p.notes || '—')}</td>
+        <td class="text-center"><a href="/api/supplier-payments/${p.id}/orden-pago" target="_blank" class="btn btn-ghost btn-sm">PDF</a></td>
         <td class="text-center"><button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteSupplierPayment(${p.id})">Eliminar</button></td>
-      </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">Sin pagos</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--text-muted)">Sin pagos</td></tr>';
     $('sup-notes-tbody').innerHTML = d.notes && d.notes.length ? d.notes.map(n => `
       <tr>
         <td>${fmtDate(n.date)}</td>
@@ -3223,10 +3224,30 @@ window.openSupplierAccount = async function(id) {
 
 $('btn-back-sup-account').addEventListener('click', () => { showProveedoresSubview('list'); loadSuppliers(); });
 
-// Supplier payment modal
-$('btn-new-sup-payment').addEventListener('click', () => {
+// ── Supplier payment modal ────────────────────────────────────────────────────
+let supPayFromAccount = false; // true cuando se abre desde cuenta corriente
+
+function supPayAllocTotal() {
+  let t = 0;
+  document.querySelectorAll('.sup-pay-alloc-row').forEach(row => {
+    if (row.querySelector('.sup-pay-chk').checked)
+      t += parseFloat(row.querySelector('.sup-pay-alloc-amt').value) || 0;
+  });
+  return Math.round(t * 100) / 100;
+}
+function updateSupPayAllocTotal() {
+  const t = supPayAllocTotal();
+  $('sup-pay-alloc-total').textContent = fmtMoney(t);
+  // Si hay asignaciones, auto-completar el monto total
+  if (t > 0 && !$('inp-sup-pay-amount').dataset.manual)
+    $('inp-sup-pay-amount').value = t.toFixed(2);
+}
+
+async function openSupPayModal(fromAccount) {
+  supPayFromAccount = fromAccount;
   $('inp-sup-pay-amount').value = '';
-  $('inp-sup-pay-date').value   = '';
+  delete $('inp-sup-pay-amount').dataset.manual;
+  $('inp-sup-pay-date').value   = new Date().toISOString().slice(0,10);
   $('inp-sup-pay-method').value = 'efectivo';
   $('inp-sup-pay-reference').value = '';
   $('inp-sup-pay-notes').value  = '';
@@ -3234,9 +3255,70 @@ $('btn-new-sup-payment').addEventListener('click', () => {
   $('inp-sup-pay-cheque-number').value = '';
   $('inp-sup-pay-cheque-due').value    = '';
   updateSupPayFields();
-  populateBankSelect($('inp-sup-pay-bank-account'));
+  await populateBankSelect($('inp-sup-pay-bank-account'));
+
+  const allocSection = $('sup-pay-alloc-section');
+  if (fromAccount && currentSupplierId) {
+    try {
+      const pending = await api('GET', `/suppliers/${currentSupplierId}/pending-purchases`);
+      if (pending.length) {
+        $('sup-pay-alloc-list').innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+            <thead>
+              <tr style="background:var(--bg-secondary);position:sticky;top:0">
+                <th style="padding:6px 8px;text-align:center;width:32px"></th>
+                <th style="padding:6px 8px;text-align:left">Comprobante</th>
+                <th style="padding:6px 8px;text-align:left">Tipo / Nº Doc</th>
+                <th style="padding:6px 8px;text-align:right">Saldo</th>
+                <th style="padding:6px 8px;text-align:right;width:120px">Asignar ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pending.map(p => `
+                <tr class="sup-pay-alloc-row" data-id="${p.id}" data-balance="${p.balance}">
+                  <td style="padding:5px 8px;text-align:center">
+                    <input type="checkbox" class="sup-pay-chk">
+                  </td>
+                  <td style="padding:5px 8px;font-weight:600">${esc(p.purchase_number)}</td>
+                  <td style="padding:5px 8px;color:var(--text-muted)">${esc(p.doc_type)}${p.doc_number ? ' ' + esc(p.doc_number) : ''}<br><small>${fmtDate(p.doc_date)}</small></td>
+                  <td style="padding:5px 8px;text-align:right">${fmtMoney(p.balance)}</td>
+                  <td style="padding:5px 8px">
+                    <input type="number" class="input sup-pay-alloc-amt" value="${p.balance.toFixed(2)}" min="0.01" max="${p.balance.toFixed(2)}" step="0.01" style="width:100%;padding:3px 6px;font-size:.82rem" disabled>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+        // Eventos de checkbox y monto
+        $('sup-pay-alloc-list').querySelectorAll('.sup-pay-alloc-row').forEach(row => {
+          const chk = row.querySelector('.sup-pay-chk');
+          const amt = row.querySelector('.sup-pay-alloc-amt');
+          chk.addEventListener('change', () => {
+            amt.disabled = !chk.checked;
+            updateSupPayAllocTotal();
+          });
+          amt.addEventListener('input', () => {
+            delete $('inp-sup-pay-amount').dataset.manual;
+            updateSupPayAllocTotal();
+          });
+        });
+        $('sup-pay-alloc-total').textContent = fmtMoney(0);
+        allocSection.classList.remove('hidden');
+      } else {
+        allocSection.classList.add('hidden');
+      }
+    } catch(e) { allocSection.classList.add('hidden'); }
+  } else {
+    allocSection.classList.add('hidden');
+  }
+
   $('sup-payment-modal').classList.remove('hidden');
+}
+
+$('inp-sup-pay-amount').addEventListener('input', () => {
+  $('inp-sup-pay-amount').dataset.manual = '1';
 });
+
+$('btn-new-sup-payment').addEventListener('click', () => openSupPayModal(true));
 $('btn-sup-pay-cancel').addEventListener('click', () => $('sup-payment-modal').classList.add('hidden'));
 $('sup-payment-modal').addEventListener('click', e => { if (e.target === $('sup-payment-modal')) $('sup-payment-modal').classList.add('hidden'); });
 
@@ -3253,31 +3335,62 @@ $('btn-sup-pay-confirm').addEventListener('click', async () => {
   btn.disabled = true;
   const method = $('inp-sup-pay-method').value;
   try {
-    const payload = {
+    // Recoger asignaciones a comprobantes (si las hay)
+    const allocations = [];
+    if (supPayFromAccount) {
+      document.querySelectorAll('.sup-pay-alloc-row').forEach(row => {
+        if (row.querySelector('.sup-pay-chk').checked) {
+          const amt = parseFloat(row.querySelector('.sup-pay-alloc-amt').value);
+          if (amt > 0) allocations.push({ purchase_id: Number(row.dataset.id), amount: amt });
+        }
+      });
+    }
+
+    const amount = parseFloat($('inp-sup-pay-amount').value);
+    if (!amount || amount <= 0) { toast('Ingresá un monto válido', 'error'); btn.disabled = false; return; }
+
+    // Validar que el total asignado no supere el monto
+    if (allocations.length) {
+      const allocTotal = allocations.reduce((s, a) => s + a.amount, 0);
+      if (Math.abs(allocTotal - amount) > 0.02) {
+        toast(`El total asignado (${fmtMoney(allocTotal)}) no coincide con el monto del pago (${fmtMoney(amount)})`, 'error');
+        btn.disabled = false; return;
+      }
+    }
+
+    const basePayload = {
       supplier_id:  currentSupplierId,
-      purchase_id:  currentPurchaseId || null,
-      amount:       parseFloat($('inp-sup-pay-amount').value),
       method,
+      amount,
       payment_date: $('inp-sup-pay-date').value || null,
       notes:        $('inp-sup-pay-notes').value.trim(),
       reference:    $('inp-sup-pay-reference').value.trim(),
     };
     if (method === 'transferencia') {
-      payload.bank_account_id = $('inp-sup-pay-bank-account').value;
-      if (!payload.bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); btn.disabled = false; return; }
+      basePayload.bank_account_id = $('inp-sup-pay-bank-account').value;
+      if (!basePayload.bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); btn.disabled = false; return; }
     }
     if (method === 'cheque') {
-      payload.cheque_bank    = $('inp-sup-pay-cheque-bank').value.trim();
-      payload.cheque_number  = $('inp-sup-pay-cheque-number').value.trim();
-      payload.cheque_due_date= $('inp-sup-pay-cheque-due').value;
-      if (!payload.cheque_bank || !payload.cheque_number || !payload.cheque_due_date) {
+      basePayload.cheque_bank     = $('inp-sup-pay-cheque-bank').value.trim();
+      basePayload.cheque_number   = $('inp-sup-pay-cheque-number').value.trim();
+      basePayload.cheque_due_date = $('inp-sup-pay-cheque-due').value;
+      if (!basePayload.cheque_bank || !basePayload.cheque_number || !basePayload.cheque_due_date) {
         toast('Completá los datos del cheque', 'error'); btn.disabled = false; return;
       }
     }
-    await api('POST', '/supplier-payments', payload);
+
+    if (allocations.length > 1) {
+      // Batch: un pago por comprobante, un asiento total
+      await api('POST', '/supplier-payments/batch', { ...basePayload, allocations });
+    } else {
+      // Pago único (con o sin comprobante)
+      const payload = { ...basePayload, purchase_id: allocations[0]?.purchase_id || (currentPurchaseId || null) };
+      await api('POST', '/supplier-payments', payload);
+    }
+
     toast('Pago registrado', 'success');
     $('sup-payment-modal').classList.add('hidden');
-    if (currentPurchaseId) {
+    if (currentPurchaseId && !supPayFromAccount) {
       openPurchaseDetail(currentPurchaseId);
     } else {
       openSupplierAccount(currentSupplierId);
@@ -3427,17 +3540,7 @@ $('btn-new-purchase-payment').addEventListener('click', async () => {
   try {
     const pur = await api('GET', `/purchases/${currentPurchaseId}`);
     currentSupplierId = pur.supplier_id;
-    $('inp-sup-pay-amount').value       = '';
-    $('inp-sup-pay-date').value         = new Date().toISOString().slice(0,10);
-    $('inp-sup-pay-method').value       = 'efectivo';
-    $('inp-sup-pay-reference').value    = '';
-    $('inp-sup-pay-notes').value        = '';
-    $('inp-sup-pay-cheque-bank').value  = '';
-    $('inp-sup-pay-cheque-number').value= '';
-    $('inp-sup-pay-cheque-due').value   = '';
-    updateSupPayFields();
-    await populateBankSelect($('inp-sup-pay-bank-account'));
-    $('sup-payment-modal').classList.remove('hidden');
+    await openSupPayModal(false); // desde detalle de comprobante: sin selector
   } catch (err) { toast(err.message, 'error'); }
 });
 

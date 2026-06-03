@@ -103,6 +103,26 @@ router.get('/:id/account', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/suppliers/:id/pending-purchases — comprobantes con saldo > 0
+router.get('/:id/pending-purchases', (req, res) => {
+  try {
+    const sid = Number(req.params.id);
+    const rows = db.prepare(`
+      SELECT p.id, p.purchase_sequence, p.doc_type, p.doc_number, p.doc_date, p.total,
+             printf('C-%04d', p.purchase_sequence) AS purchase_number,
+             COALESCE(SUM(sp.amount), 0)            AS total_paid,
+             p.total - COALESCE(SUM(sp.amount), 0)  AS balance
+      FROM purchases p
+      LEFT JOIN supplier_payments sp ON sp.purchase_id = p.id
+      WHERE p.supplier_id = ?
+      GROUP BY p.id
+      HAVING balance > 0.005
+      ORDER BY p.doc_date ASC, p.purchase_sequence ASC
+    `).all(sid);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/suppliers
 router.post('/', (req, res) => {
   try {

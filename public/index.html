@@ -1218,7 +1218,8 @@
           </div>
           <div class="table-wrap" style="max-height:220px;overflow-y:auto">
             <table class="table"><thead><tr>
-              <th>Fecha</th><th>Método</th><th class="text-right">Monto</th><th>Notas</th><th class="text-center">Eliminar</th>
+              <th>Fecha</th><th>Método</th><th class="text-right">Monto</th><th>Notas</th>
+              <th class="text-center">OP PDF</th><th class="text-center">Eliminar</th>
             </tr></thead><tbody id="sup-payments-tbody"></tbody></table>
           </div>
           <div style="margin:14px 0 6px;font-weight:600">Notas de débito / crédito</div>
@@ -2392,9 +2393,22 @@
 </div>
 
 <div id="sup-payment-modal" class="modal-overlay hidden">
-  <div class="modal" style="max-width:420px">
+  <div class="modal" style="max-width:580px;width:95%">
     <div class="modal-header">Registrar pago a proveedor</div>
     <div class="modal-form-body">
+
+      <!-- Comprobantes pendientes (solo desde cuenta corriente) -->
+      <div id="sup-pay-alloc-section" class="hidden" style="margin-bottom:16px">
+        <div style="font-weight:600;font-size:.9rem;margin-bottom:6px">Comprobantes pendientes</div>
+        <div id="sup-pay-alloc-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          <!-- filas generadas dinámicamente -->
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:.82rem;color:var(--text-muted)">
+          <span>Dejá sin marcar para registrar pago a cuenta</span>
+          <span>Total asignado: <strong id="sup-pay-alloc-total">$ 0,00</strong></span>
+        </div>
+      </div>
+
       <div class="form-grid-2">
         <div class="field">
           <label class="label required">Monto ($)</label>
