@@ -2,6 +2,24 @@
 const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
+const { acctBySubtype, acctByCode, recordJournal } = require('../lib/accounting');
+
+function parseIvaPct(ivaStr) {
+  if (!ivaStr) return 0;
+  const s = String(ivaStr).replace(',', '.').trim();
+  if (/exen/i.test(s)) return 0;
+  const m = s.match(/(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : 0;
+}
+
+function ivaDebitAcct(pct) {
+  const r = Math.round(pct * 10) / 10;
+  if (r === 21)  return acctByCode('1120411');
+  if (r === 27)  return acctByCode('1120412');
+  if (Math.abs(r - 10.5) < 0.1) return acctByCode('1120413');
+  if (r > 0) return acctByCode('1120411');
+  return null;
+}
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -122,10 +140,12 @@ router.put('/:id/estado', (req, res) => {
     const { estado, receipt } = req.body;
     const VALID = ['pendiente', 'realizado', 'entregado'];
     if (!VALID.includes(estado)) return res.status(400).json({ error: 'Estado inválido' });
-    if (!db.prepare('SELECT id FROM mp_orders WHERE id=?').get(id))
-      return res.status(404).json({ error: 'Pedido no encontrado' });
+    const orderRec = db.prepare(`${ORDER_SELECT} WHERE o.id=?`).get(id);
+    if (!orderRec) return res.status(404).json({ error: 'Pedido no encontrado' });
+
     withTransaction(() => {
       db.prepare(`UPDATE mp_orders SET estado=? WHERE id=?`).run(estado, id);
+
       if (estado === 'entregado' && receipt) {
         db.prepare('DELETE FROM mp_receipts WHERE mp_order_id=?').run(id);
         db.prepare(`INSERT INTO mp_receipts
@@ -135,8 +155,60 @@ router.put('/:id/estado', (req, res) => {
             receipt.numero_comprobante||'', receipt.fecha_comprobante||'',
             parseFloat(receipt.monto_total)||0, receipt.iva||'21%',
             receipt.notas||'', req.session.userId);
+
+        // Solo crear comprobante si no existe uno ya para este pedido MP
+        const existing = db.prepare("SELECT id FROM purchases WHERE origin='pedido_mp' AND origin_id=?").get(id);
+        if (!existing && orderRec.supplier_id) {
+          const total    = parseFloat(receipt.monto_total) || 0;
+          const ivaPct   = parseIvaPct(receipt.iva);
+          const ivaAmt   = ivaPct > 0 ? Math.round(total / (1 + ivaPct / 100) * (ivaPct / 100) * 100) / 100 : 0;
+          const netAmt   = total - ivaAmt;
+          const docDate  = receipt.fecha_comprobante || new Date().toISOString().slice(0, 10);
+          const docType  = receipt.tipo_comprobante || 'Factura A';
+          const docNum   = receipt.numero_comprobante || '';
+          const notes    = receipt.notas || '';
+
+          const { nextSeq } = db.prepare('SELECT COALESCE(MAX(purchase_sequence),0)+1 AS nextSeq FROM purchases').get();
+          const pr = db.prepare(`
+            INSERT INTO purchases (purchase_sequence, supplier_id, doc_type, doc_number, doc_date, total, notes, origin, origin_id, created_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+          `).run(nextSeq, orderRec.supplier_id, docType, docNum, docDate, total, notes, 'pedido_mp', id, req.session.userId);
+          const purchaseId = Number(pr.lastInsertRowid);
+
+          db.prepare(`INSERT INTO purchase_items (purchase_id, product_name, quantity, unit_price) VALUES (?,?,?,?)`)
+            .run(purchaseId, `Materias primas - Pedido MP #${id}`, 1, total);
+
+          try {
+            const matAcct  = acctByCode('1131') || acctBySubtype('Stock');
+            const provAcct = acctBySubtype('Proveedores');
+            if (matAcct && provAcct && total > 0) {
+              const jLines = [
+                { account_id: matAcct.id, debit: netAmt, credit: 0,
+                  description: `${docType} ${docNum}`.trim() },
+                { account_id: provAcct.id, debit: 0, credit: total,
+                  description: orderRec.supplier_name || orderRec.proveedor },
+              ];
+              if (ivaAmt > 0) {
+                const ivaAcct = ivaDebitAcct(ivaPct);
+                if (ivaAcct) {
+                  jLines.splice(1, 0, { account_id: ivaAcct.id, debit: ivaAmt, credit: 0,
+                    description: `IVA ${receipt.iva}` });
+                }
+              }
+              recordJournal({
+                date:     docDate,
+                desc:     `Compra MP - ${orderRec.supplier_name || orderRec.proveedor} - ${docType} ${docNum}`.trim(),
+                ref_type: 'purchase',
+                ref_id:   purchaseId,
+                lines:    jLines,
+                userId:   req.session.userId,
+              });
+            }
+          } catch (e) { console.error('Journal MP purchase error:', e.message); }
+        }
       }
     });
+
     res.json(db.prepare(`${ORDER_SELECT} WHERE o.id=?`).get(id));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

@@ -3309,10 +3309,13 @@ function showComprobantesSubview(v) {
 async function loadPurchases() {
   try {
     const rows = await api('GET', '/purchases');
-    $('purchases-tbody').innerHTML = rows.length ? rows.map(p => `
-      <tr>
+    $('purchases-tbody').innerHTML = rows.length ? rows.map(p => {
+      const mpBadge = p.origin === 'pedido_mp'
+        ? `<span style="font-size:.68rem;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 6px;font-weight:700;vertical-align:middle;white-space:nowrap">MP #${p.origin_id}</span>`
+        : '';
+      return `<tr>
         <td><a href="#" onclick="openPurchaseDetail(${p.id});return false;" style="font-weight:600">${esc(p.purchase_number)}</a></td>
-        <td>${esc(p.supplier_name)}</td>
+        <td>${esc(p.supplier_name)} ${mpBadge}</td>
         <td>${esc(p.doc_type)}</td>
         <td>${esc(p.doc_number || '—')}</td>
         <td>${fmtDate(p.doc_date || p.created_at)}</td>
@@ -3322,7 +3325,8 @@ async function loadPurchases() {
           <a href="/api/purchases/${p.id}/print" target="_blank" class="btn btn-ghost btn-sm">PDF</a>
           <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deletePurchase(${p.id},'${esc(p.purchase_number)}')">Eliminar</button>
         </td>
-      </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin comprobantes</td></tr>';
+      </tr>`;
+    }).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin comprobantes</td></tr>';
   } catch (err) { toast(err.message, 'error'); }
 }
 
