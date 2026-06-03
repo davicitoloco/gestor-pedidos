@@ -26,16 +26,27 @@ function findAcctBySubtype(subtype) {
 function ivaDebitAcct(pct) {
   if (pct <= 0) return null;
   const r = Math.round(pct * 10) / 10;
+
+  // 1. Códigos exactos del plan importado (DB con plan completo)
   let acct;
-  if (r === 21)                acct = findAcctByCode('1120411');
-  else if (r === 27)           acct = findAcctByCode('1120412');
+  if (r === 21)                  acct = findAcctByCode('1120411');
+  else if (r === 27)             acct = findAcctByCode('1120412');
   else if (Math.abs(r - 10.5) < 0.1) acct = findAcctByCode('1120413');
-  else                         acct = findAcctByCode('1120411');
-  // Fallback: buscar por código-prefijo del grupo "IVA CREDITO FISCAL" (112041x)
-  // para DBs donde los códigos exactos difieren de los estándar.
-  return acct
-      || db.prepare("SELECT id, code, name FROM accounts WHERE code LIKE '112041%' AND accepts_movements=1 ORDER BY code LIMIT 1").get()
+  else                           acct = findAcctByCode('1120411');
+  if (acct) return acct;
+
+  // 2. Prefijo de código del grupo "IVA CREDITO FISCAL" (112041x)
+  acct = db.prepare("SELECT id, code, name FROM accounts WHERE code LIKE '112041%' AND accepts_movements=1 ORDER BY code LIMIT 1").get()
       || db.prepare("SELECT id, code, name FROM accounts WHERE code LIKE '112041%' ORDER BY code LIMIT 1").get();
+  if (acct) return acct;
+
+  // 3. Subtype IVACompras — cuenta creada por la migración en db.js (1.1.06)
+  acct = findAcctBySubtype('IVACompras');
+  if (acct) return acct;
+
+  // 4. Nombre: cualquier cuenta que contenga "IVA" y "credito"/"crédito"
+  return db.prepare("SELECT id, code, name FROM accounts WHERE (LOWER(name) LIKE '%iva%credito%' OR LOWER(name) LIKE '%iva%cr%dito%') AND accepts_movements=1 LIMIT 1").get()
+      || db.prepare("SELECT id, code, name FROM accounts WHERE LOWER(name) LIKE '%iva%credito%' OR LOWER(name) LIKE '%iva%cr%dito%' LIMIT 1").get();
 }
 
 function requireAuth(req, res, next) {
@@ -197,10 +208,17 @@ router.put('/:id/estado', (req, res) => {
             .run(purchaseId, `Materias primas - Pedido MP #${id}`, 1, total);
 
           try {
-            const matAcct  = findAcctByCode('1131') || findAcctBySubtype('Stock');
-            const provAcct = findAcctBySubtype('Proveedores');
+            const matAcct  = findAcctByCode('1131')
+                || findAcctBySubtype('Stock')
+                || db.prepare("SELECT id, code, name FROM accounts WHERE LOWER(name) LIKE '%materia%prima%' AND accepts_movements=1 LIMIT 1").get()
+                || db.prepare("SELECT id, code, name FROM accounts WHERE LOWER(name) LIKE '%materia%prima%' LIMIT 1").get()
+                || db.prepare("SELECT id, code, name FROM accounts WHERE LOWER(name) LIKE '%mercader%' AND accepts_movements=1 LIMIT 1").get()
+                || db.prepare("SELECT id, code, name FROM accounts WHERE LOWER(name) LIKE '%mercader%' LIMIT 1").get();
+            const provAcct = findAcctBySubtype('Proveedores')
+                || db.prepare("SELECT id, code, name FROM accounts WHERE code='2.1.01' LIMIT 1").get()
+                || db.prepare("SELECT id, code, name FROM accounts WHERE LOWER(name) LIKE '%proveedor%' AND accepts_movements=1 LIMIT 1").get();
 
-            if (!matAcct) console.error('[MP Journal] Cuenta Materias Primas (1131) no encontrada en el plan de cuentas');
+            if (!matAcct)  console.error('[MP Journal] Cuenta Materias Primas/Mercaderías no encontrada en el plan de cuentas');
             if (!provAcct) console.error('[MP Journal] Cuenta Proveedores no encontrada en el plan de cuentas');
 
             if (matAcct && provAcct && total > 0) {

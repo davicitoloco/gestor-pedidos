@@ -477,6 +477,10 @@ db.exec(`CREATE TABLE IF NOT EXISTS mp_receipts (
   } catch(e) {}
   // IVA Ventas — cuenta de pasivo para IVA repercutido
   db.prepare("INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code) VALUES ('2.1.03','IVA Ventas','Pasivo','IVAVentas',1,'2.1')").run();
+  // IVA Crédito Fiscal — activo por IVA soportado en compras de materias primas.
+  // Clave para el asiento de compra MP. Se agrega aquí para garantizar que esté
+  // en cualquier instancia (Railway incluida) aunque no tenga el plan importado.
+  db.prepare("INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code) VALUES ('1.1.06','IVA Crédito Fiscal','Activo','IVACompras',1,'1.1')").run();
 }
 
 // Settings por defecto
