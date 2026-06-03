@@ -2,7 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
-const { acctBySubtype, acctByCode, recordJournal } = require('../lib/accounting');
+const { recordJournal } = require('../lib/accounting');
 
 function parseIvaPct(ivaStr) {
   if (!ivaStr) return 0;
@@ -12,12 +12,23 @@ function parseIvaPct(ivaStr) {
   return m ? parseFloat(m[1]) : 0;
 }
 
+// Lookup sin requerir accepts_movements=1 para no fallar silenciosamente en
+// DBs donde esas cuentas existen pero tienen el flag en 0.
+function findAcctByCode(code) {
+  return db.prepare('SELECT id, code, name FROM accounts WHERE code=? AND accepts_movements=1 LIMIT 1').get(code)
+      || db.prepare('SELECT id, code, name FROM accounts WHERE code=? LIMIT 1').get(code);
+}
+function findAcctBySubtype(subtype) {
+  return db.prepare('SELECT id, code, name FROM accounts WHERE subtype=? AND accepts_movements=1 LIMIT 1').get(subtype)
+      || db.prepare('SELECT id, code, name FROM accounts WHERE subtype=? LIMIT 1').get(subtype);
+}
+
 function ivaDebitAcct(pct) {
   const r = Math.round(pct * 10) / 10;
-  if (r === 21)  return acctByCode('1120411');
-  if (r === 27)  return acctByCode('1120412');
-  if (Math.abs(r - 10.5) < 0.1) return acctByCode('1120413');
-  if (r > 0) return acctByCode('1120411');
+  if (r === 21)  return findAcctByCode('1120411');
+  if (r === 27)  return findAcctByCode('1120412');
+  if (Math.abs(r - 10.5) < 0.1) return findAcctByCode('1120413');
+  if (r > 0)     return findAcctByCode('1120411');
   return null;
 }
 
@@ -179,22 +190,36 @@ router.put('/:id/estado', (req, res) => {
             .run(purchaseId, `Materias primas - Pedido MP #${id}`, 1, total);
 
           try {
-            const matAcct  = acctByCode('1131') || acctBySubtype('Stock');
-            const provAcct = acctBySubtype('Proveedores');
+            const matAcct  = findAcctByCode('1131') || findAcctBySubtype('Stock');
+            const provAcct = findAcctBySubtype('Proveedores');
+
+            if (!matAcct) console.error('[MP Journal] Cuenta Materias Primas (1131) no encontrada en el plan de cuentas');
+            if (!provAcct) console.error('[MP Journal] Cuenta Proveedores no encontrada en el plan de cuentas');
+
             if (matAcct && provAcct && total > 0) {
-              const jLines = [
-                { account_id: matAcct.id, debit: netAmt, credit: 0,
-                  description: `${docType} ${docNum}`.trim() },
-                { account_id: provAcct.id, debit: 0, credit: total,
-                  description: orderRec.supplier_name || orderRec.proveedor },
-              ];
+              // Construir líneas garantizando balance: si hay IVA pero no hay cuenta
+              // de IVA, absorber el IVA en la línea de Materias Primas.
+              const jLines = [];
               if (ivaAmt > 0) {
                 const ivaAcct = ivaDebitAcct(ivaPct);
                 if (ivaAcct) {
-                  jLines.splice(1, 0, { account_id: ivaAcct.id, debit: ivaAmt, credit: 0,
+                  jLines.push({ account_id: matAcct.id, debit: netAmt, credit: 0,
+                    description: `${docType} ${docNum}`.trim() });
+                  jLines.push({ account_id: ivaAcct.id, debit: ivaAmt, credit: 0,
                     description: `IVA ${receipt.iva}` });
+                } else {
+                  // Cuenta de IVA no encontrada: registrar monto completo en Mat. Primas
+                  console.error(`[MP Journal] Cuenta IVA para tasa ${ivaPct}% no encontrada — IVA incluido en Materias Primas`);
+                  jLines.push({ account_id: matAcct.id, debit: total, credit: 0,
+                    description: `${docType} ${docNum} (IVA incl.)`.trim() });
                 }
+              } else {
+                jLines.push({ account_id: matAcct.id, debit: total, credit: 0,
+                  description: `${docType} ${docNum}`.trim() });
               }
+              jLines.push({ account_id: provAcct.id, debit: 0, credit: total,
+                description: orderRec.supplier_name || orderRec.proveedor });
+
               recordJournal({
                 date:     docDate,
                 desc:     `Compra MP - ${orderRec.supplier_name || orderRec.proveedor} - ${docType} ${docNum}`.trim(),
@@ -204,7 +229,9 @@ router.put('/:id/estado', (req, res) => {
                 userId:   req.session.userId,
               });
             }
-          } catch (e) { console.error('Journal MP purchase error:', e.message); }
+          } catch (e) {
+            console.error(`[MP Journal] Error al generar asiento para comprobante ${purchaseId}:`, e.message);
+          }
         }
       }
     });
