@@ -764,6 +764,55 @@ router.post('/:id/deliveries', (req, res) => {
       db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
         .run(newStatus, id);
 
+      // Asiento contable de venta — solo en la primera entrega
+      const DELIVERY_STATUSES = ['Entrega parcial', 'Entregado'];
+      if (DELIVERY_STATUSES.includes(newStatus) && !DELIVERY_STATUSES.includes(order.status)) {
+        const dup = db.prepare(
+          "SELECT id FROM journal_entries WHERE ref_type='order' AND ref_id=? AND is_reversed=0"
+        ).get(id);
+        if (!dup) {
+          const currentItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id);
+          const sub = currentItems.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+          const total = sub
+            * (1 - (order.discount  || 0) / 100)
+            * (1 - (order.discount2 || 0) / 100)
+            * (1 - (order.discount3 || 0) / 100)
+            * (1 - (order.discount4 || 0) / 100);
+
+          if (total > 0.005) {
+            const deudores  = findAcctBySubtype('Clientes');
+            const ventas    = findAcctByCode('4.1.01');
+            const ivaVentas = findAcctByCode('2.1.03');
+            if (deudores && ventas) {
+              const orderNum = String(order.order_sequence).padStart(3, '0');
+              let lines;
+              if (order.iva_exempt || !ivaVentas) {
+                lines = [
+                  { account_id: deudores.id, debit: total, credit: 0     },
+                  { account_id: ventas.id,   debit: 0,     credit: total },
+                ];
+              } else {
+                const iva   = Math.round(total * 0.21 * 100) / 100;
+                const gross = total + iva;
+                lines = [
+                  { account_id: deudores.id,  debit: gross, credit: 0     },
+                  { account_id: ventas.id,    debit: 0,     credit: total },
+                  { account_id: ivaVentas.id, debit: 0,     credit: iva   },
+                ];
+              }
+              recordJournal({
+                date:     new Date().toISOString().slice(0, 10),
+                desc:     `Venta pedido #${orderNum} - cliente ${order.customer_name}`,
+                ref_type: 'order',
+                ref_id:   id,
+                lines,
+                userId:   req.session.userId
+              });
+            }
+          }
+        }
+      }
+
       // Auto-crear remito
       const remitoItems = validItems.map(item => {
         const oi = db.prepare('SELECT product_name, unit_price, discount FROM order_items WHERE id = ?').get(item.order_item_id);
