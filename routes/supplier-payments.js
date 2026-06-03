@@ -99,19 +99,45 @@ router.post('/', (req, res) => {
       // Journal entry
       try {
         const today = payment_date || new Date().toISOString().slice(0,10);
-        const proveedores = acctBySubtype('Proveedores');
+
+        // Descripción con datos del comprobante si viene asociado a una compra
+        let jDesc = `Pago proveedor ${supplier?.name || sid}`;
+        if (purchase_id) {
+          const pur = db.prepare('SELECT doc_type, doc_number FROM purchases WHERE id=?').get(Number(purchase_id));
+          if (pur) jDesc = `Pago proveedor ${supplier?.name || sid} - ${pur.doc_type}${pur.doc_number ? ' ' + pur.doc_number : ''}`;
+        }
+
+        const proveedores = acctBySubtype('Proveedores')
+            || db.prepare("SELECT id FROM accounts WHERE code='2.1.01' LIMIT 1").get();
+
         let creditAcct = null;
         if (method === 'efectivo') {
-          creditAcct = acctBySubtype('Caja');
-        } else if (method === 'transferencia' && bank_account_id) {
-          creditAcct = acctByBankId(Number(bank_account_id));
+          creditAcct = acctBySubtype('Caja')
+              || db.prepare("SELECT id FROM accounts WHERE code='1.1.01' LIMIT 1").get();
+        } else if (method === 'transferencia') {
+          creditAcct = (bank_account_id ? acctByBankId(Number(bank_account_id)) : null)
+              || db.prepare("SELECT id FROM accounts WHERE code='1115' AND accepts_movements=1 LIMIT 1").get()
+              || db.prepare("SELECT id FROM accounts WHERE code='1115' LIMIT 1").get()
+              || db.prepare("SELECT id FROM accounts WHERE code LIKE '1.1.02%' AND accepts_movements=1 LIMIT 1").get()
+              || db.prepare("SELECT id FROM accounts WHERE subtype='BancoGrupo' LIMIT 1").get();
         } else if (method === 'cheque') {
-          creditAcct = db.prepare("SELECT id FROM accounts WHERE code='2.1.02'").get();
+          // Cheque emitido propio: acreditar cuenta de cheques diferidos/documentos a pagar
+          creditAcct = db.prepare("SELECT id FROM accounts WHERE code='21124' AND accepts_movements=1 LIMIT 1").get()
+              || db.prepare("SELECT id FROM accounts WHERE code='21124' LIMIT 1").get()
+              || db.prepare("SELECT id FROM accounts WHERE LOWER(name) LIKE '%cheque%difer%' AND accepts_movements=1 LIMIT 1").get()
+              || db.prepare("SELECT id FROM accounts WHERE code='1.1.03' AND accepts_movements=1 LIMIT 1").get()
+              || acctBySubtype('Cheques');
         }
+
         if (proveedores && creditAcct) {
-          recordJournal({ date: today, desc: desc, ref_type: 'supplier_payment', ref_id: paymentId,
-            lines: [{ account_id: proveedores.id, debit: amt, credit: 0 }, { account_id: creditAcct.id, debit: 0, credit: amt }],
+          recordJournal({ date: today, desc: jDesc, ref_type: 'supplier_payment', ref_id: paymentId,
+            lines: [
+              { account_id: proveedores.id, debit: amt,  credit: 0   },
+              { account_id: creditAcct.id,  debit: 0,    credit: amt },
+            ],
             userId: req.session.userId });
+        } else {
+          console.error('[SupPayment Journal] Cuentas no encontradas — proveedores:', !!proveedores, 'creditAcct:', !!creditAcct);
         }
       } catch(e) { console.error('Journal sup-payment error:', e.message); }
 

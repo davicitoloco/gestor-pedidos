@@ -3370,6 +3370,15 @@ function renderPurchaseDetailPayments(p) {
   const balEl = $('pur-detail-balance');
   balEl.textContent  = fmtMoney(balance);
   balEl.style.color  = balance <= 0 ? 'var(--success)' : 'var(--error)';
+
+  // Botón Orden de pago PDF: visible solo cuando hay pagos
+  const opBtn = $('btn-orden-pago-pdf');
+  if (payments.length) {
+    opBtn.href = `/api/purchases/${p.id}/orden-pago`;
+    opBtn.classList.remove('hidden');
+  } else {
+    opBtn.classList.add('hidden');
+  }
 }
 
 window.deletePurchasePayment = async function(id) {

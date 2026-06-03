@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
 const { acctBySubtype, recordJournal } = require('../lib/accounting');
+const PDFDocument = require('pdfkit');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -202,6 +203,128 @@ router.get('/:id/print', (req, res) => {
     </body></html>`;
     res.send(html);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/purchases/:id/orden-pago  — PDF orden de pago
+router.get('/:id/orden-pago', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const p = db.prepare(`
+      SELECT pu.*, printf('C-%04d', pu.purchase_sequence) AS purchase_number,
+             s.name AS supplier_name
+      FROM purchases pu JOIN suppliers s ON pu.supplier_id = s.id WHERE pu.id = ?
+    `).get(id);
+    if (!p) return res.status(404).json({ error: 'Comprobante no encontrado' });
+
+    const payments = db.prepare(`
+      SELECT sp.*, COALESCE(ba.name,'') AS bank_account_name
+      FROM supplier_payments sp
+      LEFT JOIN bank_accounts ba ON sp.bank_account_id = ba.id
+      WHERE sp.purchase_id = ? ORDER BY sp.created_at ASC
+    `).all(id);
+    if (!payments.length) return res.status(400).json({ error: 'Sin pagos registrados' });
+
+    const total_paid = payments.reduce((s, pmt) => s + pmt.amount, 0);
+    const balance    = p.total - total_paid;
+    const company    = db.prepare("SELECT value FROM settings WHERE key='company_name'").get()?.value || 'Candex';
+
+    const fmtMoney = v => '$ ' + (v || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtDate  = s => { if (!s) return '-'; const [y,m,d] = (s.split(' ')[0]).split('-'); return `${d}/${m}/${y}`; };
+    const opNum    = String(id).padStart(4, '0');
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, info: { Title: `OP-${opNum}` } });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="OP-${opNum}.pdf"`);
+    doc.pipe(res);
+
+    // ── Encabezado ───────────────────────────────────────────────────────────
+    const pageW = doc.page.width - 80; // usable width (margins 40 each side)
+    doc.fontSize(14).font('Helvetica-Bold').text(company, 40, 40, { continued: false });
+    doc.fontSize(16).font('Helvetica-Bold').text('ORDEN DE PAGO', 40, 40, { align: 'center', width: pageW });
+    doc.fontSize(10).font('Helvetica')
+      .text(`OP-${opNum}`, 40, 58, { align: 'right', width: pageW })
+      .text(`Fecha: ${fmtDate(new Date().toISOString())}`, 40, 70, { align: 'right', width: pageW });
+
+    doc.moveTo(40, 88).lineTo(555, 88).strokeColor('#888').lineWidth(0.5).stroke();
+
+    // ── Datos del comprobante ─────────────────────────────────────────────────
+    let y = 100;
+    const labelW = 110;
+    const row = (label, value) => {
+      doc.fontSize(10).font('Helvetica-Bold').text(label, 40, y, { width: labelW, continued: false });
+      doc.fontSize(10).font('Helvetica').text(String(value), 40 + labelW, y, { width: pageW - labelW });
+      y += 16;
+    };
+    row('Proveedor:',    p.supplier_name);
+    row('Comprobante:',  `${p.doc_type}${p.doc_number ? '  ' + p.doc_number : ''}`);
+    row('Fecha comp.:',  fmtDate(p.doc_date));
+    row('Total fact.:',  fmtMoney(p.total));
+
+    y += 10;
+    doc.moveTo(40, y).lineTo(555, y).strokeColor('#888').lineWidth(0.5).stroke();
+    y += 10;
+
+    // ── Tabla de pagos ───────────────────────────────────────────────────────
+    doc.fontSize(10).font('Helvetica-Bold').text('Pagos aplicados', 40, y);
+    y += 16;
+
+    const colX  = [40, 115, 185, 340, 460];
+    const colW  = [75,  70, 155, 120, 95];
+    const heads = ['Fecha', 'Método', 'Notas', 'Referencia', 'Monto'];
+
+    // Header row
+    doc.fillColor('#e8e8e8').rect(40, y, pageW, 16).fill();
+    doc.fillColor('#000');
+    heads.forEach((h, i) => {
+      const align = i === 4 ? 'right' : 'left';
+      doc.fontSize(9).font('Helvetica-Bold').text(h, colX[i], y + 3, { width: colW[i], align });
+    });
+    y += 16;
+
+    payments.forEach((pmt, idx) => {
+      if (idx % 2 === 1) { doc.fillColor('#f8f8f8').rect(40, y, pageW, 15).fill(); doc.fillColor('#000'); }
+      const metodoCap = pmt.method.charAt(0).toUpperCase() + pmt.method.slice(1);
+      const rowData   = [
+        fmtDate(pmt.payment_date || pmt.created_at),
+        metodoCap,
+        pmt.notes || '-',
+        pmt.reference || (pmt.bank_account_name || '-'),
+        fmtMoney(pmt.amount),
+      ];
+      rowData.forEach((v, i) => {
+        const align = i === 4 ? 'right' : 'left';
+        doc.fontSize(9).font('Helvetica').text(v, colX[i], y + 2, { width: colW[i], align });
+      });
+      y += 15;
+    });
+
+    // Línea de cierre de tabla
+    doc.moveTo(40, y).lineTo(555, y).strokeColor('#aaa').lineWidth(0.5).stroke();
+    y += 14;
+
+    // ── Totales ───────────────────────────────────────────────────────────────
+    const totalX = 370;
+    const amtX   = 460;
+    const totW   = 95;
+    const totRow = (label, value, bold) => {
+      doc.fontSize(10).font(bold ? 'Helvetica-Bold' : 'Helvetica')
+        .text(label, totalX, y, { width: 90, align: 'right' });
+      doc.fontSize(10).font(bold ? 'Helvetica-Bold' : 'Helvetica')
+        .text(value, amtX, y, { width: totW, align: 'right' });
+      y += 15;
+    };
+    totRow('Total pagado:', fmtMoney(total_paid), false);
+    totRow('Saldo pendiente:', fmtMoney(balance), true);
+
+    // ── Pie ───────────────────────────────────────────────────────────────────
+    y += 20;
+    doc.moveTo(40, y).lineTo(555, y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    y += 8;
+    doc.fontSize(8).fillColor('#666').font('Helvetica')
+      .text('Documento interno. Emitido por el sistema Candex.', 40, y, { align: 'center', width: pageW });
+
+    doc.end();
+  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
 module.exports = router;

@@ -1316,7 +1316,10 @@
           <!-- Payments section -->
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-weight:600">Pagos aplicados a este comprobante</span>
-            <button class="btn btn-primary btn-sm" id="btn-new-purchase-payment">+ Registrar pago</button>
+            <div style="display:flex;gap:8px">
+              <a id="btn-orden-pago-pdf" href="#" target="_blank" class="btn btn-secondary btn-sm hidden">Orden de pago PDF</a>
+              <button class="btn btn-primary btn-sm" id="btn-new-purchase-payment">+ Registrar pago</button>
+            </div>
           </div>
           <div class="table-wrap" style="margin-bottom:12px">
             <table class="table"><thead><tr>
