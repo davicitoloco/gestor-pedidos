@@ -38,11 +38,12 @@ router.post('/', requireAdmin, (req, res) => {
   try {
     const {
       customer_id, amount, method, reference, bank, bank_account_id, notes, payment_date,
-      cheque_bank, cheque_number, cheque_due_date, allocations
+      cheque_bank, cheque_number, cheque_due_date, cuit_librador, allocations
     } = req.body;
     if (!customer_id)                       return res.status(400).json({ error: 'Cliente requerido' });
     if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Monto inválido' });
     if (!VALID_METHODS.includes(method))    return res.status(400).json({ error: 'Método de pago inválido' });
+    if (!payment_date)                      return res.status(400).json({ error: 'La fecha de cobro es requerida' });
 
     const result = withTransaction(() => {
       const amt  = parseFloat(amount);
@@ -70,8 +71,10 @@ router.post('/', requireAdmin, (req, res) => {
 
       const sucursalId = getInsertSucursalId(req);
       const r = db.prepare(`
-        INSERT INTO payments (customer_id, amount, method, reference, bank, bank_account_id, cheque_id, notes, payment_date, created_by, sucursal_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO payments
+          (customer_id, amount, method, reference, bank, bank_account_id, cheque_id, notes,
+           payment_date, cuit_librador, fecha_vencimiento_cheque, created_by, sucursal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         cid, amt, method,
         reference || '',
@@ -80,6 +83,8 @@ router.post('/', requireAdmin, (req, res) => {
         chequeId,
         notes || '',
         payment_date || null,
+        (method === 'cheque' ? (cuit_librador || '') : ''),
+        (method === 'cheque' ? (cheque_due_date || null) : null),
         req.session.userId,
         sucursalId
       );
@@ -197,9 +202,11 @@ router.get('/:id/recibo', (req, res) => {
       y += 16;
     };
     row('Cliente:', pmt.customer_name);
-    if (pmt.customer_cuit) row('CUIT:', pmt.customer_cuit);
-    row('Fecha del pago:', fmtDate(pmt.payment_date || pmt.created_at));
+    if (pmt.customer_cuit) row('CUIT cliente:', pmt.customer_cuit);
+    row('Fecha de cobro:', fmtDate(pmt.payment_date || pmt.created_at));
     row('Método de pago:', metodoCap);
+    if (pmt.method === 'cheque' && pmt.cuit_librador)           row('CUIT librador:', pmt.cuit_librador);
+    if (pmt.method === 'cheque' && pmt.fecha_vencimiento_cheque) row('Vencimiento cheque:', fmtDate(pmt.fecha_vencimiento_cheque));
     if (pmt.notes) row('Notas:', pmt.notes);
 
     y += 8;

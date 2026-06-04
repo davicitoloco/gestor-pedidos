@@ -2187,9 +2187,10 @@ $('btn-new-payment').addEventListener('click', async () => {
   $('inp-payment-date').value      = new Date().toISOString().slice(0,10);
   $('inp-payment-reference').value = '';
   $('inp-payment-notes').value     = '';
-  $('inp-payment-cheque-bank').value   = '';
-  $('inp-payment-cheque-number').value = '';
-  $('inp-payment-cheque-due').value    = '';
+  $('inp-payment-cheque-bank').value    = '';
+  $('inp-payment-cheque-number').value  = '';
+  $('inp-payment-cheque-due').value     = '';
+  $('inp-payment-cuit-librador').value  = '';
   updatePaymentFields();
   await populateBankSelect($('inp-payment-bank-account'));
 
@@ -2265,6 +2266,9 @@ $('btn-payment-confirm').addEventListener('click', async () => {
     const amount = parseFloat($('inp-payment-amount').value);
     if (!amount || amount <= 0) { toast('Ingresá un monto válido', 'error'); btn.disabled = false; return; }
 
+    const payDate = $('inp-payment-date').value;
+    if (!payDate) { toast('La fecha de cobro es obligatoria', 'error'); btn.disabled = false; return; }
+
     // Validar total asignado vs monto del pago
     if (allocations.length) {
       const allocTotal = allocations.reduce((s, a) => s + a.amount, 0);
@@ -2278,7 +2282,7 @@ $('btn-payment-confirm').addEventListener('click', async () => {
       customer_id:  _accountCustomerId,
       amount,
       method,
-      payment_date: $('inp-payment-date').value || null,
+      payment_date: payDate,
       notes:        $('inp-payment-notes').value.trim(),
       reference:    $('inp-payment-reference').value.trim(),
       allocations:  allocations.length ? allocations : undefined,
@@ -2293,6 +2297,14 @@ $('btn-payment-confirm').addEventListener('click', async () => {
       payload.cheque_due_date = $('inp-payment-cheque-due').value;
       if (!payload.cheque_bank || !payload.cheque_number || !payload.cheque_due_date) {
         toast('Completá los datos del cheque', 'error'); btn.disabled = false; return;
+      }
+      const cuit = $('inp-payment-cuit-librador').value.trim();
+      if (cuit) {
+        const cuitClean = cuit.replace(/-/g, '');
+        if (!/^\d{11}$/.test(cuitClean)) {
+          toast('CUIT inválido — usá el formato XX-XXXXXXXX-X o 11 dígitos', 'error'); btn.disabled = false; return;
+        }
+        payload.cuit_librador = cuit;
       }
     }
     await api('POST', '/payments', payload);

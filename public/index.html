@@ -2361,8 +2361,8 @@
           <input type="number" id="inp-payment-amount" class="input" min="0.01" step="0.01" placeholder="0.00">
         </div>
         <div class="field">
-          <label class="label">Fecha del pago</label>
-          <input type="date" id="inp-payment-date" class="input">
+          <label class="label required">Fecha de cobro</label>
+          <input type="date" id="inp-payment-date" class="input" required>
         </div>
       </div>
       <!-- Transferencia / Tarjeta: bank account select -->
@@ -2384,9 +2384,15 @@
             <input type="text" id="inp-payment-cheque-number" class="input">
           </div>
         </div>
-        <div class="field" style="margin-top:8px">
-          <label class="label required">Fecha de vencimiento</label>
-          <input type="date" id="inp-payment-cheque-due" class="input">
+        <div class="form-grid-2" style="margin-top:8px">
+          <div class="field">
+            <label class="label required">Fecha de vencimiento</label>
+            <input type="date" id="inp-payment-cheque-due" class="input">
+          </div>
+          <div class="field">
+            <label class="label">CUIT del librador</label>
+            <input type="text" id="inp-payment-cuit-librador" class="input" placeholder="20-12345678-9" maxlength="13">
+          </div>
         </div>
       </div>
       <!-- Otros: reference field -->
