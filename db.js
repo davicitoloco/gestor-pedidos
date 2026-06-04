@@ -383,6 +383,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS supplier_visibility (
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   PRIMARY KEY (supplier_id, user_id)
 )`);
+db.exec(`CREATE TABLE IF NOT EXISTS payment_remito_allocations (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  remito_id  INTEGER NOT NULL REFERENCES remitos(id),
+  amount     REAL NOT NULL
+)`);
 db.exec(`CREATE TABLE IF NOT EXISTS mp_receipts (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   mp_order_id         INTEGER NOT NULL REFERENCES mp_orders(id) ON DELETE CASCADE,

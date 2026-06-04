@@ -2095,6 +2095,11 @@ async function loadAccount() {
           <td><span class="badge badge-info">${methodLabel[p.method] || p.method}</span></td>
           <td style="color:var(--text-muted);font-size:.85rem">${esc(detail || '—')}</td>
           <td class="text-right" style="font-weight:600;color:var(--success-txt)">${fmtMoney(p.amount)}</td>
+          <td class="text-center">
+            <a href="/api/payments/${p.id}/recibo" target="_blank" class="btn-icon" title="Recibo PDF">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </a>
+          </td>
           <td class="text-center admin-only">
             <button class="btn-icon btn-delete" onclick="deletePayment(${p.id})" title="Eliminar pago">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
@@ -2156,43 +2161,136 @@ function updatePaymentFields() {
 }
 $('inp-payment-method').addEventListener('change', updatePaymentFields);
 
-$('btn-new-payment').addEventListener('click', () => {
+function paymentAllocTotal() {
+  let t = 0;
+  document.querySelectorAll('.payment-alloc-row').forEach(row => {
+    if (row.querySelector('.payment-alloc-chk').checked)
+      t += parseFloat(row.querySelector('.payment-alloc-amt').value) || 0;
+  });
+  return Math.round(t * 100) / 100;
+}
+function updatePaymentAllocTotal() {
+  const t = paymentAllocTotal();
+  $('payment-alloc-total').textContent = fmtMoney(t);
+  if (t > 0 && !$('inp-payment-amount').dataset.manual)
+    $('inp-payment-amount').value = t.toFixed(2);
+}
+
+$('inp-payment-amount').addEventListener('input', () => {
+  $('inp-payment-amount').dataset.manual = '1';
+});
+
+$('btn-new-payment').addEventListener('click', async () => {
   $('inp-payment-method').value    = 'efectivo';
   $('inp-payment-amount').value    = '';
-  $('inp-payment-date').value      = '';
+  delete $('inp-payment-amount').dataset.manual;
+  $('inp-payment-date').value      = new Date().toISOString().slice(0,10);
   $('inp-payment-reference').value = '';
   $('inp-payment-notes').value     = '';
   $('inp-payment-cheque-bank').value   = '';
   $('inp-payment-cheque-number').value = '';
   $('inp-payment-cheque-due').value    = '';
   updatePaymentFields();
-  populateBankSelect($('inp-payment-bank-account'));
+  await populateBankSelect($('inp-payment-bank-account'));
+
+  // Cargar remitos pendientes
+  const remitosSection = $('payment-remitos-section');
+  if (_accountCustomerId) {
+    try {
+      const pending = await api('GET', `/customers/${_accountCustomerId}/pending-remitos`);
+      if (pending.length) {
+        $('payment-remitos-list').innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+            <thead>
+              <tr style="background:var(--bg-secondary);position:sticky;top:0">
+                <th style="padding:6px 8px;text-align:center;width:32px"></th>
+                <th style="padding:6px 8px;text-align:left">Remito</th>
+                <th style="padding:6px 8px;text-align:left">Pedido / Fecha</th>
+                <th style="padding:6px 8px;text-align:right">Saldo</th>
+                <th style="padding:6px 8px;text-align:right;width:120px">Asignar ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pending.map(r => `
+                <tr class="payment-alloc-row" data-id="${r.id}" data-balance="${r.balance}">
+                  <td style="padding:5px 8px;text-align:center">
+                    <input type="checkbox" class="payment-alloc-chk">
+                  </td>
+                  <td style="padding:5px 8px;font-weight:600">${esc(r.remito_number)}</td>
+                  <td style="padding:5px 8px;color:var(--text-muted)">${esc(r.order_number)}<br><small>${fmtDate(r.created_at)}</small></td>
+                  <td style="padding:5px 8px;text-align:right">${fmtMoney(r.balance)}</td>
+                  <td style="padding:5px 8px">
+                    <input type="number" class="input payment-alloc-amt" value="${r.balance.toFixed(2)}"
+                      min="0.01" max="${r.balance.toFixed(2)}" step="0.01"
+                      style="width:100%;padding:3px 6px;font-size:.82rem" disabled>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+        $('payment-alloc-total').textContent = fmtMoney(0);
+        $('payment-remitos-list').querySelectorAll('.payment-alloc-row').forEach(row => {
+          const chk = row.querySelector('.payment-alloc-chk');
+          const amt = row.querySelector('.payment-alloc-amt');
+          chk.addEventListener('change', () => { amt.disabled = !chk.checked; updatePaymentAllocTotal(); });
+          amt.addEventListener('input', () => { delete $('inp-payment-amount').dataset.manual; updatePaymentAllocTotal(); });
+        });
+        remitosSection.classList.remove('hidden');
+      } else {
+        remitosSection.classList.add('hidden');
+      }
+    } catch(e) { remitosSection.classList.add('hidden'); }
+  } else {
+    remitosSection.classList.add('hidden');
+  }
+
   $('payment-modal').classList.remove('hidden');
 });
 $('btn-payment-cancel').addEventListener('click', () => $('payment-modal').classList.add('hidden'));
 $('payment-modal').addEventListener('click', e => { if (e.target === $('payment-modal')) $('payment-modal').classList.add('hidden'); });
 
 $('btn-payment-confirm').addEventListener('click', async () => {
-  const btn  = $('btn-payment-confirm');
+  const btn    = $('btn-payment-confirm');
   const method = $('inp-payment-method').value;
   btn.disabled = true;
   try {
+    // Recoger asignaciones a remitos
+    const allocations = [];
+    document.querySelectorAll('.payment-alloc-row').forEach(row => {
+      if (row.querySelector('.payment-alloc-chk').checked) {
+        const amt = parseFloat(row.querySelector('.payment-alloc-amt').value);
+        if (amt > 0) allocations.push({ remito_id: Number(row.dataset.id), amount: amt });
+      }
+    });
+
+    const amount = parseFloat($('inp-payment-amount').value);
+    if (!amount || amount <= 0) { toast('Ingresá un monto válido', 'error'); btn.disabled = false; return; }
+
+    // Validar total asignado vs monto del pago
+    if (allocations.length) {
+      const allocTotal = allocations.reduce((s, a) => s + a.amount, 0);
+      if (Math.abs(allocTotal - amount) > 0.02) {
+        toast(`El total asignado (${fmtMoney(allocTotal)}) no coincide con el monto del pago (${fmtMoney(amount)})`, 'error');
+        btn.disabled = false; return;
+      }
+    }
+
     const payload = {
       customer_id:  _accountCustomerId,
-      amount:       parseFloat($('inp-payment-amount').value),
+      amount,
       method,
       payment_date: $('inp-payment-date').value || null,
       notes:        $('inp-payment-notes').value.trim(),
       reference:    $('inp-payment-reference').value.trim(),
+      allocations:  allocations.length ? allocations : undefined,
     };
     if (['transferencia','tarjeta'].includes(method)) {
       payload.bank_account_id = $('inp-payment-bank-account').value;
       if (!payload.bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); btn.disabled = false; return; }
     }
     if (method === 'cheque') {
-      payload.cheque_bank    = $('inp-payment-cheque-bank').value.trim();
-      payload.cheque_number  = $('inp-payment-cheque-number').value.trim();
-      payload.cheque_due_date= $('inp-payment-cheque-due').value;
+      payload.cheque_bank     = $('inp-payment-cheque-bank').value.trim();
+      payload.cheque_number   = $('inp-payment-cheque-number').value.trim();
+      payload.cheque_due_date = $('inp-payment-cheque-due').value;
       if (!payload.cheque_bank || !payload.cheque_number || !payload.cheque_due_date) {
         toast('Completá los datos del cheque', 'error'); btn.disabled = false; return;
       }

@@ -543,6 +543,7 @@
               <th style="width:140px">Método</th>
               <th>Detalle</th>
               <th class="text-right" style="width:140px">Monto</th>
+              <th style="width:60px" class="text-center">Recibo</th>
               <th style="width:50px" class="text-center admin-only"></th>
             </tr></thead><tbody id="account-payments-tbody"></tbody></table>
             <div id="no-account-payments" class="empty-state hidden"><p>Sin pagos registrados</p></div>
@@ -2328,9 +2329,22 @@
 
 <!-- ===================================================== MODAL: Registrar Pago -->
 <div id="payment-modal" class="modal-overlay hidden">
-  <div class="modal" style="max-width:460px">
+  <div class="modal" style="max-width:580px;width:95%">
     <div class="modal-header">Registrar pago</div>
     <div class="modal-form-body">
+
+      <!-- Remitos pendientes -->
+      <div id="payment-remitos-section" class="hidden" style="margin-bottom:16px">
+        <div style="font-weight:600;font-size:.9rem;margin-bottom:6px">Remitos pendientes</div>
+        <div id="payment-remitos-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          <!-- generado dinámicamente -->
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:.82rem;color:var(--text-muted)">
+          <span>Dejá sin marcar para registrar pago a cuenta</span>
+          <span>Total asignado: <strong id="payment-alloc-total">$ 0,00</strong></span>
+        </div>
+      </div>
+
       <div class="field">
         <label class="label required">Método de pago</label>
         <select id="inp-payment-method" class="input select">

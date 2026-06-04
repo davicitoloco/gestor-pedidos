@@ -88,6 +88,28 @@ router.get('/:id/account', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/customers/:id/pending-remitos — remitos con saldo > 0
+router.get('/:id/pending-remitos', (req, res) => {
+  try {
+    const cid = Number(req.params.id);
+    const rows = db.prepare(`
+      SELECT r.id, r.remito_sequence, r.order_id, r.total, r.created_at,
+             printf('R-%03d', r.remito_sequence)  AS remito_number,
+             printf('#%03d', o.order_sequence)    AS order_number,
+             COALESCE(SUM(pra.amount), 0)         AS total_paid,
+             r.total - COALESCE(SUM(pra.amount), 0) AS balance
+      FROM remitos r
+      JOIN orders o ON r.order_id = o.id
+      LEFT JOIN payment_remito_allocations pra ON pra.remito_id = r.id
+      WHERE r.customer_id = ?
+      GROUP BY r.id
+      HAVING balance > 0.005
+      ORDER BY r.created_at ASC
+    `).all(cid);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/customers
 router.post('/', (req, res) => {
   try {
