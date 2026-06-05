@@ -353,8 +353,9 @@ addColIfMissing('cheques',           'deposited_to',    'INTEGER REFERENCES bank
 addColIfMissing('supplier_payments', 'purchase_id',     'INTEGER REFERENCES purchases(id)');
 addColIfMissing('journal_entries',    'reference',        "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('journal_entry_lines','line_description', "TEXT NOT NULL DEFAULT ''");
-addColIfMissing('payments', 'cuit_librador',          "TEXT NOT NULL DEFAULT ''");
-addColIfMissing('payments', 'fecha_vencimiento_cheque', "TEXT");
+addColIfMissing('payments',   'cuit_librador',            "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('payments',   'fecha_vencimiento_cheque', "TEXT");
+addColIfMissing('purchases',  'iva_condition',            "TEXT NOT NULL DEFAULT ''"  );
 addColIfMissing('stock_movements',    'previous_qty',     'REAL');
 addColIfMissing('stock_movements',    'new_qty',          'REAL');
 addColIfMissing('orders',  'iva_exempt',        'INTEGER NOT NULL DEFAULT 0');

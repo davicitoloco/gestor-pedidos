@@ -14,7 +14,12 @@ function requireAdmin(req, res, next) {
 }
 router.use(requireAuth, requireAdmin);
 
-const DOC_TYPES = ['Factura A', 'Factura B', 'Factura C', 'Remito', 'Nota de Crédito', 'Otros'];
+const DOC_TYPES = [
+  'Factura A', 'Factura B', 'Factura C',
+  'Nota de Débito A', 'Nota de Débito B',
+  'Nota de Crédito A', 'Nota de Crédito B',
+  'Nota de Crédito', 'Remito', 'Otros',
+];
 
 // GET /api/purchases
 router.get('/', (req, res) => {
@@ -64,7 +69,7 @@ router.get('/:id', (req, res) => {
 // POST /api/purchases
 router.post('/', (req, res) => {
   try {
-    const { supplier_id, doc_type, doc_number, doc_date, notes, items } = req.body;
+    const { supplier_id, doc_type, doc_number, doc_date, notes, iva_condition, items } = req.body;
     if (!supplier_id)                        return res.status(400).json({ error: 'Proveedor requerido' });
     if (!db.prepare('SELECT id FROM suppliers WHERE id = ?').get(Number(supplier_id)))
       return res.status(404).json({ error: 'Proveedor no encontrado' });
@@ -85,9 +90,9 @@ router.post('/', (req, res) => {
     const result = withTransaction(() => {
       const { nextSeq } = db.prepare('SELECT COALESCE(MAX(purchase_sequence),0)+1 AS nextSeq FROM purchases').get();
       const r = db.prepare(`
-        INSERT INTO purchases (purchase_sequence, supplier_id, doc_type, doc_number, doc_date, total, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(nextSeq, Number(supplier_id), doc_type||'Factura B', doc_number||'', doc_date||null, total, notes||'', req.session.userId);
+        INSERT INTO purchases (purchase_sequence, supplier_id, doc_type, doc_number, doc_date, total, notes, iva_condition, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(nextSeq, Number(supplier_id), doc_type||'Factura B', doc_number||'', doc_date||null, total, notes||'', iva_condition||'', req.session.userId);
 
       const purchaseId = Number(r.lastInsertRowid);
       const insItem = db.prepare('INSERT INTO purchase_items (purchase_id, product_id, product_name, quantity, unit_price) VALUES (?,?,?,?,?)');
@@ -195,7 +200,7 @@ router.get('/:id/print', (req, res) => {
       </div>
       <div class="info"><b>Proveedor:</b> ${p.supplier_name}</div>
       ${p.supplier_cuit ? `<div class="info"><b>CUIT:</b> ${p.supplier_cuit}</div>` : ''}
-      <div class="info"><b>Condición IVA:</b> ${p.supplier_iva}</div>
+      <div class="info"><b>Condición IVA:</b> ${p.iva_condition || p.supplier_iva || '—'}</div>
       <table><thead><tr><th>Producto</th><th>Cantidad</th><th>Precio Unit.</th><th>Subtotal</th></tr></thead>
       <tbody>${rows}</tbody></table>
       <div class="total">Total: $${p.total.toFixed(2)}</div>

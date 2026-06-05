@@ -1261,16 +1261,40 @@
                 </select>
               </div>
               <div class="field">
-                <label class="label">Tipo de comprobante</label>
-                <select id="inp-pur-doctype" class="input select">
-                  <option>Factura A</option><option selected>Factura B</option>
-                  <option>Factura C</option><option>Remito</option>
-                  <option>Nota de Crédito</option><option>Otros</option>
+                <label class="label">Condición IVA</label>
+                <select id="inp-pur-iva-condition" class="input select">
+                  <option value="">— Sin especificar —</option>
+                  <option>Responsable Inscripto</option>
+                  <option>Consumidor Final</option>
+                  <option>No Alcanzado</option>
+                  <option>Monotributo</option>
+                  <option>Sujeto Exento</option>
                 </select>
               </div>
               <div class="field">
+                <label class="label">Tipo de comprobante</label>
+                <select id="inp-pur-doctype" class="input select">
+                  <option>Factura A</option><option selected>Factura B</option>
+                  <option>Factura C</option>
+                  <option>Nota de Débito A</option><option>Nota de Débito B</option>
+                  <option>Nota de Crédito A</option><option>Nota de Crédito B</option>
+                  <option>Nota de Crédito</option><option>Remito</option><option>Otros</option>
+                </select>
+              </div>
+              <!-- Nº de documento: prefijo + número separados -->
+              <div class="field">
                 <label class="label">Nº de documento</label>
-                <input type="text" id="inp-pur-docnum" class="input" placeholder="0001-00001234">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input type="text" id="inp-pur-docprefix" class="input"
+                    placeholder="00001" maxlength="5"
+                    style="width:80px;text-align:center;font-variant-numeric:tabular-nums"
+                    pattern="\d{1,5}" inputmode="numeric">
+                  <span style="font-weight:700;color:var(--text-muted)">—</span>
+                  <input type="text" id="inp-pur-docseq" class="input"
+                    placeholder="00000001" maxlength="8"
+                    style="flex:1;font-variant-numeric:tabular-nums"
+                    pattern="\d{1,8}" inputmode="numeric">
+                </div>
               </div>
               <div class="field">
                 <label class="label">Fecha del documento</label>

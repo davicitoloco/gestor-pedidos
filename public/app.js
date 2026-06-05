@@ -3558,7 +3558,7 @@ window.openPurchaseDetail = async function(id) {
   try {
     const p = await api('GET', `/purchases/${id}`);
     $('pur-detail-title').textContent = p.purchase_number;
-    $('pur-detail-subtitle').textContent = `${p.supplier_name} — ${p.doc_type}${p.doc_number ? ' ' + p.doc_number : ''} ${p.doc_date ? '| ' + fmtDate(p.doc_date) : ''}`;
+    $('pur-detail-subtitle').textContent = `${p.supplier_name} — ${p.doc_type}${p.doc_number ? ' ' + p.doc_number : ''} ${p.doc_date ? '| ' + fmtDate(p.doc_date) : ''}${p.iva_condition ? ' | ' + p.iva_condition : ''}`;
     $('pur-detail-print-link').href = `/api/purchases/${id}/print`;
     $('pur-detail-total').textContent = fmtMoney(p.total);
 
@@ -3618,14 +3618,25 @@ $('btn-new-purchase').addEventListener('click', async () => {
   purchaseItems = [];
   renderPurchaseItems();
   addPurchaseItemRow();
-  // populate supplier select
+  // Limpiar campos nuevos
+  $('inp-pur-docprefix').value      = '';
+  $('inp-pur-docseq').value         = '';
+  $('inp-pur-iva-condition').value  = '';
+  // populate supplier select con datos de condición IVA
   try {
     const suppliers = await api('GET', '/suppliers');
     $('inp-pur-supplier').innerHTML = '<option value="">— Seleccioná —</option>' +
-      suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      suppliers.map(s => `<option value="${s.id}" data-iva="${esc(s.iva_condition||'')}">${esc(s.name)}</option>`).join('');
   } catch(e) {}
   $('inp-pur-docdate').value = new Date().toISOString().slice(0,10);
   showComprobantesSubview('form');
+});
+
+// Auto-completar condición IVA al seleccionar proveedor
+$('inp-pur-supplier').addEventListener('change', () => {
+  const opt = $('inp-pur-supplier').selectedOptions[0];
+  const iva = opt?.dataset?.iva || '';
+  if (iva) $('inp-pur-iva-condition').value = iva;
 });
 $('btn-back-purchases').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
 $('btn-pur-form-cancel').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
@@ -3709,12 +3720,18 @@ $('purchase-form').addEventListener('submit', async e => {
   const btn = e.submitter;
   btn.disabled = true;
   try {
+    // Construir doc_number desde prefijo + número
+    const prefix = $('inp-pur-docprefix').value.trim();
+    const seq    = $('inp-pur-docseq').value.trim();
+    const doc_number = prefix && seq ? `${prefix}-${seq}` : (prefix || seq || '');
+
     await api('POST', '/purchases', {
       supplier_id,
-      doc_type:   $('inp-pur-doctype').value,
-      doc_number: $('inp-pur-docnum').value.trim(),
-      doc_date:   $('inp-pur-docdate').value || null,
-      notes:      $('inp-pur-notes').value.trim(),
+      doc_type:      $('inp-pur-doctype').value,
+      doc_number,
+      doc_date:      $('inp-pur-docdate').value || null,
+      notes:         $('inp-pur-notes').value.trim(),
+      iva_condition: $('inp-pur-iva-condition').value || '',
       items: purchaseItems.filter(it => it.name.trim()).map(it => ({
         product_name: it.name.trim(),
         quantity:     parseFloat(it.qty)  || 0,
