@@ -3622,6 +3622,7 @@ $('btn-new-purchase').addEventListener('click', async () => {
   $('inp-pur-docprefix').value      = '';
   $('inp-pur-docseq').value         = '';
   $('inp-pur-iva-condition').value  = '';
+  $('inp-pur-iva-pct').value        = '21';
   // populate supplier select con datos de condición IVA
   try {
     const suppliers = await api('GET', '/suppliers');
@@ -3706,11 +3707,18 @@ function addPurchaseItemRow() {
 }
 
 function updatePurchaseTotal() {
-  const total = purchaseItems.reduce((s, it) => s + (parseFloat(it.qty)||0)*(parseFloat(it.price)||0), 0);
-  $('purchase-total-display').textContent = total.toFixed(2);
+  const sub    = purchaseItems.reduce((s, it) => s + (parseFloat(it.qty)||0)*(parseFloat(it.price)||0), 0);
+  const ivaPct = parseFloat($('inp-pur-iva-pct')?.value) || 0;
+  const ivaAmt = Math.round(sub * ivaPct / 100 * 100) / 100;
+  const total  = Math.round((sub + ivaAmt) * 100) / 100;
+  const fmt    = v => '$ ' + v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  $('pur-display-subtotal').textContent = fmt(sub);
+  $('pur-display-iva').textContent      = fmt(ivaAmt);
+  $('pur-display-total').textContent    = fmt(total);
 }
 
 $('btn-add-purchase-item').addEventListener('click', addPurchaseItemRow);
+$('inp-pur-iva-pct').addEventListener('change', updatePurchaseTotal);
 
 $('purchase-form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -3732,6 +3740,7 @@ $('purchase-form').addEventListener('submit', async e => {
       doc_date:      $('inp-pur-docdate').value || null,
       notes:         $('inp-pur-notes').value.trim(),
       iva_condition: $('inp-pur-iva-condition').value || '',
+      iva_percent:   parseFloat($('inp-pur-iva-pct').value) || 0,
       items: purchaseItems.filter(it => it.name.trim()).map(it => ({
         product_name: it.name.trim(),
         quantity:     parseFloat(it.qty)  || 0,

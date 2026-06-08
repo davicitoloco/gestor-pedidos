@@ -355,7 +355,10 @@ addColIfMissing('journal_entries',    'reference',        "TEXT NOT NULL DEFAULT
 addColIfMissing('journal_entry_lines','line_description', "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('payments',   'cuit_librador',            "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('payments',   'fecha_vencimiento_cheque', "TEXT");
-addColIfMissing('purchases',  'iva_condition',            "TEXT NOT NULL DEFAULT ''"  );
+addColIfMissing('purchases',  'iva_condition',             "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('purchases',  'subtotal_neto',             'REAL NOT NULL DEFAULT 0');
+addColIfMissing('purchases',  'iva_percent',               'REAL NOT NULL DEFAULT 0');
+addColIfMissing('purchases',  'iva_monto',                 'REAL NOT NULL DEFAULT 0');
 addColIfMissing('stock_movements',    'previous_qty',     'REAL');
 addColIfMissing('stock_movements',    'new_qty',          'REAL');
 addColIfMissing('orders',  'iva_exempt',        'INTEGER NOT NULL DEFAULT 0');

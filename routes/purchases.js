@@ -69,7 +69,7 @@ router.get('/:id', (req, res) => {
 // POST /api/purchases
 router.post('/', (req, res) => {
   try {
-    const { supplier_id, doc_type, doc_number, doc_date, notes, iva_condition, items } = req.body;
+    const { supplier_id, doc_type, doc_number, doc_date, notes, iva_condition, iva_percent, items } = req.body;
     if (!supplier_id)                        return res.status(400).json({ error: 'Proveedor requerido' });
     if (!db.prepare('SELECT id FROM suppliers WHERE id = ?').get(Number(supplier_id)))
       return res.status(404).json({ error: 'Proveedor no encontrado' });
@@ -85,14 +85,22 @@ router.post('/', (req, res) => {
       return { product_name: it.product_name.trim(), product_id: it.product_id || null, quantity: qty, unit_price: price };
     });
 
-    const total = parsedItems.reduce((s, it) => s + it.quantity * it.unit_price, 0);
+    const subtotalNeto = Math.round(parsedItems.reduce((s, it) => s + it.quantity * it.unit_price, 0) * 100) / 100;
+    const ivaPct       = parseFloat(iva_percent) || 0;
+    const ivaMonto     = Math.round(subtotalNeto * ivaPct / 100 * 100) / 100;
+    const total        = Math.round((subtotalNeto + ivaMonto) * 100) / 100;
 
     const result = withTransaction(() => {
       const { nextSeq } = db.prepare('SELECT COALESCE(MAX(purchase_sequence),0)+1 AS nextSeq FROM purchases').get();
       const r = db.prepare(`
-        INSERT INTO purchases (purchase_sequence, supplier_id, doc_type, doc_number, doc_date, total, notes, iva_condition, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(nextSeq, Number(supplier_id), doc_type||'Factura B', doc_number||'', doc_date||null, total, notes||'', iva_condition||'', req.session.userId);
+        INSERT INTO purchases
+          (purchase_sequence, supplier_id, doc_type, doc_number, doc_date,
+           total, subtotal_neto, iva_percent, iva_monto, notes, iva_condition, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        nextSeq, Number(supplier_id), doc_type||'Factura B', doc_number||'', doc_date||null,
+        total, subtotalNeto, ivaPct, ivaMonto, notes||'', iva_condition||'', req.session.userId
+      );
 
       const purchaseId = Number(r.lastInsertRowid);
       const insItem = db.prepare('INSERT INTO purchase_items (purchase_id, product_id, product_name, quantity, unit_price) VALUES (?,?,?,?,?)');

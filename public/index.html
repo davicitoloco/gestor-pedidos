@@ -1308,7 +1308,31 @@
             <div style="font-weight:600;margin-bottom:8px">Ítems</div>
             <div id="purchase-items-container"></div>
             <button type="button" class="btn btn-ghost btn-sm" id="btn-add-purchase-item" style="margin-top:8px">+ Agregar ítem</button>
-            <div style="margin-top:16px;text-align:right;font-size:16px;font-weight:700">Total: $<span id="purchase-total-display">0.00</span></div>
+
+            <!-- Subtotal / IVA / Total -->
+            <div style="margin-top:16px;background:var(--bg-secondary,#f8fafc);border:1px solid var(--border,#e2e8f0);border-radius:6px;padding:12px 16px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span style="color:var(--text-muted);font-size:.9rem">Subtotal (neto)</span>
+                <span id="pur-display-subtotal" style="font-variant-numeric:tabular-nums">$ 0,00</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="color:var(--text-muted);font-size:.9rem">IVA</span>
+                  <select id="inp-pur-iva-pct" class="input select" style="padding:3px 8px;font-size:.85rem;width:auto">
+                    <option value="0">Exento (0%)</option>
+                    <option value="10.5">10.5%</option>
+                    <option value="21" selected>21%</option>
+                    <option value="27">27%</option>
+                  </select>
+                </div>
+                <span id="pur-display-iva" style="font-variant-numeric:tabular-nums">$ 0,00</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border,#e2e8f0);padding-top:8px;margin-top:4px">
+                <span style="font-size:1rem;font-weight:700">Total</span>
+                <span id="pur-display-total" style="font-size:1.1rem;font-weight:700;font-variant-numeric:tabular-nums">$ 0,00</span>
+              </div>
+            </div>
+
             <div class="form-actions" style="margin-top:20px">
               <button type="button" class="btn btn-ghost" id="btn-pur-form-cancel">Cancelar</button>
               <button type="submit" class="btn btn-primary">Confirmar compra</button>
