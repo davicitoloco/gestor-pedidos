@@ -456,7 +456,47 @@ db.exec(`
     created_by  INTEGER REFERENCES users(id),
     created_at  TEXT DEFAULT (datetime('now','localtime'))
   );
+  CREATE TABLE IF NOT EXISTS prod_chapa (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    categoria  INTEGER NOT NULL UNIQUE,
+    kilos      REAL NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_chapa_movs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo        TEXT NOT NULL DEFAULT 'ingreso_chapa',
+    categoria   INTEGER NOT NULL,
+    cantidad    REAL NOT NULL DEFAULT 0,
+    notas       TEXT NOT NULL DEFAULT '',
+    mp_order_id INTEGER REFERENCES mp_orders(id),
+    purchase_id INTEGER REFERENCES purchases(id),
+    created_by  INTEGER REFERENCES users(id),
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+  );
 `);
+
+// ── Migraciones producción ────────────────────────────────────
+// Nuevas columnas en prod_mp_proceso (circuito completo)
+['cajas_pulidas','cajas_sincadas','tapas_pulidas','tapas_sincadas',
+ 'cremalleras_pulidas','cremalleras_sincadas','combinaciones_pulidas','combinaciones_sincadas',
+ 'contrafrentes_pulidos','contrafrentes_sincados'].forEach(col =>
+  addColIfMissing('prod_mp_proceso', col, 'REAL NOT NULL DEFAULT 0')
+);
+// Nuevas columnas en prod_movimientos
+addColIfMissing('prod_movimientos', 'pieza',     "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('prod_movimientos', 'cantidad',  'REAL NOT NULL DEFAULT 0');
+addColIfMissing('prod_movimientos', 'kg_usados', 'REAL NOT NULL DEFAULT 0');
+addColIfMissing('prod_movimientos', 'categoria', 'INTEGER');
+
+// Seed prod_chapa con las 9 categorías
+{
+  const cnt = db.prepare('SELECT COUNT(*) AS c FROM prod_chapa').get().c;
+  if (cnt === 0) {
+    const ins = db.prepare('INSERT INTO prod_chapa (categoria) VALUES (?)');
+    for (let i = 1; i <= 9; i++) ins.run(i);
+  }
+}
 
 // Seed sucursales
 {

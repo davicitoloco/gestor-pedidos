@@ -258,6 +258,23 @@ router.put('/:id/estado', (req, res) => {
             console.error(`[MP Journal] Error al generar asiento para comprobante ${purchaseId}:`, e.message);
           }
         }
+
+        // Auto-importar kg de chapa al módulo de producción
+        try {
+          const items = db.prepare('SELECT seccion, cantidad, unidad FROM mp_order_items WHERE mp_order_id=?').all(id);
+          const kgBySec = {};
+          for (const it of items) {
+            if ((it.unidad || 'kg').toLowerCase() === 'kg' && it.cantidad > 0)
+              kgBySec[it.seccion] = (kgBySec[it.seccion] || 0) + it.cantidad;
+          }
+          for (const [sec, kg] of Object.entries(kgBySec)) {
+            db.prepare('INSERT INTO prod_chapa (categoria,kilos) VALUES (?,0) ON CONFLICT(categoria) DO NOTHING').run(Number(sec));
+            db.prepare("UPDATE prod_chapa SET kilos=kilos+?,updated_at=datetime('now','localtime') WHERE categoria=?").run(kg, Number(sec));
+            db.prepare("INSERT INTO prod_chapa_movs (tipo,categoria,cantidad,notas,mp_order_id,created_by) VALUES ('ingreso_chapa',?,?,?,?,?)").run(Number(sec), kg, `Auto-importado desde Pedido MP #${id}`, id, req.session.userId);
+          }
+        } catch (e) {
+          console.error('[Producción] Error al actualizar chapa desde Pedido MP:', e.message);
+        }
       }
     });
 

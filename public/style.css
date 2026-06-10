@@ -298,6 +298,7 @@ tr.stock-critical td { background:#fff1f2 }
 .prod-row-verde      {background:#e8f5e9!important}.prod-row-verde:hover      {background:#c8e6c9!important}
 .prod-row-verde-int  {background:#c8e6c9!important}.prod-row-verde-int:hover  {background:#a5d6a7!important}
 .prod-row-celeste    {background:#e1f5fe!important}.prod-row-celeste:hover    {background:#b3e5fc!important}
+.prod-section-header{display:flex;align-items:center;justify-content:space-between;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:14px 0 8px;border-bottom:2px solid var(--border);margin-bottom:14px}
 .prod-obs-cell{cursor:pointer;min-width:140px}
 .prod-obs-cell:hover{background:rgba(0,0,0,.04)}
 .prod-obs-input{width:100%;padding:4px 6px;border:1.5px solid var(--primary);border-radius:4px;font-size:.85rem;font-family:inherit}
