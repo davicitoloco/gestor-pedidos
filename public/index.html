@@ -81,6 +81,10 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4a1 1 0 011 1v10a1 1 0 01-1 1H8a1 1 0 01-1-1v-4"/><line x1="7" y1="11" x2="13" y2="11"/><line x1="7" y1="15" x2="10" y2="15"/></svg>
         Pedidos MP
       </a>
+      <a class="nav-item admin-only" data-section="produccion" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        Producción
+      </a>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-user">
@@ -1949,6 +1953,144 @@
 
     </div><!-- /section-contable -->
 
+    <!-- ======================== SECCIÓN: PRODUCCIÓN -->
+    <div id="section-produccion" class="app-section hidden">
+
+      <div class="compras-tabs">
+        <button class="prod-tab active" data-prod-tab="cruda">MP Sin Procesar</button>
+        <button class="prod-tab" data-prod-tab="proceso">MP En Proceso</button>
+        <button class="prod-tab" data-prod-tab="terminadas">Terminadas</button>
+        <button class="prod-tab" data-prod-tab="historial">Historial</button>
+      </div>
+
+      <!-- ── TAB: MP Sin Procesar ── -->
+      <div id="prod-tab-cruda">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Materia Prima Sin Procesar</h2>
+            <p class="page-subtitle">Stock de componentes crudos por artículo</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-prod-refresh-cruda">Actualizar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-prod-aj-cruda">Ajuste manual</button>
+          </div>
+        </div>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table class="table">
+            <thead><tr>
+              <th>Artículo</th>
+              <th class="text-center" style="width:80px">Cajas</th>
+              <th class="text-center" style="width:80px">Llaves</th>
+              <th class="text-center" style="width:80px">Nueces</th>
+              <th class="text-center" style="width:80px">Pestillos</th>
+              <th class="text-center" style="width:210px">Acciones</th>
+            </tr></thead>
+            <tbody id="prod-cruda-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TAB: MP En Proceso ── -->
+      <div id="prod-tab-proceso" class="hidden">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Materia Prima En Proceso</h2>
+            <p class="page-subtitle">Potencial para armar — hacer clic en la celda Observaciones para editar</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-prod-refresh-proceso">Actualizar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-prod-aj-proceso">Ajuste manual</button>
+          </div>
+        </div>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table class="table">
+            <thead><tr>
+              <th>Artículo</th>
+              <th class="text-center" style="width:85px">Cajas<br><small style="font-weight:400;text-transform:none">Disp.</small></th>
+              <th class="text-center" style="width:85px">Cajas<br><small style="font-weight:400;text-transform:none">Est.</small></th>
+              <th class="text-center" style="width:75px">Llaves</th>
+              <th class="text-center" style="width:75px">Nueces</th>
+              <th class="text-center" style="width:75px">Pestillos</th>
+              <th style="min-width:140px">Observaciones</th>
+              <th class="text-center" style="width:80px">Armar</th>
+            </tr></thead>
+            <tbody id="prod-proceso-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TAB: Terminadas ── -->
+      <div id="prod-tab-terminadas" class="hidden">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Cerraduras Terminadas</h2>
+            <p class="page-subtitle">Stock de cerraduras ensambladas</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-prod-refresh-term">Actualizar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-prod-aj-term">Ajuste manual</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Artículo</th>
+              <th class="text-center" style="width:130px">Cantidad</th>
+              <th style="width:160px">Últ. actualización</th>
+            </tr></thead>
+            <tbody id="prod-term-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TAB: Historial ── -->
+      <div id="prod-tab-historial" class="hidden">
+        <div class="page-header">
+          <h2 class="page-title">Historial de Movimientos</h2>
+          <button class="btn btn-ghost btn-sm" id="btn-prod-refresh-hist">Actualizar</button>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="margin:0">
+            <label class="label">Artículo</label>
+            <select id="prod-hist-product" class="input select" style="min-width:180px"><option value="">Todos</option></select>
+          </div>
+          <div class="field" style="margin:0">
+            <label class="label">Tipo</label>
+            <select id="prod-hist-tipo" class="input select" style="min-width:150px">
+              <option value="">Todos</option>
+              <option value="entrada_mp">Ingreso MP</option>
+              <option value="proceso">Pase a proceso</option>
+              <option value="armado">Armado</option>
+              <option value="ajuste">Ajuste</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="prod-hist-desde" class="input" style="width:145px"></div>
+          <div class="field" style="margin:0"><label class="label">Hasta</label><input type="date" id="prod-hist-hasta" class="input" style="width:145px"></div>
+          <button class="btn btn-secondary" id="btn-prod-hist-filter" style="margin-top:20px">Filtrar</button>
+          <button class="btn btn-ghost"     id="btn-prod-hist-clear"  style="margin-top:20px">Limpiar</button>
+        </div>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table class="table" style="font-size:.85rem">
+            <thead><tr>
+              <th style="width:140px">Fecha</th>
+              <th>Artículo</th>
+              <th class="text-center" style="width:110px">Tipo</th>
+              <th class="text-right" style="width:65px">Cajas</th>
+              <th class="text-right" style="width:65px">Llaves</th>
+              <th class="text-right" style="width:65px">Nueces</th>
+              <th class="text-right" style="width:65px">Pestillos</th>
+              <th class="text-right" style="width:70px">Term.</th>
+              <th>Notas</th>
+              <th style="width:110px">Usuario</th>
+            </tr></thead>
+            <tbody id="prod-hist-tbody"></tbody>
+          </table>
+          <div id="prod-hist-empty" class="empty-state hidden"><p>No hay movimientos registrados</p></div>
+        </div>
+      </div>
+
+    </div><!-- /section-produccion -->
+
     <!-- ======================== SECCIÓN: PEDIDOS MP -->
     <div id="section-mp" class="app-section hidden">
 
@@ -2849,6 +2991,127 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-mpr-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-mpr-confirm">Registrar y marcar como entregado</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Ingreso MP cruda -->
+<div id="prod-ingreso-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header"><h3>Registrar ingreso de materia prima</h3></div>
+    <div class="modal-form-body">
+      <div class="field" style="margin-bottom:12px">
+        <label class="label required">Artículo</label>
+        <select id="inp-prod-ing-product" class="input select"></select>
+      </div>
+      <div class="form-grid-2">
+        <div class="field"><label class="label">Cajas</label><input type="number" id="inp-prod-ing-cajas" class="input" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label class="label">Llaves</label><input type="number" id="inp-prod-ing-llaves" class="input" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label class="label">Nueces</label><input type="number" id="inp-prod-ing-nueces" class="input" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label class="label">Pestillos</label><input type="number" id="inp-prod-ing-pestillos" class="input" min="0" step="any" placeholder="0"></div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Comprobante de compra (opcional)</label>
+          <select id="inp-prod-ing-purchase" class="input select"><option value="">— Sin vincular —</option></select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-ing-notas" class="input" placeholder="Ej: Remito 1234, observaciones...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-ing-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-ing-confirm">Registrar ingreso</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Pase a proceso -->
+<div id="prod-procesar-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header"><h3>Pasar a materia prima en proceso</h3></div>
+    <div class="modal-form-body">
+      <div class="field" style="margin-bottom:12px">
+        <label class="label required">Artículo</label>
+        <select id="inp-prod-proc-product" class="input select"></select>
+      </div>
+      <p id="prod-proc-stock-info" style="font-size:.83rem;color:var(--text-muted);margin-bottom:14px;line-height:1.6"></p>
+      <div class="form-grid-2">
+        <div class="field"><label class="label">Cajas</label><input type="number" id="inp-prod-proc-cajas" class="input" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label class="label">Llaves</label><input type="number" id="inp-prod-proc-llaves" class="input" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label class="label">Nueces</label><input type="number" id="inp-prod-proc-nueces" class="input" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label class="label">Pestillos</label><input type="number" id="inp-prod-proc-pestillos" class="input" min="0" step="any" placeholder="0"></div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-proc-notas" class="input">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-proc-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-proc-confirm">Confirmar pasaje</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Armar cerraduras -->
+<div id="prod-armar-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header"><h3>Registrar armado de cerraduras</h3></div>
+    <div class="modal-form-body">
+      <p id="prod-armar-name" style="font-weight:600;font-size:1rem;margin-bottom:4px"></p>
+      <p id="prod-armar-info" style="font-size:.83rem;color:var(--text-muted);margin-bottom:16px;line-height:1.6"></p>
+      <div class="field">
+        <label class="label required">Cantidad de cerraduras a armar</label>
+        <input type="number" id="inp-prod-armar-cantidad" class="input" min="1" step="1" placeholder="1">
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label class="label">Notas</label>
+        <input type="text" id="inp-prod-armar-notas" class="input">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-armar-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-armar-confirm">Confirmar armado</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Ajuste de producción -->
+<div id="prod-ajuste-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header"><h3>Ajuste manual de stock de producción</h3></div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field" style="grid-column:1/-1">
+          <label class="label required">Artículo</label>
+          <select id="inp-prod-aj-product" class="input select"></select>
+        </div>
+        <div class="field">
+          <label class="label required">Etapa</label>
+          <select id="inp-prod-aj-etapa" class="input select">
+            <option value="cruda">MP Sin Procesar</option>
+            <option value="proceso">MP En Proceso</option>
+            <option value="terminadas">Terminadas</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label required">Componente</label>
+          <select id="inp-prod-aj-campo" class="input select"></select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label required">Cantidad (+/-)</label>
+          <input type="number" id="inp-prod-aj-delta" class="input" step="any" placeholder="Ej: 5 ó -3">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-aj-notas" class="input" placeholder="Razón del ajuste...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-aj-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-aj-confirm">Aplicar ajuste</button>
     </div>
   </div>
 </div>

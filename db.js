@@ -409,6 +409,55 @@ db.exec(`CREATE TABLE IF NOT EXISTS mp_receipts (
   created_by          INTEGER REFERENCES users(id)
 )`);
 
+// ── Módulo de Producción ──────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS prod_mp_cruda (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id  INTEGER NOT NULL UNIQUE REFERENCES products(id),
+    cajas       REAL NOT NULL DEFAULT 0,
+    llaves      REAL NOT NULL DEFAULT 0,
+    nueces      REAL NOT NULL DEFAULT 0,
+    pestillos   REAL NOT NULL DEFAULT 0,
+    updated_at  TEXT DEFAULT (datetime('now','localtime')),
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_mp_proceso (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id        INTEGER NOT NULL UNIQUE REFERENCES products(id),
+    cajas_disponibles REAL NOT NULL DEFAULT 0,
+    cajas_estanteria  REAL NOT NULL DEFAULT 0,
+    llaves            REAL NOT NULL DEFAULT 0,
+    nueces            REAL NOT NULL DEFAULT 0,
+    pestillos         REAL NOT NULL DEFAULT 0,
+    observaciones     TEXT NOT NULL DEFAULT '',
+    updated_at        TEXT DEFAULT (datetime('now','localtime')),
+    created_at        TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_terminadas (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id  INTEGER NOT NULL UNIQUE REFERENCES products(id),
+    cantidad    REAL NOT NULL DEFAULT 0,
+    updated_at  TEXT DEFAULT (datetime('now','localtime')),
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_movimientos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo        TEXT NOT NULL,
+    product_id  INTEGER NOT NULL REFERENCES products(id),
+    cajas       REAL NOT NULL DEFAULT 0,
+    cajas_est   REAL NOT NULL DEFAULT 0,
+    llaves      REAL NOT NULL DEFAULT 0,
+    nueces      REAL NOT NULL DEFAULT 0,
+    pestillos   REAL NOT NULL DEFAULT 0,
+    terminadas  REAL NOT NULL DEFAULT 0,
+    etapa       TEXT NOT NULL DEFAULT '',
+    notas       TEXT NOT NULL DEFAULT '',
+    purchase_id INTEGER REFERENCES purchases(id),
+    created_by  INTEGER REFERENCES users(id),
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+
 // Seed sucursales
 {
   const sucCount = db.prepare('SELECT COUNT(*) AS c FROM sucursales').get().c;

@@ -251,6 +251,7 @@ function navigate(section) {
   if (section === 'compras')   { showComprasTab('proveedores'); showProveedoresSubview('list'); loadSuppliers(); }
   if (section === 'contable')  { showContableTab('resumen'); loadFinanceSummary(); }
   if (section === 'mp')        { showMpView('list'); loadMpOrders(); }
+  if (section === 'produccion') showProdTab('cruda');
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -5545,6 +5546,480 @@ function renderMpReport(orders) {
     </tr>`;
   }).join('');
 }
+
+/* ================================================================ PRODUCCIÓN */
+
+const PROD_CAMPOS = {
+  cruda:     [['cajas','Cajas'],['llaves','Llaves'],['nueces','Nueces'],['pestillos','Pestillos']],
+  proceso:   [['cajas_disponibles','Cajas disponibles'],['cajas_estanteria','Cajas estantería'],['llaves','Llaves'],['nueces','Nueces'],['pestillos','Pestillos']],
+  terminadas:[['cantidad','Cantidad']]
+};
+
+// Color de fila según nombre de artículo
+function prodRowClass(name) {
+  if (!name) return '';
+  if (/\b(108|111|118|128|115|116|124|125)\b/.test(name)) return 'prod-row-rosa';
+  if (/\b(117|114|122|126)\b/.test(name))                  return 'prod-row-verde';
+  if (/\b(121|127)\b/.test(name))                          return 'prod-row-verde-int';
+  if (/\b(120|123)\b/.test(name))                          return 'prod-row-celeste';
+  return '';
+}
+
+function prodTipoBadge(tipo) {
+  const MAP = {
+    entrada_mp: ['info',    'Ingreso MP'],
+    proceso:    ['warning', 'A proceso'],
+    armado:     ['success', 'Armado'],
+    ajuste:     ['default', 'Ajuste']
+  };
+  const [cls, label] = MAP[tipo] || ['default', tipo];
+  return `<span class="badge badge-${cls}">${label}</span>`;
+}
+
+function fmtProdQty(v) {
+  if (!v || v === 0) return '<span style="color:var(--text-muted)">—</span>';
+  const cls = v > 0 ? 'color:#166534' : 'color:var(--danger)';
+  return `<span style="${cls}">${v > 0 ? '+' : ''}${v}</span>`;
+}
+
+// ── Tab navigation ─────────────────────────────────────────────
+
+function showProdTab(tab) {
+  document.querySelectorAll('.prod-tab').forEach(el =>
+    el.classList.toggle('active', el.dataset.prodTab === tab)
+  );
+  ['cruda','proceso','terminadas','historial'].forEach(t => {
+    const el = $(`prod-tab-${t}`);
+    if (el) el.classList.toggle('hidden', t !== tab);
+  });
+  if (tab === 'cruda')      loadProdCruda();
+  if (tab === 'proceso')    loadProdProceso();
+  if (tab === 'terminadas') loadProdTerminadas();
+  if (tab === 'historial')  loadProdHistorial();
+}
+
+document.querySelectorAll('.prod-tab').forEach(btn =>
+  btn.addEventListener('click', () => showProdTab(btn.dataset.prodTab))
+);
+
+// ── Tab: MP Sin Procesar ───────────────────────────────────────
+
+let _prodCruda = [];
+
+async function loadProdCruda() {
+  try {
+    _prodCruda = await api('GET', '/produccion/mp-cruda');
+    renderProdCruda(_prodCruda);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderProdCruda(rows) {
+  const tbody = $('prod-cruda-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="color:var(--text-muted);padding:24px">No hay artículos activos en el catálogo</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr data-pid="${r.product_id}">
+      <td style="font-weight:500">${esc(r.name)}</td>
+      <td class="text-center">${r.cajas || 0}</td>
+      <td class="text-center">${r.llaves || 0}</td>
+      <td class="text-center">${r.nueces || 0}</td>
+      <td class="text-center">${r.pestillos || 0}</td>
+      <td class="text-center" style="white-space:nowrap">
+        <button class="btn btn-sm btn-secondary" data-action="ingresar" data-pid="${r.product_id}" data-name="${esc(r.name)}" title="Registrar ingreso de MP">+ Ingresar</button>
+        <button class="btn btn-sm btn-ghost"      data-action="procesar" data-pid="${r.product_id}" data-name="${esc(r.name)}" title="Pasar a proceso" style="margin-left:4px">→ Procesar</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+$('prod-cruda-tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const pid  = Number(btn.dataset.pid);
+  const name = btn.dataset.name;
+  if (btn.dataset.action === 'ingresar') openProdIngresoModal(pid, name);
+  if (btn.dataset.action === 'procesar') openProdProcesarModal(pid, name);
+});
+
+$('btn-prod-refresh-cruda').addEventListener('click', loadProdCruda);
+$('btn-prod-aj-cruda').addEventListener('click', () => openProdAjusteModal('cruda'));
+
+// ── Tab: MP En Proceso ─────────────────────────────────────────
+
+let _prodProceso = [];
+
+async function loadProdProceso() {
+  try {
+    _prodProceso = await api('GET', '/produccion/mp-proceso');
+    renderProdProceso(_prodProceso);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderProdProceso(rows) {
+  const tbody = $('prod-proceso-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="color:var(--text-muted);padding:24px">No hay artículos activos en el catálogo</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const cls = prodRowClass(r.name);
+    return `
+    <tr class="${cls}" data-pid="${r.product_id}">
+      <td style="font-weight:500">${esc(r.name)}</td>
+      <td class="text-center">${r.cajas_disponibles || 0}</td>
+      <td class="text-center">${r.cajas_estanteria || 0}</td>
+      <td class="text-center">${r.llaves || 0}</td>
+      <td class="text-center">${r.nueces || 0}</td>
+      <td class="text-center">${r.pestillos || 0}</td>
+      <td class="prod-obs-cell" data-pid="${r.product_id}" title="Clic para editar">${esc(r.observaciones) || '<span style="color:var(--text-muted);font-size:.82rem">—</span>'}</td>
+      <td class="text-center">
+        <button class="btn btn-sm btn-primary" data-action="armar" data-pid="${r.product_id}" data-name="${esc(r.name)}" data-row='${JSON.stringify({cd:r.cajas_disponibles,ce:r.cajas_estanteria,ll:r.llaves,nu:r.nueces,pe:r.pestillos})}' title="Registrar armado">Armar</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+$('prod-proceso-tbody').addEventListener('click', e => {
+  // Botón armar
+  const btn = e.target.closest('button[data-action="armar"]');
+  if (btn) {
+    const pid  = Number(btn.dataset.pid);
+    const name = btn.dataset.name;
+    let rowData = {};
+    try { rowData = JSON.parse(btn.dataset.row || '{}'); } catch {}
+    openProdArmarModal(pid, name, rowData);
+    return;
+  }
+  // Editar observaciones inline
+  const obsCell = e.target.closest('.prod-obs-cell');
+  if (obsCell && !obsCell.querySelector('input')) {
+    const pid     = Number(obsCell.dataset.pid);
+    const current = _prodProceso.find(r => r.product_id === pid)?.observaciones || '';
+    const inp     = document.createElement('input');
+    inp.type      = 'text';
+    inp.value     = current;
+    inp.className = 'prod-obs-input';
+    obsCell.innerHTML = '';
+    obsCell.appendChild(inp);
+    inp.focus();
+    const save = async () => {
+      const val = inp.value.trim();
+      try {
+        await api('PUT', `/produccion/mp-proceso/${pid}/obs`, { observaciones: val });
+        const row = _prodProceso.find(r => r.product_id === pid);
+        if (row) row.observaciones = val;
+        obsCell.innerHTML = val ? esc(val) : '<span style="color:var(--text-muted);font-size:.82rem">—</span>';
+      } catch (err) { toast(err.message, 'error'); loadProdProceso(); }
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } if (ev.key === 'Escape') { loadProdProceso(); } });
+  }
+});
+
+$('btn-prod-refresh-proceso').addEventListener('click', loadProdProceso);
+$('btn-prod-aj-proceso').addEventListener('click', () => openProdAjusteModal('proceso'));
+
+// ── Tab: Terminadas ────────────────────────────────────────────
+
+async function loadProdTerminadas() {
+  try {
+    const rows = await api('GET', '/produccion/terminadas');
+    renderProdTerminadas(rows);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderProdTerminadas(rows) {
+  const tbody = $('prod-term-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="color:var(--text-muted);padding:24px">No hay artículos activos en el catálogo</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td style="font-weight:500">${esc(r.name)}</td>
+      <td class="text-center" style="font-weight:${r.cantidad > 0 ? '700' : '400'};color:${r.cantidad > 0 ? 'var(--success-txt)' : 'var(--text-muted)'}">${r.cantidad || 0}</td>
+      <td style="color:var(--text-muted);font-size:.83rem">${r.updated_at ? fmtDateTime(r.updated_at) : '—'}</td>
+    </tr>
+  `).join('');
+}
+
+$('btn-prod-refresh-term').addEventListener('click', loadProdTerminadas);
+$('btn-prod-aj-term').addEventListener('click', () => openProdAjusteModal('terminadas'));
+
+// ── Tab: Historial ─────────────────────────────────────────────
+
+async function loadProdHistorial() {
+  try {
+    const params = new URLSearchParams();
+    const pid   = $('prod-hist-product').value;
+    const tipo  = $('prod-hist-tipo').value;
+    const desde = $('prod-hist-desde').value;
+    const hasta = $('prod-hist-hasta').value;
+    if (pid)   params.set('product_id', pid);
+    if (tipo)  params.set('tipo', tipo);
+    if (desde) params.set('desde', desde);
+    if (hasta) params.set('hasta', hasta);
+    const qs   = params.toString() ? `?${params}` : '';
+    const rows = await api('GET', `/produccion/movimientos${qs}`);
+    renderProdHistorial(rows);
+    // Populate product filter if empty
+    if ($('prod-hist-product').options.length <= 1) {
+      const prods = await api('GET', '/produccion/mp-cruda');
+      prods.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.product_id;
+        opt.textContent = p.name;
+        $('prod-hist-product').appendChild(opt);
+      });
+    }
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderProdHistorial(rows) {
+  const tbody = $('prod-hist-tbody');
+  const empty = $('prod-hist-empty');
+  if (!rows.length) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  tbody.innerHTML = rows.map(r => {
+    const totalCajas = (r.cajas || 0) + (r.cajas_est || 0);
+    return `<tr>
+      <td style="color:var(--text-muted)">${fmtDateTime(r.created_at)}</td>
+      <td>${esc(r.product_name)}</td>
+      <td class="text-center">${prodTipoBadge(r.tipo)}</td>
+      <td class="text-right">${totalCajas ? fmtProdQty(r.tipo==='armado'?-totalCajas:totalCajas) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="text-right">${r.llaves    ? fmtProdQty(r.tipo==='armado'?-r.llaves:r.llaves)       : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="text-right">${r.nueces    ? fmtProdQty(r.tipo==='armado'?-r.nueces:r.nueces)       : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="text-right">${r.pestillos ? fmtProdQty(r.tipo==='armado'?-r.pestillos:r.pestillos) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="text-right">${r.terminadas ? fmtProdQty(r.terminadas) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="font-size:.82rem;color:var(--text-muted)">${esc(r.notas || '')}${r.purchase_doc ? ` <span class="badge badge-info" style="font-size:.75rem">${esc(r.purchase_doc)}</span>` : ''}</td>
+      <td style="font-size:.82rem;color:var(--text-muted)">${esc(r.created_by_name || '—')}</td>
+    </tr>`;
+  }).join('');
+}
+
+$('btn-prod-refresh-hist').addEventListener('click', loadProdHistorial);
+$('btn-prod-hist-filter').addEventListener('click', loadProdHistorial);
+$('btn-prod-hist-clear').addEventListener('click', () => {
+  $('prod-hist-product').value = '';
+  $('prod-hist-tipo').value    = '';
+  $('prod-hist-desde').value   = '';
+  $('prod-hist-hasta').value   = '';
+  loadProdHistorial();
+});
+
+// ── Modal: Ingreso MP cruda ────────────────────────────────────
+
+let _prodIngresoProductId = null;
+
+async function openProdIngresoModal(presetPid, presetName) {
+  // Load products into selector
+  const sel = $('inp-prod-ing-product');
+  if (sel.options.length <= 1) {
+    const prods = _prodCruda.length ? _prodCruda : await api('GET', '/produccion/mp-cruda');
+    sel.innerHTML = '<option value="">— Seleccioná un artículo —</option>';
+    prods.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.product_id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+  }
+  if (presetPid) sel.value = presetPid;
+
+  // Load recent purchases into selector
+  try {
+    const purchases = await api('GET', '/produccion/purchases-for-mp');
+    const selP = $('inp-prod-ing-purchase');
+    selP.innerHTML = '<option value="">— Sin vincular —</option>';
+    purchases.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.purchase_number} — ${esc(p.supplier_name)} ${p.doc_date ? `(${fmtDate(p.doc_date)})` : ''}`;
+      selP.appendChild(opt);
+    });
+  } catch {}
+
+  $('inp-prod-ing-cajas').value     = '';
+  $('inp-prod-ing-llaves').value    = '';
+  $('inp-prod-ing-nueces').value    = '';
+  $('inp-prod-ing-pestillos').value = '';
+  $('inp-prod-ing-notas').value     = '';
+  $('prod-ingreso-modal').classList.remove('hidden');
+  $('inp-prod-ing-cajas').focus();
+}
+
+$('btn-prod-ing-cancel').addEventListener('click', () => $('prod-ingreso-modal').classList.add('hidden'));
+
+$('btn-prod-ing-confirm').addEventListener('click', async () => {
+  const pid = Number($('inp-prod-ing-product').value);
+  if (!pid) { toast('Seleccioná un artículo', 'error'); return; }
+  const body = {
+    product_id:  pid,
+    cajas:       Number($('inp-prod-ing-cajas').value)     || 0,
+    llaves:      Number($('inp-prod-ing-llaves').value)    || 0,
+    nueces:      Number($('inp-prod-ing-nueces').value)    || 0,
+    pestillos:   Number($('inp-prod-ing-pestillos').value) || 0,
+    notas:       $('inp-prod-ing-notas').value.trim(),
+    purchase_id: Number($('inp-prod-ing-purchase').value)  || null
+  };
+  if (body.cajas + body.llaves + body.nueces + body.pestillos === 0) {
+    toast('Ingrese al menos una cantidad mayor a 0', 'error'); return;
+  }
+  try {
+    await api('POST', '/produccion/ingreso-mp', body);
+    $('prod-ingreso-modal').classList.add('hidden');
+    toast('Ingreso registrado', 'success');
+    loadProdCruda();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Pase a proceso ──────────────────────────────────────
+
+async function openProdProcesarModal(presetPid, presetName) {
+  const sel = $('inp-prod-proc-product');
+  const prods = _prodCruda.length ? _prodCruda : await api('GET', '/produccion/mp-cruda');
+  sel.innerHTML = '<option value="">— Seleccioná un artículo —</option>';
+  prods.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.product_id;
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  });
+  if (presetPid) {
+    sel.value = presetPid;
+    updateProdProcStockInfo(presetPid);
+  } else {
+    $('prod-proc-stock-info').textContent = '';
+  }
+  $('inp-prod-proc-cajas').value     = '';
+  $('inp-prod-proc-llaves').value    = '';
+  $('inp-prod-proc-nueces').value    = '';
+  $('inp-prod-proc-pestillos').value = '';
+  $('inp-prod-proc-notas').value     = '';
+  $('prod-procesar-modal').classList.remove('hidden');
+}
+
+function updateProdProcStockInfo(pid) {
+  const row = _prodCruda.find(r => r.product_id === Number(pid));
+  if (!row) { $('prod-proc-stock-info').textContent = ''; return; }
+  $('prod-proc-stock-info').textContent = `Stock disponible en cruda → Cajas: ${row.cajas} | Llaves: ${row.llaves} | Nueces: ${row.nueces} | Pestillos: ${row.pestillos}`;
+}
+
+$('inp-prod-proc-product').addEventListener('change', e => updateProdProcStockInfo(e.target.value));
+
+$('btn-prod-proc-cancel').addEventListener('click', () => $('prod-procesar-modal').classList.add('hidden'));
+
+$('btn-prod-proc-confirm').addEventListener('click', async () => {
+  const pid = Number($('inp-prod-proc-product').value);
+  if (!pid) { toast('Seleccioná un artículo', 'error'); return; }
+  const body = {
+    product_id: pid,
+    cajas:      Number($('inp-prod-proc-cajas').value)     || 0,
+    llaves:     Number($('inp-prod-proc-llaves').value)    || 0,
+    nueces:     Number($('inp-prod-proc-nueces').value)    || 0,
+    pestillos:  Number($('inp-prod-proc-pestillos').value) || 0,
+    notas:      $('inp-prod-proc-notas').value.trim()
+  };
+  if (body.cajas + body.llaves + body.nueces + body.pestillos === 0) {
+    toast('Ingrese al menos una cantidad mayor a 0', 'error'); return;
+  }
+  try {
+    await api('POST', '/produccion/procesar', body);
+    $('prod-procesar-modal').classList.add('hidden');
+    toast('Pasaje a proceso registrado', 'success');
+    loadProdCruda();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Armar cerraduras ────────────────────────────────────
+
+let _prodArmarPid = null;
+
+function openProdArmarModal(pid, name, stockRow) {
+  _prodArmarPid = pid;
+  $('prod-armar-name').textContent = name;
+  const totalCajas = (stockRow.cd || 0) + (stockRow.ce || 0);
+  $('prod-armar-info').innerHTML = `Stock en proceso → Cajas: <b>${totalCajas}</b> (${stockRow.cd||0} disp. + ${stockRow.ce||0} est.) | Llaves: <b>${stockRow.ll||0}</b> | Nueces: <b>${stockRow.nu||0}</b> | Pestillos: <b>${stockRow.pe||0}</b><br><span style="color:var(--text-muted)">Cada cerradura consume 1 caja + 1 llave + 1 nuez + 1 pestillo</span>`;
+  $('inp-prod-armar-cantidad').value = 1;
+  $('inp-prod-armar-notas').value    = '';
+  $('prod-armar-modal').classList.remove('hidden');
+  $('inp-prod-armar-cantidad').focus();
+  $('inp-prod-armar-cantidad').select();
+}
+
+$('btn-prod-armar-cancel').addEventListener('click', () => $('prod-armar-modal').classList.add('hidden'));
+
+$('btn-prod-armar-confirm').addEventListener('click', async () => {
+  const qty = Number($('inp-prod-armar-cantidad').value);
+  if (!_prodArmarPid || qty <= 0) { toast('Cantidad inválida', 'error'); return; }
+  try {
+    await api('POST', '/produccion/armar', {
+      product_id: _prodArmarPid,
+      cantidad:   qty,
+      notas:      $('inp-prod-armar-notas').value.trim()
+    });
+    $('prod-armar-modal').classList.add('hidden');
+    toast(`${qty} cerradura${qty > 1 ? 's' : ''} armada${qty > 1 ? 's' : ''} correctamente`, 'success');
+    loadProdProceso();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Ajuste manual ───────────────────────────────────────
+
+async function openProdAjusteModal(presetEtapa) {
+  // Fill product selector
+  const sel = $('inp-prod-aj-product');
+  const prods = _prodCruda.length ? _prodCruda : await api('GET', '/produccion/mp-cruda');
+  sel.innerHTML = '<option value="">— Seleccioná un artículo —</option>';
+  prods.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.product_id;
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  });
+
+  if (presetEtapa) $('inp-prod-aj-etapa').value = presetEtapa;
+  updateProdAjCampos();
+
+  $('inp-prod-aj-delta').value = '';
+  $('inp-prod-aj-notas').value = '';
+  $('prod-ajuste-modal').classList.remove('hidden');
+}
+
+function updateProdAjCampos() {
+  const etapa  = $('inp-prod-aj-etapa').value;
+  const campos = PROD_CAMPOS[etapa] || [];
+  const selC   = $('inp-prod-aj-campo');
+  selC.innerHTML = campos.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+}
+
+$('inp-prod-aj-etapa').addEventListener('change', updateProdAjCampos);
+
+$('btn-prod-aj-cancel').addEventListener('click', () => $('prod-ajuste-modal').classList.add('hidden'));
+
+$('btn-prod-aj-confirm').addEventListener('click', async () => {
+  const pid   = Number($('inp-prod-aj-product').value);
+  const etapa = $('inp-prod-aj-etapa').value;
+  const campo = $('inp-prod-aj-campo').value;
+  const delta = Number($('inp-prod-aj-delta').value);
+  const notas = $('inp-prod-aj-notas').value.trim();
+  if (!pid)       { toast('Seleccioná un artículo', 'error'); return; }
+  if (isNaN(delta) || delta === 0) { toast('El delta no puede ser cero', 'error'); return; }
+  try {
+    await api('POST', '/produccion/ajuste', { etapa, product_id: pid, campo, delta, notas });
+    $('prod-ajuste-modal').classList.add('hidden');
+    toast('Ajuste aplicado', 'success');
+    if (etapa === 'cruda')      loadProdCruda();
+    if (etapa === 'proceso')    loadProdProceso();
+    if (etapa === 'terminadas') loadProdTerminadas();
+  } catch (err) { toast(err.message, 'error'); }
+});
 
 /* ================================================================ INIT */
 checkAuth();

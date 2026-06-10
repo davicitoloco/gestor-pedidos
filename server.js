@@ -50,6 +50,7 @@ app.use('/api/finance',           require('./routes/finance'));
 app.use('/api/accounting',        require('./routes/accounting'));
 app.use('/api/price-lists',       require('./routes/price_lists'));
 app.use('/api/mp-orders',         require('./routes/mp_orders'));
+app.use('/api/produccion',        require('./routes/produccion'));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
