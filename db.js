@@ -528,6 +528,16 @@ db.exec(`
     for (let i = 1; i <= 3; i++) ins.run('caja', `Caja modelo ${i}`);
   }
 }
+// Renombrar insumos genéricos (solo si aún conservan el nombre original)
+{
+  const upd = db.prepare("UPDATE deposito_insumos SET descripcion=? WHERE descripcion=? AND tipo=?");
+  upd.run('Tornillos 7x1',   'Tornillo modelo 1', 'tornillo');
+  upd.run('Tornillos 4x5/8', 'Tornillo modelo 2', 'tornillo');
+  upd.run('Tornillos 4x1/4', 'Tornillo modelo 3', 'tornillo');
+  upd.run('Caja Cerradura',  'Caja modelo 1',     'caja');
+  upd.run('Caja Cerrojo',    'Caja modelo 2',     'caja');
+  db.prepare("UPDATE deposito_insumos SET activo=0 WHERE descripcion='Caja modelo 3' AND tipo='caja'").run();
+}
 
 // Seed sucursales
 {

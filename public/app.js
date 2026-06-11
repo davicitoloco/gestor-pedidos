@@ -125,12 +125,14 @@ async function showApp() {
   document.querySelectorAll('.strict-admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
   // MP nav visible para admin y fabrica; resto del nav oculto para fabrica
   document.querySelectorAll('.mp-visible').forEach(el => el.classList.toggle('hidden', !canAccessMP()));
+  // prod-visible: visible para admin, subadmin y mp/fábrica
+  document.querySelectorAll('.prod-visible').forEach(el => el.classList.toggle('hidden', !canAccessProd()));
   if (isFabrica()) {
-    document.querySelectorAll('.nav-item:not(.mp-visible)').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.nav-item:not(.mp-visible):not(.prod-visible)').forEach(el => el.classList.add('hidden'));
   } else {
     // Restaurar módulos base para roles no-mp (pueden haber quedado ocultos si antes
     // había una sesión mp activa en la misma pestaña)
-    document.querySelectorAll('.nav-item:not(.mp-visible):not(.admin-only):not(.strict-admin-only)')
+    document.querySelectorAll('.nav-item:not(.mp-visible):not(.prod-visible):not(.admin-only):not(.strict-admin-only)')
       .forEach(el => el.classList.remove('hidden'));
   }
 
@@ -230,7 +232,7 @@ function navigate(section) {
     toast('Sin acceso a esta sección', 'error');
     return;
   }
-  if (isFabrica() && section !== 'mp') {
+  if (isFabrica() && section !== 'mp' && section !== 'produccion') {
     toast('Sin acceso a esta sección', 'error');
     return;
   }
@@ -4965,8 +4967,9 @@ window.deleteNote = async function(id, entityType, entityId) {
 
 /* ================================================================ MÓDULO PEDIDOS MP */
 
-function isFabrica()  { return state.user && state.user.role === 'mp'; }
-function canAccessMP(){ return isAdmin() || isFabrica(); }
+function isFabrica()   { return state.user && state.user.role === 'mp'; }
+function canAccessMP() { return isAdmin() || isFabrica(); }
+function canAccessProd(){ return isAdminLike() || isFabrica(); }
 
 const MP_SECTIONS = [
   { num: 1, name: 'C/Frnts', unidad: 'kg', items: [
