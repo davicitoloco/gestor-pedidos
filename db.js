@@ -498,6 +498,37 @@ addColIfMissing('prod_movimientos', 'categoria', 'INTEGER');
   }
 }
 
+// ── Depósito de insumos ───────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS deposito_insumos (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo         TEXT NOT NULL DEFAULT 'tornillo',
+    descripcion  TEXT NOT NULL,
+    stock_actual REAL NOT NULL DEFAULT 0,
+    activo       INTEGER NOT NULL DEFAULT 1,
+    updated_at   TEXT DEFAULT (datetime('now','localtime')),
+    created_at   TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS deposito_movimientos (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    insumo_id     INTEGER NOT NULL REFERENCES deposito_insumos(id),
+    tipo          TEXT NOT NULL,
+    cantidad      REAL NOT NULL,
+    motivo        TEXT NOT NULL DEFAULT '',
+    observaciones TEXT NOT NULL DEFAULT '',
+    created_by    INTEGER REFERENCES users(id),
+    created_at    TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+{
+  const cnt = db.prepare('SELECT COUNT(*) AS c FROM deposito_insumos').get().c;
+  if (cnt === 0) {
+    const ins = db.prepare("INSERT INTO deposito_insumos (tipo, descripcion) VALUES (?,?)");
+    for (let i = 1; i <= 4; i++) ins.run('tornillo', `Tornillo modelo ${i}`);
+    for (let i = 1; i <= 3; i++) ins.run('caja', `Caja modelo ${i}`);
+  }
+}
+
 // Seed sucursales
 {
   const sucCount = db.prepare('SELECT COUNT(*) AS c FROM sucursales').get().c;

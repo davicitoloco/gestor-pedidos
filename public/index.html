@@ -1959,6 +1959,7 @@
       <div class="compras-tabs">
         <button class="prod-tab active" data-prod-tab="proceso">MP En Proceso</button>
         <button class="prod-tab" data-prod-tab="terminadas">Terminadas</button>
+        <button class="prod-tab" data-prod-tab="deposito">Depósito</button>
         <button class="prod-tab" data-prod-tab="historial">Historial</button>
       </div>
 
@@ -2052,6 +2053,35 @@
         </div>
       </div>
 
+      <!-- ── TAB: Depósito ── -->
+      <div id="prod-tab-deposito" class="hidden">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Depósito de insumos</h2>
+            <p class="page-subtitle">Tornillos y cajas de embalaje</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-dep-refresh">Actualizar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-dep-gestionar">Gestionar insumos</button>
+          </div>
+        </div>
+        <!-- Resumen -->
+        <div id="dep-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px"></div>
+        <!-- Tabla -->
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:100px">Tipo</th>
+              <th>Descripción</th>
+              <th class="text-center" style="width:130px">Stock actual</th>
+              <th style="width:160px">Últ. movimiento</th>
+              <th class="text-center" style="width:160px">Acciones</th>
+            </tr></thead>
+            <tbody id="dep-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- ── TAB: Historial ── -->
       <div id="prod-tab-historial" class="hidden">
         <div class="page-header">
@@ -2074,6 +2104,8 @@
               <option value="armado">Armado</option>
               <option value="ingreso_componentes">Ingreso componentes</option>
               <option value="ajuste_manual">Ajuste manual</option>
+              <option value="ingreso_deposito">Ingreso depósito</option>
+              <option value="egreso_deposito">Egreso depósito</option>
             </select>
           </div>
           <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="prod-hist-desde" class="input" style="width:145px"></div>
@@ -3255,6 +3287,107 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-prod-aj-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-prod-aj-confirm">Aplicar ajuste</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Ingresar depósito -->
+<div id="dep-ingreso-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3>Registrar ingreso al depósito</h3></div>
+    <div class="modal-form-body">
+      <p id="dep-ing-name" style="font-weight:600;font-size:1rem;margin-bottom:14px"></p>
+      <div class="field">
+        <label class="label required">Cantidad a ingresar</label>
+        <input type="number" id="inp-dep-ing-cantidad" class="input" min="1" step="any" placeholder="0">
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label class="label">Observaciones</label>
+        <input type="text" id="inp-dep-ing-obs" class="input" placeholder="Proveedor, remito, etc.">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-dep-ing-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-dep-ing-confirm">Registrar ingreso</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Egresar depósito -->
+<div id="dep-egreso-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3>Registrar egreso del depósito</h3></div>
+    <div class="modal-form-body">
+      <p id="dep-egr-name" style="font-weight:600;font-size:1rem;margin-bottom:4px"></p>
+      <p id="dep-egr-stock" style="font-size:.83rem;color:var(--text-muted);margin-bottom:14px"></p>
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="label required">Cantidad</label>
+          <input type="number" id="inp-dep-egr-cantidad" class="input" min="1" step="any" placeholder="0">
+        </div>
+        <div class="field">
+          <label class="label required">Motivo</label>
+          <select id="inp-dep-egr-motivo" class="input select">
+            <option value="uso">Uso</option>
+            <option value="merma">Merma</option>
+            <option value="ajuste">Ajuste</option>
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Observaciones</label>
+          <input type="text" id="inp-dep-egr-obs" class="input" placeholder="Detalle adicional...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-dep-egr-cancel">Cancelar</button>
+      <button class="btn btn-danger" id="btn-dep-egr-confirm">Registrar egreso</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Gestionar insumos -->
+<div id="dep-gestionar-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between">
+      <h3>Gestionar insumos del depósito</h3>
+      <button class="btn btn-ghost btn-sm" id="btn-dep-gest-close">✕</button>
+    </div>
+    <div class="modal-form-body" style="padding-bottom:0">
+      <!-- Formulario nuevo -->
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px;margin-bottom:16px">
+        <p style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:10px">Agregar insumo</p>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field" style="margin:0">
+            <label class="label required">Tipo</label>
+            <select id="inp-dep-new-tipo" class="input select" style="width:140px">
+              <option value="tornillo">Tornillo</option>
+              <option value="caja">Caja</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;flex:1;min-width:160px">
+            <label class="label required">Descripción</label>
+            <input type="text" id="inp-dep-new-desc" class="input" placeholder="Ej: Tornillo 3/8 zinc">
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-dep-new-add" style="margin-bottom:1px">+ Agregar</button>
+        </div>
+      </div>
+      <!-- Lista -->
+      <div style="max-height:340px;overflow-y:auto">
+        <table class="table" style="font-size:.87rem">
+          <thead><tr>
+            <th style="width:90px">Tipo</th>
+            <th>Descripción</th>
+            <th class="text-center" style="width:80px">Stock</th>
+            <th class="text-center" style="width:70px">Estado</th>
+            <th class="text-center" style="width:70px">Editar</th>
+          </tr></thead>
+          <tbody id="dep-gest-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-dep-gest-done">Cerrar</button>
     </div>
   </div>
 </div>

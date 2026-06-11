@@ -5584,6 +5584,8 @@ function prodTipoBadge(tipo) {
     armado:              ['success', 'Armado'],
     ingreso_componentes: ['info',    'Ingreso comp.'],
     ajuste_manual:       ['default', 'Ajuste'],
+    ingreso_deposito:    ['success', 'Ingreso dep.'],
+    egreso_deposito:     ['warning', 'Egreso dep.'],
     // legacy
     entrada_mp:['info','Ingreso MP'], proceso:['warning','A proceso']
   };
@@ -5603,12 +5605,13 @@ function showProdTab(tab) {
   document.querySelectorAll('.prod-tab').forEach(el =>
     el.classList.toggle('active', el.dataset.prodTab === tab)
   );
-  ['proceso','terminadas','historial'].forEach(t => {
+  ['proceso','terminadas','deposito','historial'].forEach(t => {
     const el = $(`prod-tab-${t}`);
     if (el) el.classList.toggle('hidden', t !== tab);
   });
   if (tab === 'proceso')    { loadProdChapa(); loadProdProceso(); }
   if (tab === 'terminadas') loadProdTerminadas();
+  if (tab === 'deposito')   loadDeposito();
   if (tab === 'historial')  loadProdHistorial();
 }
 
@@ -6073,6 +6076,231 @@ $('btn-prod-aj-confirm').addEventListener('click', async () => {
     if (etapa === 'terminadas') loadProdTerminadas();
   } catch (err) { toast(err.message, 'error'); }
 });
+
+/* ================================================================ DEPÓSITO */
+
+let _deposito = [];
+
+// ── Carga y render principal ───────────────────────────────────
+
+async function loadDeposito() {
+  try {
+    _deposito = await api('GET', '/produccion/deposito/insumos');
+    renderDepositoSummary(_deposito);
+    renderDepositoTable(_deposito);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderDepositoSummary(rows) {
+  const totalTornillos = rows.filter(r => r.tipo === 'tornillo').reduce((s, r) => s + r.stock_actual, 0);
+  const totalCajas     = rows.filter(r => r.tipo === 'caja').reduce((s, r) => s + r.stock_actual, 0);
+  const cerraduras     = Math.floor(totalTornillos / 4);
+  $('dep-summary').innerHTML = `
+    <div class="stat-card">
+      <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:6px">Tornillos en stock</div>
+      <div style="font-size:1.6rem;font-weight:700;color:var(--text)">${totalTornillos.toLocaleString('es-AR')}</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:6px">Cajas en stock</div>
+      <div style="font-size:1.6rem;font-weight:700;color:var(--text)">${totalCajas.toLocaleString('es-AR')}</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:6px">Tornillos → cerraduras</div>
+      <div style="font-size:1.6rem;font-weight:700;color:var(--success-txt)">${cerraduras.toLocaleString('es-AR')}</div>
+      <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">4 tornillos por cerradura</div>
+    </div>`;
+}
+
+function renderDepositoTable(rows) {
+  const tbody = $('dep-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="color:var(--text-muted);padding:24px">Sin insumos activos</td></tr>';
+    return;
+  }
+  // Group: tornillos first, then cajas
+  const sorted = [...rows].sort((a, b) => {
+    if (a.tipo !== b.tipo) return a.tipo === 'tornillo' ? -1 : 1;
+    return a.id - b.id;
+  });
+  let lastTipo = null;
+  tbody.innerHTML = sorted.map(r => {
+    const groupHeader = r.tipo !== lastTipo
+      ? `<tr><td colspan="5" style="background:var(--bg);font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:8px 14px">${r.tipo === 'tornillo' ? 'Tornillos' : 'Cajas de embalaje'}</td></tr>`
+      : '';
+    lastTipo = r.tipo;
+    const stockColor = r.stock_actual > 0 ? 'var(--text)' : 'var(--text-muted)';
+    return `${groupHeader}<tr data-id="${r.id}">
+      <td style="color:var(--text-muted);font-size:.83rem">${r.tipo === 'tornillo' ? 'Tornillo' : 'Caja'}</td>
+      <td style="font-weight:500">${esc(r.descripcion)}</td>
+      <td class="text-center" style="font-weight:700;color:${stockColor}">${r.stock_actual}</td>
+      <td style="color:var(--text-muted);font-size:.83rem">${r.updated_at ? fmtDateTime(r.updated_at) : '—'}</td>
+      <td class="text-center" style="white-space:nowrap">
+        <button class="btn btn-sm btn-secondary" data-dep-action="ingresar" data-id="${r.id}" data-name="${esc(r.descripcion)}">+ Ingresar</button>
+        <button class="btn btn-sm btn-ghost" data-dep-action="egresar" data-id="${r.id}" data-name="${esc(r.descripcion)}" data-stock="${r.stock_actual}" style="margin-left:4px">− Egresar</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+$('dep-tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-dep-action]');
+  if (!btn) return;
+  const id    = Number(btn.dataset.id);
+  const name  = btn.dataset.name;
+  const stock = Number(btn.dataset.stock);
+  if (btn.dataset.depAction === 'ingresar') openDepIngresoModal(id, name);
+  if (btn.dataset.depAction === 'egresar')  openDepEgresoModal(id, name, stock);
+});
+
+$('btn-dep-refresh').addEventListener('click', loadDeposito);
+$('btn-dep-gestionar').addEventListener('click', openDepGestionarModal);
+
+// ── Modal: Ingresar ────────────────────────────────────────────
+
+let _depIngId = null;
+
+function openDepIngresoModal(id, name) {
+  _depIngId = id;
+  $('dep-ing-name').textContent = name;
+  $('inp-dep-ing-cantidad').value = '';
+  $('inp-dep-ing-obs').value      = '';
+  $('dep-ingreso-modal').classList.remove('hidden');
+  $('inp-dep-ing-cantidad').focus();
+}
+
+$('btn-dep-ing-cancel').addEventListener('click', () => $('dep-ingreso-modal').classList.add('hidden'));
+$('btn-dep-ing-confirm').addEventListener('click', async () => {
+  const qty = Number($('inp-dep-ing-cantidad').value);
+  if (!_depIngId || qty <= 0) { toast('Cantidad inválida', 'error'); return; }
+  try {
+    await api('POST', '/produccion/deposito/ingreso', {
+      insumo_id:    _depIngId,
+      cantidad:     qty,
+      observaciones: $('inp-dep-ing-obs').value.trim()
+    });
+    $('dep-ingreso-modal').classList.add('hidden');
+    toast('Ingreso registrado', 'success');
+    loadDeposito();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Egresar ─────────────────────────────────────────────
+
+let _depEgrId = null;
+
+function openDepEgresoModal(id, name, stock) {
+  _depEgrId = id;
+  $('dep-egr-name').textContent  = name;
+  $('dep-egr-stock').textContent = `Stock disponible: ${stock} unidades`;
+  $('inp-dep-egr-cantidad').value = '';
+  $('inp-dep-egr-obs').value      = '';
+  $('inp-dep-egr-motivo').value   = 'uso';
+  $('dep-egreso-modal').classList.remove('hidden');
+  $('inp-dep-egr-cantidad').focus();
+}
+
+$('btn-dep-egr-cancel').addEventListener('click', () => $('dep-egreso-modal').classList.add('hidden'));
+$('btn-dep-egr-confirm').addEventListener('click', async () => {
+  const qty = Number($('inp-dep-egr-cantidad').value);
+  if (!_depEgrId || qty <= 0) { toast('Cantidad inválida', 'error'); return; }
+  try {
+    await api('POST', '/produccion/deposito/egreso', {
+      insumo_id:    _depEgrId,
+      cantidad:     qty,
+      motivo:       $('inp-dep-egr-motivo').value,
+      observaciones: $('inp-dep-egr-obs').value.trim()
+    });
+    $('dep-egreso-modal').classList.add('hidden');
+    toast('Egreso registrado', 'success');
+    loadDeposito();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Gestionar insumos ───────────────────────────────────
+
+async function openDepGestionarModal() {
+  await renderDepGestList();
+  $('dep-gestionar-modal').classList.remove('hidden');
+}
+
+async function renderDepGestList() {
+  try {
+    const todos = await api('GET', '/produccion/deposito/insumos?all=1');
+    $('dep-gest-tbody').innerHTML = todos.map(r => `
+      <tr id="dep-gest-row-${r.id}">
+        <td style="color:var(--text-muted);font-size:.82rem">${r.tipo === 'tornillo' ? 'Tornillo' : 'Caja'}</td>
+        <td id="dep-gest-desc-${r.id}">${esc(r.descripcion)}</td>
+        <td class="text-center">${r.stock_actual}</td>
+        <td class="text-center">
+          <span class="badge ${r.activo ? 'badge-success' : 'badge-default'}">${r.activo ? 'Activo' : 'Inactivo'}</span>
+        </td>
+        <td class="text-center">
+          <button class="btn btn-sm btn-ghost" data-gest-edit="${r.id}" data-desc="${esc(r.descripcion)}" data-activo="${r.activo}">Editar</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('dep-gest-tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-gest-edit]');
+  if (!btn) return;
+  const id     = Number(btn.dataset.gestEdit);
+  const desc   = btn.dataset.desc;
+  const activo = Number(btn.dataset.activo);
+  const row    = $(`dep-gest-row-${id}`);
+  if (!row) return;
+  row.innerHTML = `
+    <td colspan="2">
+      <input type="text" id="dep-gest-inp-${id}" class="input" style="font-size:.87rem;padding:5px 8px" value="${esc(desc)}">
+    </td>
+    <td class="text-center" style="font-size:.82rem;color:var(--text-muted)">${e.target.closest('tr').cells[2].textContent}</td>
+    <td class="text-center">
+      <select id="dep-gest-activo-${id}" class="input select" style="font-size:.82rem;padding:4px 6px;height:auto">
+        <option value="1" ${activo ? 'selected' : ''}>Activo</option>
+        <option value="0" ${!activo ? 'selected' : ''}>Inactivo</option>
+      </select>
+    </td>
+    <td class="text-center" style="white-space:nowrap">
+      <button class="btn btn-sm btn-primary" data-gest-save="${id}">Guardar</button>
+      <button class="btn btn-sm btn-ghost" data-gest-cancel="${id}" style="margin-left:4px">✕</button>
+    </td>`;
+  $(`dep-gest-inp-${id}`).focus();
+});
+
+$('dep-gest-tbody').addEventListener('click', async e => {
+  const saveBtn   = e.target.closest('button[data-gest-save]');
+  const cancelBtn = e.target.closest('button[data-gest-cancel]');
+  if (saveBtn) {
+    const id     = Number(saveBtn.dataset.gestSave);
+    const desc   = $(`dep-gest-inp-${id}`)?.value.trim();
+    const activo = Number($(`dep-gest-activo-${id}`)?.value);
+    if (!desc) { toast('La descripción no puede estar vacía', 'error'); return; }
+    try {
+      await api('PUT', `/produccion/deposito/insumos/${id}`, { descripcion: desc, activo });
+      toast('Insumo actualizado', 'success');
+      await renderDepGestList();
+      loadDeposito();
+    } catch (err) { toast(err.message, 'error'); }
+  }
+  if (cancelBtn) { await renderDepGestList(); }
+});
+
+$('btn-dep-new-add').addEventListener('click', async () => {
+  const tipo = $('inp-dep-new-tipo').value;
+  const desc = $('inp-dep-new-desc').value.trim();
+  if (!desc) { toast('Ingresá una descripción', 'error'); return; }
+  try {
+    await api('POST', '/produccion/deposito/insumos', { tipo, descripcion: desc });
+    $('inp-dep-new-desc').value = '';
+    toast('Insumo agregado', 'success');
+    await renderDepGestList();
+    loadDeposito();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+$('btn-dep-gest-close').addEventListener('click', () => $('dep-gestionar-modal').classList.add('hidden'));
+$('btn-dep-gest-done').addEventListener('click',  () => $('dep-gestionar-modal').classList.add('hidden'));
 
 /* ================================================================ INIT */
 checkAuth();

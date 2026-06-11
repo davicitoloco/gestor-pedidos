@@ -125,6 +125,21 @@ router.get('/movimientos', (req, res) => {
         JOIN products p ON m.product_id = p.id
         LEFT JOIN users u ON m.created_by = u.id
         LEFT JOIN purchases pu ON m.purchase_id = pu.id
+        UNION ALL
+        SELECT dm.created_at,
+               CASE WHEN dm.tipo='ingreso' THEN 'ingreso_deposito' ELSE 'egreso_deposito' END AS tipo,
+               NULL AS product_id, NULL AS product_name,
+               NULL AS categoria, di.descripcion AS pieza,
+               CASE WHEN dm.tipo='ingreso' THEN dm.cantidad ELSE -dm.cantidad END AS cantidad,
+               0.0 AS kg_usados,
+               CASE WHEN dm.motivo != '' AND dm.observaciones != '' THEN dm.motivo || ': ' || dm.observaciones
+                    WHEN dm.motivo != '' THEN dm.motivo
+                    ELSE dm.observaciones END AS notas,
+               COALESCE(u.full_name, u.username) AS created_by_name,
+               NULL AS purchase_doc
+        FROM deposito_movimientos dm
+        JOIN deposito_insumos di ON dm.insumo_id = di.id
+        LEFT JOIN users u ON dm.created_by = u.id
       ) all_movs
       ${where}${prodFilter}
       ORDER BY created_at DESC
@@ -365,6 +380,83 @@ router.post('/ajuste', (req, res) => {
       if (newVal < 0) throw Object.assign(new Error('El ajuste resultaría en stock negativo'), { status: 400 });
       db.prepare(`UPDATE ${table} SET ${campo}=?, updated_at=datetime('now','localtime') WHERE product_id=?`).run(newVal, pid);
       db.prepare(`INSERT INTO prod_movimientos (tipo,product_id,pieza,cantidad,etapa,notas,created_by) VALUES ('ajuste_manual',?,?,?,?,?,?)`).run(pid, campo, d, etapa, notas || `Ajuste ${campo}`, req.session.userId);
+    });
+    res.json({ ok: true });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// ── GET /api/produccion/deposito/insumos ─────────────────────
+
+router.get('/deposito/insumos', (req, res) => {
+  try {
+    const all = req.query.all === '1';
+    const rows = db.prepare(`SELECT * FROM deposito_insumos${all ? '' : ' WHERE activo=1'} ORDER BY tipo DESC, id ASC`).all();
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /api/produccion/deposito/insumos ────────────────────
+
+router.post('/deposito/insumos', (req, res) => {
+  try {
+    const { tipo, descripcion } = req.body;
+    if (!['tornillo','caja'].includes(tipo)) return res.status(400).json({ error: 'Tipo inválido (tornillo/caja)' });
+    if (!descripcion?.trim()) return res.status(400).json({ error: 'Descripción requerida' });
+    const { lastInsertRowid } = db.prepare(`INSERT INTO deposito_insumos (tipo, descripcion) VALUES (?,?)`).run(tipo, descripcion.trim());
+    res.status(201).json(db.prepare('SELECT * FROM deposito_insumos WHERE id=?').get(Number(lastInsertRowid)));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── PUT /api/produccion/deposito/insumos/:id ─────────────────
+
+router.put('/deposito/insumos/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ins = db.prepare('SELECT * FROM deposito_insumos WHERE id=?').get(id);
+    if (!ins) return res.status(404).json({ error: 'Insumo no encontrado' });
+    const descripcion = req.body.descripcion !== undefined ? req.body.descripcion.trim() : ins.descripcion;
+    const activo      = req.body.activo      !== undefined ? (req.body.activo ? 1 : 0)   : ins.activo;
+    if (!descripcion) return res.status(400).json({ error: 'Descripción requerida' });
+    db.prepare(`UPDATE deposito_insumos SET descripcion=?, activo=?, updated_at=datetime('now','localtime') WHERE id=?`).run(descripcion, activo, id);
+    res.json(db.prepare('SELECT * FROM deposito_insumos WHERE id=?').get(id));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /api/produccion/deposito/ingreso ────────────────────
+
+router.post('/deposito/ingreso', (req, res) => {
+  try {
+    const { insumo_id, cantidad, observaciones = '' } = req.body;
+    const id  = Number(insumo_id);
+    const qty = Number(cantidad) || 0;
+    if (!id)    return res.status(400).json({ error: 'Insumo requerido' });
+    if (qty <= 0) return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' });
+    const ins = db.prepare('SELECT * FROM deposito_insumos WHERE id=? AND activo=1').get(id);
+    if (!ins) return res.status(404).json({ error: 'Insumo no encontrado o inactivo' });
+    withTransaction(() => {
+      db.prepare(`UPDATE deposito_insumos SET stock_actual=stock_actual+?, updated_at=datetime('now','localtime') WHERE id=?`).run(qty, id);
+      db.prepare(`INSERT INTO deposito_movimientos (insumo_id,tipo,cantidad,observaciones,created_by) VALUES (?,'ingreso',?,?,?)`).run(id, qty, observaciones, req.session.userId);
+    });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /api/produccion/deposito/egreso ─────────────────────
+
+router.post('/deposito/egreso', (req, res) => {
+  try {
+    const { insumo_id, cantidad, motivo = '', observaciones = '' } = req.body;
+    const id  = Number(insumo_id);
+    const qty = Number(cantidad) || 0;
+    if (!id)    return res.status(400).json({ error: 'Insumo requerido' });
+    if (qty <= 0) return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' });
+    const ins = db.prepare('SELECT * FROM deposito_insumos WHERE id=? AND activo=1').get(id);
+    if (!ins) return res.status(404).json({ error: 'Insumo no encontrado o inactivo' });
+    if (ins.stock_actual < qty)
+      return res.status(400).json({ error: `Stock insuficiente: hay ${ins.stock_actual} unidades` });
+    withTransaction(() => {
+      db.prepare(`UPDATE deposito_insumos SET stock_actual=stock_actual-?, updated_at=datetime('now','localtime') WHERE id=?`).run(qty, id);
+      db.prepare(`INSERT INTO deposito_movimientos (insumo_id,tipo,cantidad,motivo,observaciones,created_by) VALUES (?,'egreso',?,?,?,?)`).run(id, qty, motivo, observaciones, req.session.userId);
     });
     res.json({ ok: true });
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
