@@ -125,7 +125,7 @@ async function showApp() {
   document.querySelectorAll('.strict-admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
   // MP nav visible para admin y fabrica; resto del nav oculto para fabrica
   document.querySelectorAll('.mp-visible').forEach(el => el.classList.toggle('hidden', !canAccessMP()));
-  // prod-visible: visible para admin, subadmin y mp/fábrica
+  // prod-visible: visible para todos los roles excepto vendedor
   document.querySelectorAll('.prod-visible').forEach(el => el.classList.toggle('hidden', !canAccessProd()));
   if (isFabrica()) {
     document.querySelectorAll('.nav-item:not(.mp-visible):not(.prod-visible)').forEach(el => el.classList.add('hidden'));
@@ -229,6 +229,10 @@ function closeMobileSidebar() {
 
 function navigate(section) {
   if (isSubAdmin() && (section === 'usuarios' || section === 'contable')) {
+    toast('Sin acceso a esta sección', 'error');
+    return;
+  }
+  if (isVendor() && section === 'produccion') {
     toast('Sin acceso a esta sección', 'error');
     return;
   }
@@ -4969,7 +4973,7 @@ window.deleteNote = async function(id, entityType, entityId) {
 
 function isFabrica()   { return state.user && state.user.role === 'mp'; }
 function canAccessMP() { return isAdmin() || isFabrica(); }
-function canAccessProd(){ return isAdminLike() || isFabrica(); }
+function canAccessProd(){ return state.user && !isVendor(); }
 
 const MP_SECTIONS = [
   { num: 1, name: 'C/Frnts', unidad: 'kg', items: [
