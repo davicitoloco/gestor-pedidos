@@ -13,10 +13,13 @@ function requireAdmin(req, res, next) {
 router.use(requireAuth, requireAdmin);
 
 function getBalanceData() {
-  // Cash
-  const { cash_in  } = db.prepare("SELECT COALESCE(SUM(amount),0) AS cash_in  FROM cash_movements WHERE type='ingreso'").get();
-  const { cash_out } = db.prepare("SELECT COALESCE(SUM(amount),0) AS cash_out FROM cash_movements WHERE type='egreso'").get();
-  const cash_balance = cash_in - cash_out;
+  // Cash — leer siempre desde el Libro Mayor de la cuenta 1.1.01
+  const { cash_balance } = db.prepare(`
+    SELECT COALESCE(SUM(jel.debit) - SUM(jel.credit), 0) AS cash_balance
+    FROM journal_entry_lines jel
+    JOIN accounts a ON jel.account_id = a.id
+    WHERE a.code = '1.1.01'
+  `).get();
 
   // Banks
   const bank_accounts = db.prepare('SELECT * FROM bank_accounts ORDER BY name').all();
