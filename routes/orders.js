@@ -126,8 +126,11 @@ router.get('/:id/print', (req, res) => {
     const id = Number(req.params.id);
     const order = db.prepare(`
       SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
-             COALESCE(u.full_name, u.username) AS vendor_name
-      FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
+             COALESCE(u.full_name, u.username) AS vendor_name,
+             pl.nombre AS price_list_name
+      FROM orders o
+      LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
+      LEFT JOIN price_lists pl ON o.price_list_id = pl.id
       WHERE o.id = ?
     `).get(id);
     if (!order) return res.status(404).send('Pedido no encontrado');
@@ -251,6 +254,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
     <div class="info-item"><label>Estado</label>
       <p><span class="badge" style="background:${statusBg[order.status]||'#f1f5f9'};color:${statusColor[order.status]||'#475569'}">${esc(order.status)}</span></p>
     </div>
+    ${order.price_list_name ? `<div class="info-item"><label>Lista de precios</label><p>${esc(order.price_list_name)}</p></div>` : ''}
   </div>
   <h3>Detalle del pedido</h3>
   <table>
