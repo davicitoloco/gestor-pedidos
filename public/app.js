@@ -771,8 +771,9 @@ async function loadCustomerList() {
 /* ================================================================ CATALOG SECTION */
 async function loadCatalog() {
   try {
+    const showInactive = $('chk-catalog-show-inactive') && $('chk-catalog-show-inactive').checked;
     const [products, activeList] = await Promise.all([
-      api('GET', '/products?all=1'),
+      api('GET', showInactive ? '/products?all=1' : '/products'),
       api('GET', '/price-lists/active').catch(() => null)
     ]);
     renderCatalog(products);
@@ -785,6 +786,10 @@ async function loadCatalog() {
       }
     }
   } catch (err) { toast(err.message, 'error'); }
+}
+
+if ($('chk-catalog-show-inactive')) {
+  $('chk-catalog-show-inactive').addEventListener('change', loadCatalog);
 }
 
 /* ================================================================ LISTAS DE PRECIO */
