@@ -127,7 +127,7 @@ router.get('/:id/print', (req, res) => {
     const order = db.prepare(`
       SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
              COALESCE(u.full_name, u.username) AS vendor_name,
-             pl.nombre AS price_list_name
+             COALESCE(pl.nombre, (SELECT nombre FROM price_lists WHERE active = 1 ORDER BY id DESC LIMIT 1)) AS price_list_name
       FROM orders o
       LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
       LEFT JOIN price_lists pl ON o.price_list_id = pl.id
