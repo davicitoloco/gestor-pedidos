@@ -5992,13 +5992,13 @@ function openProdArmarModal(pid, name, rd) {
   $('prod-armar-info').innerHTML =
     `Sincadas → Cajas: <b>${rd.cs||0}</b> | Tapas: <b>${rd.ts||0}</b> | Crem.: <b>${rd.crs||0}</b> | Comb.: <b>${rd.cos||0}</b> | C/Frnts: <b>${rd.cfs||0}</b><br>Directas → Llaves: <b>${rd.ll||0}</b> | Nueces: <b>${rd.nu||0}</b> | Pestillos: <b>${rd.pe||0}</b>`;
   $('inp-prod-arm-cantidad').value = 1;
-  // Pre-fill consumo fields based on available stock (1 if > 0, else 0)
+  // Pre-fill consumo fields with default consumption per cerradura (0 if no stock)
   $('inp-arm-cajas').value          = (rd.cs||0) > 0 ? 1 : 0;
   $('inp-arm-tapas').value          = (rd.ts||0) > 0 ? 1 : 0;
   $('inp-arm-cremalleras').value    = (rd.crs||0) > 0 ? 1 : 0;
   $('inp-arm-combinaciones').value  = (rd.cos||0) > 0 ? 1 : 0;
   $('inp-arm-contrafrentes').value  = (rd.cfs||0) > 0 ? 1 : 0;
-  $('inp-arm-llaves').value         = (rd.ll||0) > 0 ? 1 : 0;
+  $('inp-arm-llaves').value         = (rd.ll||0) > 0 ? 2 : 0;
   $('inp-arm-nueces').value         = (rd.nu||0) > 0 ? 1 : 0;
   $('inp-arm-pestillos').value      = (rd.pe||0) > 0 ? 1 : 0;
   $('inp-arm-notas').value          = '';
