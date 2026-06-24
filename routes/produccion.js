@@ -2,6 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 const { db, withTransaction } = require('../db');
+const { getInsertSucursalId } = require('../lib/sucursal');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -351,6 +352,15 @@ router.post('/armar', (req, res) => {
         .map(p => `${p}×${cons[p]}`)
         .join(', ');
       db.prepare(`INSERT INTO prod_movimientos (tipo,product_id,pieza,cantidad,notas,created_by) VALUES ('armado',?,?,?,?,?)`).run(pid, 'cerradura', qty, `[${consumoDesc}] ${notas}`.trim(), req.session.userId);
+
+      // Sincroniza con Gestión de Stock: lo armado pasa a estar disponible para vender.
+      const prevStock = db.prepare('SELECT stock FROM products WHERE id=?').get(pid)?.stock || 0;
+      const newStock = prevStock + qty;
+      db.prepare('UPDATE products SET stock=? WHERE id=?').run(newStock, pid);
+      db.prepare(`
+        INSERT INTO stock_movements (product_id, type, quantity, reference, notes, previous_qty, new_qty, created_by, sucursal_id)
+        VALUES (?, 'ingreso', ?, 'Armado de producción', ?, ?, ?, ?, ?)
+      `).run(pid, qty, notas || '', prevStock, newStock, req.session.userId, getInsertSucursalId(req));
     });
     res.json({ ok: true });
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
