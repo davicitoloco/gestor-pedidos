@@ -283,9 +283,11 @@ async function loadOrders() {
     if (state.filterStatus !== 'Todos') params.set('status', state.filterStatus);
     const q = ($('inp-orders-search').value || '').trim();
     if (q) params.set('search', q);
+    const modelo = ($('inp-orders-modelo').value || '').trim();
+    if (modelo) params.set('modelo', modelo);
     const qs = params.toString() ? `?${params}` : '';
     const orders = await api('GET', `/orders${qs}`);
-    renderOrders(orders, q);
+    renderOrders(orders, q, modelo);
   } catch (err) { toast(err.message, 'error'); }
 }
 
@@ -294,14 +296,30 @@ function applyOrderSearch() {
   _ordersSearchTimer = setTimeout(loadOrders, 250);
 }
 
-function renderOrders(orders, searchQuery = '') {
+function applyOrderModeloFilter() {
+  $('btn-orders-modelo-clear').style.display = $('inp-orders-modelo').value ? '' : 'none';
+  clearTimeout(_ordersSearchTimer);
+  _ordersSearchTimer = setTimeout(loadOrders, 250);
+}
+
+function renderOrders(orders, searchQuery = '', modeloQuery = '') {
   const tbody = $('orders-tbody');
   const noEl  = $('no-orders');
+  const infoEl = $('orders-modelo-info');
   $('list-count').textContent = orders.length === 0 ? 'Sin pedidos' : `${orders.length} pedido${orders.length !== 1 ? 's' : ''}`;
+
+  if (modeloQuery) {
+    infoEl.style.display = '';
+    infoEl.textContent = `${orders.length} pedido${orders.length !== 1 ? 's' : ''} con el modelo "${modeloQuery}"`;
+  } else {
+    infoEl.style.display = 'none';
+  }
 
   if (orders.length === 0) {
     tbody.innerHTML = '';
-    $('no-orders-msg').textContent = searchQuery ? 'No se encontraron pedidos' : 'No hay pedidos';
+    $('no-orders-msg').textContent = modeloQuery
+      ? 'No se encontraron pedidos con ese modelo'
+      : (searchQuery ? 'No se encontraron pedidos' : 'No hay pedidos');
     noEl.classList.remove('hidden');
     return;
   }
@@ -310,7 +328,7 @@ function renderOrders(orders, searchQuery = '') {
   tbody.innerHTML = orders.map(o => `
     <tr data-id="${o.id}" style="cursor:pointer">
       <td><span class="order-num">#${esc(o.order_number)}</span></td>
-      <td>${esc(o.customer_name)}</td>
+      <td>${esc(o.customer_name)}${modeloQuery && o.modelo_qty ? `<br><span style="font-size:.76rem;color:var(--primary);font-weight:600">${o.modelo_qty % 1 === 0 ? o.modelo_qty : o.modelo_qty.toFixed(2)} × ${esc(modeloQuery)}</span>` : ''}</td>
       <td>${statusBadge(o.status)}</td>
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(o.vendor_name||'—')}</td>` : ''}
       <td class="text-center col-mobile-hide">${o.total_units % 1 === 0 ? o.total_units : (o.total_units || 0).toFixed(2)}</td>
@@ -337,6 +355,12 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
   btn.addEventListener('click', () => { state.filterStatus = btn.dataset.status; loadOrders(); });
 });
 $('inp-orders-search').addEventListener('input', applyOrderSearch);
+$('inp-orders-modelo').addEventListener('input', applyOrderModeloFilter);
+$('btn-orders-modelo-clear').addEventListener('click', () => {
+  $('inp-orders-modelo').value = '';
+  $('btn-orders-modelo-clear').style.display = 'none';
+  loadOrders();
+});
 $('btn-new-order').addEventListener('click', () => openOrderForm(null));
 
 function showOrdersSubview(view) {

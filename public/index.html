@@ -136,7 +136,12 @@
           <button class="filter-btn" data-status="Entregado">Entregado</button>
           <button class="filter-btn" data-status="Cancelado">Cancelado</button>
           <input type="search" id="inp-orders-search" class="search-orders" placeholder="Buscar por nº o cliente…" autocomplete="off">
+          <div class="modelo-filter-wrap" style="position:relative;display:flex;align-items:center">
+            <input type="text" id="inp-orders-modelo" class="search-orders" list="products-datalist" placeholder="Filtrar por modelo de cerradura…" autocomplete="off" style="padding-right:28px">
+            <button type="button" id="btn-orders-modelo-clear" title="Limpiar filtro" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;padding:2px">✕</button>
+          </div>
         </div>
+        <p id="orders-modelo-info" class="page-subtitle" style="display:none;margin:-6px 0 10px"></p>
         <div class="table-wrap">
           <table class="table">
             <thead>

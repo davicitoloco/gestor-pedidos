@@ -65,14 +65,20 @@ function getCompanyName() {
 // ── GET /api/orders ───────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, modelo } = req.query;
     const vendorFilter = isVendor(req) ? `AND o.created_by = ${req.session.userId}` : '';
     const statusFilter = (status && status !== 'Todos') ? `AND o.status = ?` : '';
     const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ? OR LOWER(COALESCE(u.full_name, u.username)) LIKE ?)` : '';
+    const modeloFilter = modelo ? `AND EXISTS (SELECT 1 FROM order_items oim WHERE oim.order_id = o.id AND LOWER(oim.product_name) LIKE ?)` : '';
+    const modeloQtySelect = modelo
+      ? `, COALESCE((SELECT SUM(oiq.quantity) FROM order_items oiq WHERE oiq.order_id = o.id AND LOWER(oiq.product_name) LIKE ?), 0) AS modelo_qty`
+      : '';
     const sf = getSucursalFilter(req, 'o');
     const params = [];
+    if (modelo) params.push(`%${modelo.toLowerCase()}%`);
     if (status && status !== 'Todos') params.push(status);
     if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q, q); }
+    if (modelo) params.push(`%${modelo.toLowerCase()}%`);
     params.push(...sf.params);
 
     const sql = `
@@ -91,10 +97,11 @@ router.get('/', (req, res) => {
           * (1.0 - COALESCE(o.discount2,0)/100.0)
           * (1.0 - COALESCE(o.discount3,0)/100.0)
           * (1.0 - COALESCE(o.discount4,0)/100.0) AS total
+        ${modeloQtySelect}
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
-      WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter} ${sf.clause}
+      WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter} ${modeloFilter} ${sf.clause}
       GROUP BY o.id
       ORDER BY o.order_sequence DESC
     `;
