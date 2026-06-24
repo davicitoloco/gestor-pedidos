@@ -116,6 +116,11 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .table tbody tr:last-child{border-bottom:none}
 .table tbody tr:hover{background:var(--primary-light)}
 .table tbody td{padding:11px 14px;vertical-align:middle}
+
+/* Sticky 2-row group header (e.g. Producción → Potencial para armar) */
+.table-sticky-head thead th{position:sticky;z-index:5;line-height:16px}
+.table-sticky-head thead tr:nth-child(1) th{top:0;z-index:6}
+.table-sticky-head thead tr:nth-child(2) th{top:37px}
 .order-num{font-weight:700;font-family:'SF Mono','Fira Code',monospace;color:var(--primary);font-size:.92rem}
 
 /* ============================================================ BADGES */
