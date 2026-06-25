@@ -659,12 +659,13 @@
             <thead><tr>
               <th>Artículo</th>
               <th class="text-center" style="width:120px">Stock actual</th>
-              <th class="text-center" style="width:150px">Pedidos pendientes</th>
+              <th class="text-center" style="width:150px">Ganchera</th>
               <th class="text-center" style="width:120px">Diferencia</th>
               <th style="width:150px">Última actualiz.</th>
               <th class="text-center" style="width:90px">Editar</th>
             </tr></thead>
             <tbody id="stock-tbody"></tbody>
+            <tfoot id="stock-tfoot"></tfoot>
           </table>
           <div id="no-stock" class="empty-state hidden">
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/></svg>
@@ -2376,7 +2377,7 @@
       <div id="stock-edit-tab-ajuste">
         <div class="field">
           <label class="label required">Nuevo stock total</label>
-          <input type="number" id="inp-stock-edit-qty" class="input" min="0" step="1" placeholder="0">
+          <input type="number" id="inp-stock-edit-qty" class="input" step="1" placeholder="0">
         </div>
         <div class="field" style="margin-top:14px">
           <label class="label">Nota (opcional)</label>

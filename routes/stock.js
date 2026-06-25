@@ -113,7 +113,7 @@ router.put('/:article_id', requireAdmin, (req, res) => {
     if (!product) return res.status(404).json({ error: 'Artículo no encontrado' });
 
     const newQty = parseFloat(req.body.quantity);
-    if (isNaN(newQty) || newQty < 0) return res.status(400).json({ error: 'Cantidad inválida' });
+    if (isNaN(newQty)) return res.status(400).json({ error: 'Cantidad inválida' });
 
     const prevQty = product.stock;
     const delta   = Math.abs(newQty - prevQty);

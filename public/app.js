@@ -2896,7 +2896,11 @@ function renderStock(products) {
   if (!products.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
   noEl.classList.add('hidden');
 
+  let totalStock = 0, totalPending = 0, totalDiff = 0;
   tbody.innerHTML = products.map(p => {
+    totalStock   += p.stock;
+    totalPending += p.pending_orders;
+    totalDiff    += p.difference;
     const diff    = p.difference;
     const diffFmt = diff < 0
       ? `<span style="color:var(--error);font-weight:700">${diff}</span>`
@@ -2918,6 +2922,18 @@ function renderStock(products) {
       </td>
     </tr>`;
   }).join('');
+
+  const tfoot = $('stock-tfoot');
+  if (tfoot) {
+    const diffColor = totalDiff < 0 ? 'var(--error)' : 'var(--success)';
+    tfoot.innerHTML = `<tr style="border-top:2px solid var(--border);font-weight:700;background:var(--surface)">
+      <td style="padding:10px 12px">TOTAL</td>
+      <td class="text-center">${totalStock}</td>
+      <td class="text-center">${totalPending}</td>
+      <td class="text-center" style="color:${diffColor}">${totalDiff >= 0 ? '+' : ''}${totalDiff}</td>
+      <td colspan="2"></td>
+    </tr>`;
+  }
 }
 
 // ── Ingreso modal (kept as-is) ────────────────────────────────────────────────
@@ -3008,7 +3024,7 @@ $('btn-stock-edit-save').addEventListener('click', async () => {
     if (_stockEditTab === 'ajuste') {
       const quantity = parseFloat($('inp-stock-edit-qty').value);
       const note     = $('inp-stock-edit-note').value.trim();
-      if (isNaN(quantity) || quantity < 0) { toast('Ingresá una cantidad válida (≥ 0)', 'error'); return; }
+      if (isNaN(quantity)) { toast('Ingresá una cantidad válida', 'error'); return; }
       await api('PUT', `/stock/${_stockEditId}`, { quantity, note });
       toast('Stock actualizado', 'success');
     } else if (_stockEditTab === 'ingreso') {

@@ -754,7 +754,7 @@ router.post('/:id/deliveries', (req, res) => {
         }
         if (productId) {
           const qty = parseFloat(item.quantity_delivered);
-          db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(qty, productId);
+          db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').run(qty, productId);
           db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by, sucursal_id) VALUES (?, 'egreso', ?, ?, ?, ?)`)
             .run(productId, qty, ref, req.session.userId, getInsertSucursalId(req));
         }
