@@ -34,7 +34,9 @@ router.get('/', requireAdmin, (req, res) => {
       SELECT *, (stock - pending_orders) AS difference FROM (
         SELECT p.id, p.name, p.stock, p.stock_min, p.active, p.pending_extra,
           COALESCE((
-            SELECT SUM(oi.quantity)
+            SELECT SUM(oi.quantity - COALESCE((
+              SELECT SUM(di.quantity_delivered) FROM delivery_items di WHERE di.order_item_id = oi.id
+            ), 0))
             FROM order_items oi
             JOIN orders o ON oi.order_id = o.id
             WHERE oi.product_id = p.id
