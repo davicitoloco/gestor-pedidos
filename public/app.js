@@ -2912,7 +2912,7 @@ function renderStock(products) {
       <td class="text-center">${diffFmt}</td>
       <td>${lastUpd}</td>
       <td class="text-center">
-        <button class="btn-icon" onclick="openStockEditModal(${p.id},'${esc(p.name)}',${p.stock})" title="Ajustar stock">
+        <button class="btn-icon" onclick="openStockEditModal(${p.id},'${esc(p.name)}',${p.stock},${p.pending_extra||0})" title="Editar artículo">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
       </td>
@@ -2958,17 +2958,43 @@ $('btn-ingreso-confirm').addEventListener('click', async () => {
   finally { btn.disabled = false; }
 });
 
-// ── Edit (ajuste manual) modal ────────────────────────────────────────────────
+// ── Edit modal (tabs: ajuste / ingreso / pedidos extra) ───────────────────────
 let _stockEditId = null;
+let _stockEditTab = 'ajuste';
 
-window.openStockEditModal = function(id, name, currentStock) {
+function stockEditSwitchTab(tab) {
+  _stockEditTab = tab;
+  ['ajuste','ingreso','pedidos'].forEach(t => {
+    $(`stock-edit-tab-${t}`).classList.toggle('hidden', t !== tab);
+  });
+  document.querySelectorAll('.stock-edit-tab').forEach(btn => {
+    const active = btn.dataset.tab === tab;
+    btn.style.borderBottomColor = active ? 'var(--primary)' : 'transparent';
+    btn.style.color = active ? 'var(--primary)' : 'var(--text-muted)';
+    btn.style.fontWeight = active ? '600' : '500';
+  });
+  setTimeout(() => {
+    if (tab === 'ajuste')   { $('inp-stock-edit-qty').focus(); $('inp-stock-edit-qty').select(); }
+    if (tab === 'ingreso')  { $('inp-stock-edit-ingreso-qty').focus(); }
+    if (tab === 'pedidos')  { $('inp-stock-edit-pending-extra').focus(); $('inp-stock-edit-pending-extra').select(); }
+  }, 50);
+}
+
+document.querySelectorAll('.stock-edit-tab').forEach(btn => {
+  btn.addEventListener('click', () => stockEditSwitchTab(btn.dataset.tab));
+});
+
+window.openStockEditModal = function(id, name, currentStock, pendingExtra) {
   _stockEditId = id;
   $('stock-edit-product-name').textContent = name;
   $('stock-edit-prev').textContent = `Stock actual: ${currentStock}`;
   $('inp-stock-edit-qty').value  = currentStock;
   $('inp-stock-edit-note').value = '';
+  $('inp-stock-edit-ingreso-qty').value  = '';
+  $('inp-stock-edit-ingreso-note').value = '';
+  $('inp-stock-edit-pending-extra').value = pendingExtra ?? 0;
   $('stock-edit-modal').classList.remove('hidden');
-  setTimeout(() => { $('inp-stock-edit-qty').focus(); $('inp-stock-edit-qty').select(); }, 50);
+  stockEditSwitchTab('ajuste');
 };
 
 $('btn-stock-edit-cancel').addEventListener('click', () => $('stock-edit-modal').classList.add('hidden'));
@@ -2976,15 +3002,28 @@ $('stock-edit-modal').addEventListener('click', e => { if (e.target === $('stock
 
 $('btn-stock-edit-save').addEventListener('click', async () => {
   if (!_stockEditId) return;
-  const quantity = parseFloat($('inp-stock-edit-qty').value);
-  const note     = $('inp-stock-edit-note').value.trim();
-  if (isNaN(quantity) || quantity < 0) { toast('Ingresá una cantidad válida (≥ 0)', 'error'); return; }
   const btn = $('btn-stock-edit-save');
   btn.disabled = true;
   try {
-    await api('PUT', `/stock/${_stockEditId}`, { quantity, note });
+    if (_stockEditTab === 'ajuste') {
+      const quantity = parseFloat($('inp-stock-edit-qty').value);
+      const note     = $('inp-stock-edit-note').value.trim();
+      if (isNaN(quantity) || quantity < 0) { toast('Ingresá una cantidad válida (≥ 0)', 'error'); return; }
+      await api('PUT', `/stock/${_stockEditId}`, { quantity, note });
+      toast('Stock actualizado', 'success');
+    } else if (_stockEditTab === 'ingreso') {
+      const quantity = parseFloat($('inp-stock-edit-ingreso-qty').value);
+      const notes    = $('inp-stock-edit-ingreso-note').value.trim();
+      if (!quantity || quantity <= 0) { toast('Ingresá una cantidad mayor a 0', 'error'); return; }
+      await api('POST', '/stock/ingresos', { product_id: _stockEditId, quantity, notes });
+      toast('Ingreso registrado', 'success');
+    } else if (_stockEditTab === 'pedidos') {
+      const pending_extra = parseInt($('inp-stock-edit-pending-extra').value, 10);
+      if (isNaN(pending_extra) || pending_extra < 0) { toast('Ingresá un valor válido (≥ 0)', 'error'); return; }
+      await api('PUT', `/stock/${_stockEditId}/pending-extra`, { pending_extra });
+      toast('Pedidos extra actualizados', 'success');
+    }
     $('stock-edit-modal').classList.add('hidden');
-    toast('Stock actualizado', 'success');
     loadStock();
     await loadProductCatalog();
   } catch (err) { toast(err.message, 'error'); }

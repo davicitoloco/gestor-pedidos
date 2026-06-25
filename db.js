@@ -384,6 +384,7 @@ addColIfMissing('payments',         'sucursal_id', 'INTEGER REFERENCES sucursale
 addColIfMissing('supplier_payments','sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('cheques',          'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('stock_movements',  'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('products', 'pending_extra', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`CREATE TABLE IF NOT EXISTS supplier_visibility (
   supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
