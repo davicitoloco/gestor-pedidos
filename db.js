@@ -296,6 +296,41 @@ db.exec(`
     sucursal_id INTEGER NOT NULL REFERENCES sucursales(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, sucursal_id)
   );
+  CREATE TABLE IF NOT EXISTS order_returns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    return_type TEXT NOT NULL,
+    total_returned REAL NOT NULL DEFAULT 0,
+    credit_note_number TEXT NOT NULL,
+    notes TEXT DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    sucursal_id INTEGER REFERENCES sucursales(id),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS order_return_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    return_id INTEGER NOT NULL REFERENCES order_returns(id) ON DELETE CASCADE,
+    order_item_id INTEGER NOT NULL REFERENCES order_items(id),
+    product_id INTEGER REFERENCES products(id),
+    product_name TEXT NOT NULL,
+    quantity_returned REAL NOT NULL DEFAULT 0,
+    unit_price REAL NOT NULL DEFAULT 0,
+    subtotal_returned REAL NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS repair_stock (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER REFERENCES products(id),
+    product_name TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 0,
+    origin_return_id INTEGER NOT NULL REFERENCES order_returns(id) ON DELETE CASCADE,
+    origin_order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'en_reparacion',
+    repaired_at TEXT DEFAULT NULL,
+    repaired_by INTEGER REFERENCES users(id),
+    notes_repair TEXT DEFAULT '',
+    sucursal_id INTEGER REFERENCES sucursales(id),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
@@ -393,6 +428,10 @@ addColIfMissing('stock_movements',  'sucursal_id', 'INTEGER REFERENCES sucursale
     ins.run('6.1.01','Gastos administrativos',     'Gasto',  '',           1,'6.1');
     ins.run('6.1.02','Gastos financieros',         'Gasto',  '',           1,'6.1');
   }
+  // Cuenta regularizadora de Devoluciones de Ventas
+  db.prepare('INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code) VALUES (?,?,?,?,?,?)')
+    .run('4.1.02', 'Devoluciones de Ventas', 'Ingreso', '', 1, '4.1');
+
   // Create accounting accounts for existing bank_accounts
   try {
     const bankAccts = db.prepare('SELECT * FROM bank_accounts').all();

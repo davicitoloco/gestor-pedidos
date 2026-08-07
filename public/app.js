@@ -25,7 +25,7 @@ function formatCuit(c) {
   return `${d.slice(0,2)}-${d.slice(2,10)}-${d.slice(10)}`;
 }
 function statusBadge(s) {
-  const cls = { 'Pendiente':'warning','En preparación':'info','Entregado':'success','Cancelado':'default','Entrega parcial':'partial' };
+  const cls = { 'Pendiente':'warning','En preparación':'info','Entregado':'success','Cancelado':'default','Entrega parcial':'partial','Entregado con devolución':'return' };
   return `<span class="badge badge-${cls[s]||'default'}">${esc(s)}</span>`;
 }
 function isAdmin()      { return state.user && state.user.role === 'admin'; }
@@ -287,7 +287,10 @@ function renderOrders(orders, searchQuery = '') {
     <tr data-id="${o.id}" style="cursor:pointer">
       <td><span class="order-num">#${esc(o.order_number)}</span></td>
       <td>${esc(o.customer_name)}</td>
-      <td>${statusBadge(o.status)}</td>
+      <td>${statusBadge(o.status)}
+        ${o.has_rechazo ? `<span class="badge badge-return" title="Tiene devoluciones por rechazo" style="margin-left:4px">🔄</span>` : ''}
+        ${o.has_repair_pending ? `<span class="badge badge-warning" title="Tiene ítems en reparación pendientes" style="margin-left:4px">🔧</span>` : ''}
+      </td>
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(o.vendor_name||'—')}</td>` : ''}
       <td class="text-center col-mobile-hide">${o.item_count}</td>
       <td class="text-right" style="font-weight:600">${fmtMoney(o.total)}</td>
@@ -332,6 +335,7 @@ async function deleteOrder(id, num) {
 /* ================================================================ ORDER FORM */
 async function openOrderForm(orderId, prefillCustomer = null) {
   state.editingOrderId = orderId || null;
+  state.currentOrderStatus = null;
   state.items = [];
 
   $('form-title').textContent = orderId ? 'Editar Pedido' : 'Nuevo Pedido';
@@ -356,6 +360,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('inp-order-number').value   = `#${o.order_number}`;
       $('inp-customer').value       = o.customer_name;
       $('inp-status').value         = o.status;
+      state.currentOrderStatus      = o.status;
       $('inp-delivery-date').value  = o.delivery_date || '';
       $('inp-notes').value          = o.notes || '';
       $('inp-disc1').value = o.discount  || 0;
@@ -385,6 +390,16 @@ async function openOrderForm(orderId, prefillCustomer = null) {
     loadDeliveries(orderId);
   } else {
     delivCard.classList.add('hidden');
+  }
+
+  // Mostrar/ocultar sección de devoluciones
+  const returnsCard = $('returns-card');
+  if (orderId) {
+    returnsCard.classList.remove('hidden');
+    updateReturnButtonVisibility();
+    loadReturns(orderId);
+  } else {
+    returnsCard.classList.add('hidden');
   }
 
   showOrdersSubview('form');
@@ -1076,7 +1091,7 @@ function renderStatusChart(byStatus) {
   if (!canvas || typeof Chart === 'undefined') return;
   if (state.charts.status) state.charts.status.destroy();
 
-  const colorMap = { 'Pendiente':'#f59e0b','En preparación':'#3b82f6','Entregado':'#10b981','Cancelado':'#94a3b8' };
+  const colorMap = { 'Pendiente':'#f59e0b','En preparación':'#3b82f6','Entregado':'#10b981','Entregado con devolución':'#f97316','Cancelado':'#94a3b8' };
   const labels = byStatus.map(s => s.status);
   const data   = byStatus.map(s => s.cnt);
   const colors = labels.map(l => colorMap[l] || '#cbd5e1');
@@ -1573,8 +1588,191 @@ $('btn-delivery-confirm').addEventListener('click', async () => {
     // Refrescar estado del pedido en el form
     const updated = await api('GET', `/orders/${orderId}`);
     $('inp-status').value = updated.status;
+    state.currentOrderStatus = updated.status;
     $('form-status-badge').innerHTML = statusBadge(updated.status);
+    updateReturnButtonVisibility();
     loadDeliveries(orderId);
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+/* ================================================================ DEVOLUCIONES */
+function updateReturnButtonVisibility() {
+  const canReturn = isAdminLike() && ['Entregado', 'Entrega parcial', 'Entregado con devolución'].includes(state.currentOrderStatus);
+  $('btn-register-return').classList.toggle('hidden', !canReturn);
+}
+
+async function loadReturns(orderId) {
+  try {
+    const [order, returns] = await Promise.all([
+      api('GET', `/orders/${orderId}`),
+      api('GET', `/orders/${orderId}/returns`)
+    ]);
+    renderReturns(returns, order);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderReturns(returns, order) {
+  const body = $('returns-body');
+
+  if (!returns.length) {
+    body.innerHTML = '<div class="empty-items">Todavía no hay devoluciones registradas para este pedido.</div>';
+    return;
+  }
+
+  const totalOriginal = (order.items || []).reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+  const totalReturned = returns.reduce((s, r) => s + r.total_returned, 0);
+  const totalNet = totalOriginal - totalReturned;
+
+  body.innerHTML = returns.map(r => `
+    <div class="delivery-entry">
+      <div class="delivery-entry-header">
+        <span class="badge ${r.return_type === 'rechazo' ? 'badge-return' : 'badge-warning'}">
+          ${r.return_type === 'rechazo' ? '🔴 Rechazo' : '🔧 Reparación'}
+        </span>
+        <span class="delivery-date">${fmtDateTime(r.created_at)}</span>
+        ${r.created_by_name ? `<span style="color:var(--text-muted);font-size:.82rem">por ${esc(r.created_by_name)}</span>` : ''}
+        <a href="/api/orders/${order.id}/returns/${r.id}/nota-credito" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:auto;padding:3px 9px;font-size:.78rem">${esc(r.credit_note_number)} ↓</a>
+      </div>
+      <div class="delivery-items-list">
+        ${r.items.map(it => `
+          <span class="delivery-item-chip">
+            ${esc(it.product_name)} &times; <strong>${it.quantity_returned}</strong> = ${fmtMoney(it.subtotal_returned)}
+          </span>
+        `).join('')}
+      </div>
+      ${r.notes ? `<div class="delivery-notes">${esc(r.notes)}</div>` : ''}
+    </div>
+  `).join('') + `
+    <div style="padding:14px 16px;display:flex;justify-content:flex-end">
+      <div class="totals-box" style="min-width:260px">
+        <div class="total-row"><span>Total original:</span><span class="total-value">${fmtMoney(totalOriginal)}</span></div>
+        <div class="total-row"><span>Total devoluciones:</span><span class="total-value total-discount">−${fmtMoney(totalReturned)}</span></div>
+        <div class="total-row total-final-row"><span class="total-label">Total neto</span><span class="total-final">${fmtMoney(totalNet)}</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function getReturnType() {
+  const el = document.querySelector('input[name="return-type"]:checked');
+  return el ? el.value : 'rechazo';
+}
+
+function updateReturnConfirmMsg() {
+  const type = getReturnType();
+  let totalQty = 0;
+  document.querySelectorAll('.return-qty-inp').forEach(inp => { totalQty += parseFloat(inp.value) || 0; });
+  const msgEl = $('return-confirm-msg');
+  if (totalQty <= 0) { msgEl.classList.add('hidden'); return; }
+  msgEl.classList.remove('hidden');
+  msgEl.className = `return-confirm-msg ${type}`;
+  msgEl.textContent = type === 'rechazo'
+    ? `${totalQty} unidad${totalQty !== 1 ? 'es' : ''} volverán al stock`
+    : `${totalQty} unidad${totalQty !== 1 ? 'es' : ''} irán a Reparaciones`;
+}
+
+document.querySelectorAll('.return-type-option').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.return-type-option').forEach(o => o.classList.remove('active'));
+    el.classList.add('active');
+    el.querySelector('input').checked = true;
+    updateReturnConfirmMsg();
+  });
+});
+
+async function openReturnModal() {
+  const orderId = state.editingOrderId;
+  if (!orderId) return;
+
+  try {
+    const [order, deliveries, returns] = await Promise.all([
+      api('GET', `/orders/${orderId}`),
+      api('GET', `/orders/${orderId}/deliveries`),
+      api('GET', `/orders/${orderId}/returns`)
+    ]);
+
+    const deliveredMap = {};
+    for (const d of deliveries)
+      for (const di of d.items) deliveredMap[di.order_item_id] = (deliveredMap[di.order_item_id] || 0) + di.quantity_delivered;
+    const returnedMap = {};
+    for (const r of returns)
+      for (const it of r.items) returnedMap[it.order_item_id] = (returnedMap[it.order_item_id] || 0) + it.quantity_returned;
+
+    const modalItems = order.items
+      .map(item => ({
+        order_item_id: item.id,
+        product_name:  item.product_name,
+        available:     Math.max(0, (deliveredMap[item.id] || 0) - (returnedMap[item.id] || 0))
+      }))
+      .filter(it => it.available > 0);
+
+    if (!modalItems.length) { toast('No hay unidades disponibles para devolver en este pedido', 'error'); return; }
+
+    $('return-modal-tbody').innerHTML = modalItems.map(it => `
+      <tr>
+        <td>${esc(it.product_name)}</td>
+        <td class="text-right">${it.available}</td>
+        <td class="text-right">
+          <input type="number" class="input return-qty-inp" data-item-id="${it.order_item_id}"
+            min="0" max="${it.available}" step="any" value="0"
+            style="width:80px;text-align:right;padding:5px 8px">
+        </td>
+      </tr>
+    `).join('');
+    document.querySelectorAll('.return-qty-inp').forEach(inp => inp.addEventListener('input', updateReturnConfirmMsg));
+
+    $('inp-return-notes').value = '';
+    document.querySelectorAll('.return-type-option').forEach(el => el.classList.toggle('active', el.dataset.type === 'rechazo'));
+    document.querySelector('input[name="return-type"][value="rechazo"]').checked = true;
+    updateReturnConfirmMsg();
+
+    $('return-modal-form').classList.remove('hidden');
+    $('return-modal-success').classList.add('hidden');
+    $('return-modal').classList.remove('hidden');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-register-return').addEventListener('click', openReturnModal);
+$('btn-return-cancel').addEventListener('click', () => $('return-modal').classList.add('hidden'));
+$('btn-return-close').addEventListener('click', () => {
+  $('return-modal').classList.add('hidden');
+  if (state.editingOrderId) loadReturns(state.editingOrderId);
+});
+$('return-modal').addEventListener('click', e => { if (e.target === $('return-modal')) $('return-modal').classList.add('hidden'); });
+
+$('btn-return-confirm').addEventListener('click', async () => {
+  const orderId = state.editingOrderId;
+  if (!orderId) return;
+
+  const items = [];
+  document.querySelectorAll('.return-qty-inp').forEach(inp => {
+    const qty = parseFloat(inp.value) || 0;
+    if (qty > 0) items.push({ order_item_id: Number(inp.dataset.itemId), quantity_returned: qty });
+  });
+  if (!items.length) { toast('Ingresá al menos una cantidad mayor a 0', 'error'); return; }
+
+  const btn = $('btn-return-confirm');
+  btn.disabled = true;
+  try {
+    const created = await api('POST', `/orders/${orderId}/returns`, {
+      return_type: getReturnType(),
+      notes: $('inp-return-notes').value.trim(),
+      items
+    });
+    toast('Devolución registrada', 'success');
+
+    const updated = await api('GET', `/orders/${orderId}`);
+    $('inp-status').value = updated.status;
+    state.currentOrderStatus = updated.status;
+    $('form-status-badge').innerHTML = statusBadge(updated.status);
+    updateReturnButtonVisibility();
+    loadReturns(orderId);
+
+    $('return-success-detail').textContent = `${created.credit_note_number} — ${fmtMoney(created.total_returned)}`;
+    $('btn-return-download-nc').href = `/api/orders/${orderId}/returns/${created.id}/nota-credito`;
+    $('return-modal-form').classList.add('hidden');
+    $('return-modal-success').classList.remove('hidden');
   } catch (err) { toast(err.message, 'error'); }
   finally { btn.disabled = false; }
 });
@@ -1796,15 +1994,105 @@ function showStockTab(tab) {
   document.querySelectorAll('.stock-tab').forEach(b => b.classList.toggle('active', b.dataset.stockTab === tab));
   $('stock-tab-lista').classList.toggle('hidden', tab !== 'lista');
   $('stock-tab-historial').classList.toggle('hidden', tab !== 'historial');
+  $('stock-tab-reparaciones').classList.toggle('hidden', tab !== 'reparaciones');
 }
 document.querySelectorAll('.stock-tab').forEach(b => {
   b.addEventListener('click', () => {
     showStockTab(b.dataset.stockTab);
     if (b.dataset.stockTab === 'historial') loadStockHistory(1);
+    if (b.dataset.stockTab === 'reparaciones') loadRepairs();
   });
 });
 $('btn-refresh-stock').addEventListener('click', loadStock);
 $('btn-refresh-stock-hist').addEventListener('click', () => loadStockHistory(1));
+$('btn-refresh-repairs').addEventListener('click', loadRepairs);
+
+/* ================================================================ REPARACIONES */
+async function loadRepairs() {
+  try {
+    const data = await api('GET', '/stock/repairs');
+    renderRepairs(data);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderRepairs(data) {
+  const { items, summary } = data;
+  $('repairs-pending-count').textContent = `${summary.pending_count} (${summary.pending_qty}u)`;
+  $('repairs-month-count').textContent   = `${summary.repaired_month_count} (${summary.repaired_month_qty}u)`;
+
+  const pending = items.filter(r => r.status === 'en_reparacion');
+  const done    = items.filter(r => r.status === 'reparado');
+
+  const pendTbody = $('repairs-pending-tbody');
+  const noPend    = $('no-repairs-pending');
+  if (!pending.length) {
+    pendTbody.innerHTML = '';
+    noPend.classList.remove('hidden');
+  } else {
+    noPend.classList.add('hidden');
+    pendTbody.innerHTML = pending.map(r => `
+      <tr>
+        <td style="font-weight:500">${esc(r.product_name)}</td>
+        <td class="text-right" style="font-weight:700">${r.quantity}</td>
+        <td><a href="#" onclick="event.preventDefault();openOrderForm(${r.origin_order_id})" style="color:var(--primary)">#${esc(r.order_number)}</a></td>
+        <td style="color:var(--text-muted);font-size:.85rem">${fmtDateTime(r.created_at)}</td>
+        <td style="font-size:.85rem">${esc(r.notes_repair || '—')}</td>
+        <td class="text-center">
+          <button class="btn btn-secondary btn-sm admin-only" onclick="openRepairCompleteModal(${r.id},'${esc(r.product_name)}')">Marcar reparado</button>
+        </td>
+      </tr>
+    `).join('');
+    document.querySelectorAll('#repairs-pending-tbody .admin-only').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
+  }
+
+  const doneTbody = $('repairs-done-tbody');
+  const noDone    = $('no-repairs-done');
+  if (!done.length) {
+    doneTbody.innerHTML = '';
+    noDone.classList.remove('hidden');
+  } else {
+    noDone.classList.add('hidden');
+    doneTbody.innerHTML = done.map(r => `
+      <tr>
+        <td>${esc(r.product_name)}</td>
+        <td class="text-right">${r.quantity}</td>
+        <td><a href="#" onclick="event.preventDefault();openOrderForm(${r.origin_order_id})" style="color:var(--primary)">#${esc(r.order_number)}</a></td>
+        <td style="color:var(--text-muted);font-size:.85rem">${fmtDateTime(r.repaired_at)}</td>
+        <td style="font-size:.85rem">${esc(r.repaired_by_name || '—')}</td>
+        <td style="font-size:.85rem">${esc(r.notes_repair || '—')}</td>
+      </tr>
+    `).join('');
+  }
+}
+
+$('repairs-history-toggle').addEventListener('click', () => {
+  const body = $('repairs-history-body');
+  const collapsed = body.classList.toggle('hidden');
+  $('repairs-history-chevron').style.transform = collapsed ? '' : 'rotate(180deg)';
+});
+
+let _repairCompleteId = null;
+window.openRepairCompleteModal = function(id, productName) {
+  _repairCompleteId = id;
+  $('repair-complete-product-name').textContent = productName;
+  $('inp-repair-notes').value = '';
+  $('repair-complete-modal').classList.remove('hidden');
+};
+$('btn-repair-complete-cancel').addEventListener('click', () => $('repair-complete-modal').classList.add('hidden'));
+$('repair-complete-modal').addEventListener('click', e => { if (e.target === $('repair-complete-modal')) $('repair-complete-modal').classList.add('hidden'); });
+
+$('btn-repair-complete-save').addEventListener('click', async () => {
+  if (!_repairCompleteId) return;
+  const btn = $('btn-repair-complete-save');
+  btn.disabled = true;
+  try {
+    await api('PUT', `/stock/repairs/${_repairCompleteId}/complete`, { notes_repair: $('inp-repair-notes').value.trim() });
+    $('repair-complete-modal').classList.add('hidden');
+    toast('Reparación marcada como completada', 'success');
+    loadRepairs();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const TYPE_LABEL = {

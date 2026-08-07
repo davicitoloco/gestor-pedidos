@@ -127,6 +127,7 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .badge-admin{background:#f0fdf4;color:#15803d}
 .badge-vendor{background:#f5f3ff;color:#6d28d9}
 .badge-partial{background:#fff7ed;color:#c2410c}
+.badge-return{background:#ffedd5;color:#c2410c}
 
 /* ============================================================ ACTION BUTTONS */
 .btn-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:none;border-radius:var(--radius-sm);background:transparent;cursor:pointer;transition:background .12s;font-size:.85rem}
@@ -196,6 +197,19 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .delivery-complete-toggle{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:var(--radius-sm);margin-bottom:14px;cursor:pointer;font-weight:600;color:#c2410c;font-size:.9rem;user-select:none}
 .delivery-complete-toggle input[type=checkbox]{width:16px;height:16px;accent-color:#ea580c;cursor:pointer;flex-shrink:0}
 .delivery-complete-toggle.active{background:#fed7aa;border-color:#ea580c}
+.return-type-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.return-type-option{display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;padding:16px 12px;border:2px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;user-select:none;transition:border-color .15s,background .15s}
+.return-type-option input{position:absolute;opacity:0;pointer-events:none}
+.return-type-icon{font-size:1.6rem}
+.return-type-label{font-weight:700;font-size:.92rem}
+.return-type-desc{font-size:.76rem;color:var(--text-muted)}
+.return-type-option[data-type="rechazo"].active{border-color:#f87171;background:#fef2f2}
+.return-type-option[data-type="reparacion"].active{border-color:#f59e0b;background:#fffbeb}
+.return-confirm-msg{margin-top:14px;padding:11px 14px;border-radius:var(--radius-sm);font-size:.86rem;font-weight:600}
+.return-confirm-msg.rechazo{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+.return-confirm-msg.reparacion{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+.badge-return-rechazo{background:#ffedd5;color:#c2410c}
+.badge-return-repair{background:var(--warning-bg);color:var(--warning-txt)}
 
 /* ============================================================ TOAST */
 .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:var(--radius);font-weight:500;font-size:.88rem;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:1000;animation:slideUp .2s ease;max-width:360px}
@@ -277,6 +291,9 @@ tr.stock-critical td { background:#fff1f2 }
 .compras-pane{animation:fadeIn .15s ease}
 .contable-tabs{display:flex;gap:4px;border-bottom:2px solid var(--border);margin-bottom:20px;flex-wrap:wrap}
 .contable-tab{background:none;border:none;padding:8px 16px;font-size:.9rem;cursor:pointer;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .15s,border-color .15s}
+.stock-tab{background:none;border:none;padding:8px 16px;font-size:.9rem;cursor:pointer;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .15s,border-color .15s}
+.stock-tab:hover{color:var(--text)}
+.stock-tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
 .contable-tab:hover{color:var(--text)}
 .contable-tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
 .contable-pane{animation:fadeIn .15s ease}

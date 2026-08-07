@@ -195,6 +195,7 @@
                     <option>En preparación</option>
                     <option>Entrega parcial</option>
                     <option>Entregado</option>
+                    <option>Entregado con devolución</option>
                     <option>Cancelado</option>
                   </select>
                 </div>
@@ -300,6 +301,17 @@
               </button>
             </div>
             <div class="card-body" id="deliveries-body" style="padding:0"></div>
+          </div>
+
+          <div class="card hidden" id="returns-card">
+            <div class="card-header card-header-flex">
+              <span>Historial de devoluciones</span>
+              <button type="button" class="btn btn-secondary btn-sm admin-only hidden" id="btn-register-return">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 00-4-4H4"/></svg>
+                Registrar devolución
+              </button>
+            </div>
+            <div class="card-body" id="returns-body" style="padding:0"></div>
           </div>
 
           <div class="form-actions">
@@ -571,6 +583,7 @@
       <div class="contable-tabs">
         <button class="stock-tab active" data-stock-tab="lista">Stock actual</button>
         <button class="stock-tab" data-stock-tab="historial">Historial</button>
+        <button class="stock-tab" data-stock-tab="reparaciones">En reparación</button>
       </div>
 
       <!-- ── STOCK ACTUAL ── -->
@@ -638,6 +651,59 @@
           </table>
         </div>
         <div id="hist-pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center"></div>
+      </div>
+
+      <!-- ── REPARACIONES ── -->
+      <div id="stock-tab-reparaciones" class="hidden">
+        <div class="page-header">
+          <h2 class="page-title">Ítems en reparación</h2>
+          <button class="btn btn-ghost" id="btn-refresh-repairs">Actualizar</button>
+        </div>
+        <div class="account-summary-grid" style="margin-bottom:18px">
+          <div class="account-card">
+            <div class="account-card-label">Pendientes</div>
+            <div class="account-card-value" id="repairs-pending-count">0</div>
+          </div>
+          <div class="account-card account-card-paid">
+            <div class="account-card-label">Reparadas este mes</div>
+            <div class="account-card-value" id="repairs-month-count">0</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Producto</th>
+              <th class="text-right" style="width:90px">Cantidad</th>
+              <th style="width:110px">Pedido origen</th>
+              <th style="width:150px">Fecha de ingreso</th>
+              <th>Observaciones</th>
+              <th class="text-center" style="width:150px">Acción</th>
+            </tr></thead>
+            <tbody id="repairs-pending-tbody"></tbody>
+          </table>
+          <div id="no-repairs-pending" class="empty-state hidden"><p>No hay ítems en reparación</p></div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <div class="card-header card-header-flex" id="repairs-history-toggle" style="cursor:pointer">
+            <span>Historial de reparaciones completadas</span>
+            <svg id="repairs-history-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="card-body hidden" id="repairs-history-body" style="padding:0">
+            <table class="table">
+              <thead><tr>
+                <th>Producto</th>
+                <th class="text-right" style="width:90px">Cantidad</th>
+                <th style="width:110px">Pedido origen</th>
+                <th style="width:150px">Reparado el</th>
+                <th style="width:130px">Reparado por</th>
+                <th>Observaciones</th>
+              </tr></thead>
+              <tbody id="repairs-done-tbody"></tbody>
+            </table>
+            <div id="no-repairs-done" class="empty-state hidden"><p>Todavía no hay reparaciones completadas</p></div>
+          </div>
+        </div>
       </div>
 
     </div><!-- /section-stock -->
@@ -1747,6 +1813,24 @@
   </div>
 </div>
 
+<!-- ===================================================== MODAL: Marcar reparación completada -->
+<div id="repair-complete-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header"><h3>Marcar como reparado</h3></div>
+    <div class="modal-form-body">
+      <p id="repair-complete-product-name" style="font-weight:600;font-size:1rem;margin-bottom:16px"></p>
+      <div class="field">
+        <label class="label">Notas (opcional)</label>
+        <textarea id="inp-repair-notes" class="input textarea" rows="2" placeholder="Detalle de la reparación..."></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-repair-complete-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-repair-complete-save">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===================================================== MODAL: Registrar ingreso -->
 <div id="ingreso-modal" class="modal-overlay hidden">
   <div class="modal" style="max-width:460px">
@@ -1903,6 +1987,63 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-delivery-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-delivery-confirm">Confirmar entrega</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Registrar Devolución -->
+<div id="return-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">Registrar Devolución</div>
+
+    <div id="return-modal-form">
+      <div class="modal-form-body">
+        <div class="return-type-grid">
+          <label class="return-type-option active" data-type="rechazo">
+            <input type="radio" name="return-type" value="rechazo" checked>
+            <span class="return-type-icon">🔴</span>
+            <span class="return-type-label">Rechazo del cliente</span>
+            <span class="return-type-desc">Vuelve al stock disponible</span>
+          </label>
+          <label class="return-type-option" data-type="reparacion">
+            <input type="radio" name="return-type" value="reparacion">
+            <span class="return-type-icon">🔧</span>
+            <span class="return-type-label">Por reparación</span>
+            <span class="return-type-desc">Va a Reparaciones (no suma stock)</span>
+          </label>
+        </div>
+        <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);margin:16px 0">
+          <table class="table" style="font-size:.88rem">
+            <thead><tr>
+              <th>Producto</th>
+              <th style="width:120px;text-align:right">Disponible</th>
+              <th style="width:120px;text-align:right">A devolver</th>
+            </tr></thead>
+            <tbody id="return-modal-tbody"></tbody>
+          </table>
+        </div>
+        <div class="field">
+          <label class="label">Observaciones (opcional)</label>
+          <textarea id="inp-return-notes" class="input textarea" rows="2" placeholder="Motivo, detalle..."></textarea>
+        </div>
+        <div id="return-confirm-msg" class="return-confirm-msg hidden"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="btn-return-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="btn-return-confirm">Confirmar devolución</button>
+      </div>
+    </div>
+
+    <div id="return-modal-success" class="hidden">
+      <div class="modal-form-body" style="text-align:center;padding:26px 20px">
+        <div style="font-size:2.4rem;margin-bottom:8px">✅</div>
+        <p style="font-weight:600;margin-bottom:4px">Devolución registrada</p>
+        <p style="color:var(--text-muted);font-size:.88rem;margin-bottom:18px" id="return-success-detail"></p>
+        <a class="btn btn-primary" id="btn-return-download-nc" target="_blank" href="#">Descargar NC ↓</a>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="btn-return-close">Cerrar</button>
+      </div>
     </div>
   </div>
 </div>

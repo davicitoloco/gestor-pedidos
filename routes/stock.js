@@ -38,7 +38,7 @@ router.get('/', requireAdmin, (req, res) => {
             FROM order_items oi
             JOIN orders o ON oi.order_id = o.id
             WHERE oi.product_id = p.id
-              AND o.status NOT IN ('Entregado', 'Cancelado')
+              AND o.status NOT IN ('Entregado', 'Entregado con devolución', 'Cancelado')
           ), 0) AS pending_orders,
           (SELECT sm.created_at
            FROM stock_movements sm
@@ -153,6 +153,65 @@ router.post('/ingresos', requireAdmin, (req, res) => {
     });
 
     res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(Number(product_id)));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/stock/repairs — ítems en reparación + historial + resumen (admin only)
+router.get('/repairs', requireAdmin, (req, res) => {
+  try {
+    const sf = getSucursalFilter(req, 'rs');
+    const rows = db.prepare(`
+      SELECT rs.*, printf('%03d', o.order_sequence) AS order_number,
+        COALESCE(ru.full_name, ru.username) AS repaired_by_name
+      FROM repair_stock rs
+      JOIN orders o ON rs.origin_order_id = o.id
+      LEFT JOIN users ru ON rs.repaired_by = ru.id
+      WHERE 1=1 ${sf.clause}
+      ORDER BY (rs.status = 'en_reparacion') DESC, rs.created_at DESC
+    `).all(...sf.params);
+
+    const pending = rows.filter(r => r.status === 'en_reparacion');
+    const monthPrefix = new Date().toISOString().slice(0, 7);
+    const repairedThisMonth = rows.filter(r => r.status === 'reparado' && (r.repaired_at || '').startsWith(monthPrefix));
+
+    res.json({
+      items: rows,
+      summary: {
+        pending_count: pending.length,
+        pending_qty: pending.reduce((s, r) => s + r.quantity, 0),
+        repaired_month_count: repairedThisMonth.length,
+        repaired_month_qty: repairedThisMonth.reduce((s, r) => s + r.quantity, 0)
+      }
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/stock/repairs/:id/complete — marcar ítem como reparado y sumar al stock (admin only)
+router.put('/repairs/:id/complete', requireAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const repair = db.prepare('SELECT * FROM repair_stock WHERE id = ?').get(id);
+    if (!repair) return res.status(404).json({ error: 'Registro de reparación no encontrado' });
+    if (repair.status === 'reparado') return res.status(400).json({ error: 'Este ítem ya fue marcado como reparado' });
+
+    const notes = (req.body.notes_repair || '').trim();
+    withTransaction(() => {
+      if (repair.product_id) {
+        const order = db.prepare('SELECT order_sequence FROM orders WHERE id = ?').get(repair.origin_order_id);
+        const orderNumber = order ? String(order.order_sequence).padStart(3, '0') : String(repair.origin_order_id).padStart(3, '0');
+        db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(repair.quantity, repair.product_id);
+        db.prepare(`
+          INSERT INTO stock_movements (product_id, type, quantity, reference, notes, created_by, sucursal_id)
+          VALUES (?, 'ingreso', ?, ?, ?, ?, ?)
+        `).run(repair.product_id, repair.quantity, `Reparación completada (pedido #${orderNumber})`, notes, req.session.userId, getInsertSucursalId(req));
+      }
+      db.prepare(`
+        UPDATE repair_stock SET status='reparado', repaired_at=datetime('now','localtime'), repaired_by=?, notes_repair=?
+        WHERE id=?
+      `).run(req.session.userId, notes, id);
+    });
+
+    res.json(db.prepare('SELECT * FROM repair_stock WHERE id = ?').get(id));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

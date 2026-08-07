@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db, withTransaction } = require('../db');
 const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
+const { acctBySubtype, recordJournal } = require('../lib/accounting');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -10,6 +11,12 @@ function requireAuth(req, res, next) {
 router.use(requireAuth);
 
 function isVendor(req) { return req.session.role === 'vendedor'; }
+function isAdminLike(req) { return ['admin','subadmin'].includes(req.session.role); }
+function checkPeriodClosed(date) {
+  const period = (date || new Date().toISOString().slice(0,10)).slice(0,7);
+  const closed = db.prepare('SELECT id FROM accounting_closes WHERE period=?').get(period);
+  if (closed) throw new Error(`El período ${period} está cerrado. No se pueden crear ni modificar asientos en períodos cerrados.`);
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function fmtMoney(v) {
@@ -66,7 +73,9 @@ router.get('/', (req, res) => {
           * (1.0 - o.discount/100.0)
           * (1.0 - COALESCE(o.discount2,0)/100.0)
           * (1.0 - COALESCE(o.discount3,0)/100.0)
-          * (1.0 - COALESCE(o.discount4,0)/100.0) AS total
+          * (1.0 - COALESCE(o.discount4,0)/100.0) AS total,
+        EXISTS(SELECT 1 FROM order_returns r WHERE r.order_id = o.id AND r.return_type = 'rechazo') AS has_rechazo,
+        EXISTS(SELECT 1 FROM repair_stock rs WHERE rs.origin_order_id = o.id AND rs.status = 'en_reparacion') AS has_repair_pending
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN users u ON o.created_by = u.id
@@ -156,8 +165,8 @@ router.get('/:id/print', (req, res) => {
       for (const di of d.items)
         deliveredMap[di.product_name] = (deliveredMap[di.product_name] || 0) + di.quantity_delivered;
 
-    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Cancelado':'#475569' };
-    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Cancelado':'#f1f5f9' };
+    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Entregado con devolución':'#c2410c','Cancelado':'#475569' };
+    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Entregado con devolución':'#ffedd5','Cancelado':'#f1f5f9' };
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>Pedido #${esc(order.order_number)} — ${esc(company)}</title>
@@ -379,8 +388,8 @@ router.get('/:id/print-deposito', (req, res) => {
     const discParts = [dd1, dd2, dd3, dd4].filter(v => v > 0).map(v => `${v}%`);
     const hasDiscount = discParts.length > 0;
 
-    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Cancelado':'#475569' };
-    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Cancelado':'#f1f5f9' };
+    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Entregado con devolución':'#c2410c','Cancelado':'#475569' };
+    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Entregado con devolución':'#ffedd5','Cancelado':'#f1f5f9' };
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>Pedido #${esc(order.order_number)} — Depósito</title>
@@ -721,6 +730,287 @@ router.delete('/:id/deliveries/:delivId', (req, res) => {
 
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/orders/:id/returns ──────────────────────────────────────────────
+router.get('/:id/returns', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'Acceso denegado' });
+
+    const returns = db.prepare(`
+      SELECT r.*, COALESCE(u.full_name, u.username) AS created_by_name
+      FROM order_returns r LEFT JOIN users u ON r.created_by = u.id
+      WHERE r.order_id = ? ORDER BY r.created_at ASC
+    `).all(id);
+    for (const r of returns) {
+      r.items = db.prepare('SELECT * FROM order_return_items WHERE return_id = ? ORDER BY id').all(r.id);
+    }
+    res.json(returns);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /api/orders/:id/returns ─────────────────────────────────────────────
+router.post('/:id/returns', (req, res) => {
+  try {
+    if (!isAdminLike(req)) return res.status(403).json({ error: 'Acceso denegado' });
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!['Entregado', 'Entrega parcial', 'Entregado con devolución'].includes(order.status))
+      return res.status(400).json({ error: 'El pedido debe estar entregado (total o parcial) para registrar una devolución' });
+
+    const { return_type, notes, items } = req.body;
+    if (!['rechazo', 'reparacion'].includes(return_type))
+      return res.status(400).json({ error: "return_type debe ser 'rechazo' o 'reparacion'" });
+    const requestedItems = (items || []).filter(i => parseFloat(i.quantity_returned) > 0);
+    if (!requestedItems.length)
+      return res.status(400).json({ error: 'Ingresá al menos una cantidad mayor a 0' });
+
+    const today = new Date().toISOString().slice(0, 10);
+    checkPeriodClosed(today);
+
+    const customer = db.prepare("SELECT id, name FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
+    if (!customer)
+      return res.status(400).json({ error: `No se encontró un cliente registrado como "${order.customer_name}". Vinculá el pedido a un cliente existente antes de registrar la devolución.` });
+
+    const netRows = db.prepare(`
+      SELECT oi.id AS order_item_id, oi.product_id, oi.product_name, oi.unit_price,
+        COALESCE((SELECT SUM(di.quantity_delivered) FROM delivery_items di
+                  JOIN deliveries d ON di.delivery_id = d.id
+                  WHERE d.order_id = ? AND di.order_item_id = oi.id), 0) AS delivered,
+        COALESCE((SELECT SUM(ori.quantity_returned) FROM order_return_items ori
+                  JOIN order_returns r ON ori.return_id = r.id
+                  WHERE r.order_id = ? AND ori.order_item_id = oi.id), 0) AS already_returned
+      FROM order_items oi WHERE oi.order_id = ?
+    `).all(id, id, id);
+    const netMap = {};
+    for (const row of netRows) netMap[row.order_item_id] = { ...row, net_available: row.delivered - row.already_returned };
+
+    const returnItems = [];
+    for (const it of requestedItems) {
+      const oiId = Number(it.order_item_id);
+      const qty  = parseFloat(it.quantity_returned);
+      const row  = netMap[oiId];
+      if (!row) return res.status(400).json({ error: 'Ítem de pedido inválido' });
+      if (qty > row.net_available + 0.0001)
+        return res.status(400).json({ error: `No se puede devolver más de lo entregado neto para "${row.product_name}" (disponible: ${row.net_available})` });
+      returnItems.push({
+        order_item_id: oiId, product_id: row.product_id, product_name: row.product_name,
+        unit_price: row.unit_price, quantity_returned: qty, subtotal_returned: qty * row.unit_price
+      });
+    }
+    const totalReturned = returnItems.reduce((s, i) => s + i.subtotal_returned, 0);
+
+    const result = withTransaction(() => {
+      const { max } = db.prepare("SELECT MAX(CAST(SUBSTR(credit_note_number, 4) AS INTEGER)) AS max FROM order_returns").get();
+      const creditNoteNumber = `NC-${String((max || 0) + 1).padStart(3, '0')}`;
+      const sucursalId = getInsertSucursalId(req);
+
+      const rr = db.prepare(`
+        INSERT INTO order_returns (order_id, return_type, total_returned, credit_note_number, notes, created_by, sucursal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(id, return_type, totalReturned, creditNoteNumber, notes || '', req.session.userId, sucursalId);
+      const returnId = Number(rr.lastInsertRowid);
+
+      const insItem = db.prepare(`
+        INSERT INTO order_return_items (return_id, order_item_id, product_id, product_name, quantity_returned, unit_price, subtotal_returned)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const it of returnItems)
+        insItem.run(returnId, it.order_item_id, it.product_id, it.product_name, it.quantity_returned, it.unit_price, it.subtotal_returned);
+
+      const orderNumber = String(order.order_sequence).padStart(3, '0');
+      if (return_type === 'rechazo') {
+        const ref = `Devolución pedido #${orderNumber} (rechazo)`;
+        for (const it of returnItems) {
+          let productId = it.product_id;
+          if (!productId) {
+            const prod = db.prepare('SELECT id FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))').get(it.product_name);
+            if (prod) productId = prod.id;
+          }
+          if (productId) {
+            db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(it.quantity_returned, productId);
+            db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by, sucursal_id) VALUES (?, 'ingreso', ?, ?, ?, ?)`)
+              .run(productId, it.quantity_returned, ref, req.session.userId, sucursalId);
+          }
+        }
+      } else {
+        const insRepair = db.prepare(`
+          INSERT INTO repair_stock (product_id, product_name, quantity, origin_return_id, origin_order_id, status, sucursal_id)
+          VALUES (?, ?, ?, ?, ?, 'en_reparacion', ?)
+        `);
+        for (const it of returnItems) {
+          let productId = it.product_id;
+          if (!productId) {
+            const prod = db.prepare('SELECT id FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))').get(it.product_name);
+            if (prod) productId = prod.id;
+          }
+          insRepair.run(productId, it.product_name, it.quantity_returned, returnId, id, sucursalId);
+        }
+      }
+
+      db.prepare("UPDATE orders SET status='Entregado con devolución', updated_at=datetime('now','localtime') WHERE id=?").run(id);
+
+      const ventasDevolAcct = db.prepare("SELECT id FROM accounts WHERE code='4.1.02' LIMIT 1").get();
+      const clientesAcct    = acctBySubtype('Clientes');
+      if (!ventasDevolAcct || !clientesAcct) throw new Error('No se encontraron las cuentas contables necesarias (4.1.02 / Deudores por ventas).');
+
+      const desc = `Devolución pedido #${orderNumber} - Cliente: ${order.customer_name}`;
+      const entryId = recordJournal({
+        date: today, desc, reference: creditNoteNumber, ref_type: 'order_return', ref_id: returnId,
+        lines: [
+          { account_id: ventasDevolAcct.id, debit: totalReturned, credit: 0, description: desc },
+          { account_id: clientesAcct.id, debit: 0, credit: totalReturned, description: desc }
+        ],
+        userId: req.session.userId
+      });
+
+      const noteDesc = `Devolución pedido #${orderNumber} - ${return_type === 'rechazo' ? 'rechazo' : 'reparación'}`;
+      db.prepare(`
+        INSERT INTO credit_debit_notes (entity_type, entity_id, note_type, date, description, amount, reference, journal_entry_id, created_by)
+        VALUES ('customer', ?, 'credito', ?, ?, ?, ?, ?, ?)
+      `).run(customer.id, today, noteDesc, totalReturned, creditNoteNumber, entryId, req.session.userId);
+
+      return returnId;
+    });
+
+    const created = db.prepare(`
+      SELECT r.*, COALESCE(u.full_name, u.username) AS created_by_name
+      FROM order_returns r LEFT JOIN users u ON r.created_by = u.id WHERE r.id = ?
+    `).get(result);
+    created.items = db.prepare('SELECT * FROM order_return_items WHERE return_id = ? ORDER BY id').all(result);
+    res.status(201).json(created);
+  } catch (err) { res.status(err.message.includes('cerrado') ? 409 : 500).json({ error: err.message }); }
+});
+
+// ── GET /api/orders/:orderId/returns/:returnId/nota-credito ─────────────────
+router.get('/:orderId/returns/:returnId/nota-credito', (req, res) => {
+  try {
+    const orderId  = Number(req.params.orderId);
+    const returnId = Number(req.params.returnId);
+    const order = db.prepare(`
+      SELECT o.*, printf('%03d', o.order_sequence) AS order_number
+      FROM orders o WHERE o.id = ?
+    `).get(orderId);
+    if (!order) return res.status(404).send('Pedido no encontrado');
+    const ret = db.prepare(`
+      SELECT r.*, COALESCE(u.full_name, u.username) AS created_by_name
+      FROM order_returns r LEFT JOIN users u ON r.created_by = u.id
+      WHERE r.id = ? AND r.order_id = ?
+    `).get(returnId, orderId);
+    if (!ret) return res.status(404).send('Devolución no encontrada');
+
+    const items    = db.prepare('SELECT * FROM order_return_items WHERE return_id = ? ORDER BY id').all(returnId);
+    const company  = getCompanyName();
+    const custRow  = db.prepare("SELECT cuit, address, iva_condition FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
+    const subtotal  = items.reduce((s, i) => s + i.subtotal_returned, 0);
+    const ivaExempt = !!order.iva_exempt;
+    const iva       = ivaExempt ? 0 : subtotal * 0.21;
+    const total     = subtotal + iva;
+    const typeLabel = ret.return_type === 'rechazo' ? 'Devolución por rechazo' : 'Devolución por reparación';
+    const typeColor = ret.return_type === 'rechazo' ? { bg: '#ffedd5', txt: '#c2410c' } : { bg: '#fef3c7', txt: '#92400e' };
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>${esc(ret.credit_note_number)} — ${esc(company)}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1e293b;background:#fff}
+.page{padding:32px 40px;max-width:820px;margin:0 auto}
+.no-print{text-align:right;margin-bottom:18px}
+.print-btn{padding:9px 22px;background:#dc2626;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600}
+.header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:2px solid #dc2626;margin-bottom:22px}
+.header-left h1{font-size:22px;color:#dc2626;font-weight:700}
+.header-left p{font-size:12px;color:#64748b;margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
+.header-right{text-align:right}
+.nc-num{font-size:26px;font-weight:700;color:#1e293b;letter-spacing:.02em}
+.nc-date{font-size:12px;color:#64748b;margin-top:4px}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 30px;margin-bottom:18px;padding:14px 16px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0}
+.info-item label{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:3px}
+.info-item p{font-size:13px;font-weight:500}
+.badge{display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:18px}
+h3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:12.5px}
+thead th{background:#dc2626;color:#fff;padding:8px 10px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+thead th.r{text-align:right}
+tbody td{padding:8px 10px;border-bottom:1px solid #e2e8f0}
+tbody td.r{text-align:right}
+tbody tr:nth-child(even) td{background:#f8fafc}
+.totals-wrap{display:flex;justify-content:flex-end}
+.totals{width:280px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+.totals tr td{padding:8px 14px;border-bottom:1px solid #e2e8f0;font-size:13px}
+.totals tr:last-child td{border-bottom:none}
+.totals .t-final td{font-weight:700;font-size:15px;color:#dc2626;background:#fef2f2;border-top:2px solid #dc2626}
+.t-label{color:#64748b}
+.t-val{text-align:right;font-weight:600}
+.notes-box{margin-top:20px;padding:14px 16px;background:#f8fafc;border-left:3px solid #dc2626;border-radius:0 6px 6px 0}
+.notes-box strong{display:block;margin-bottom:5px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+.footer{margin-top:32px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
+.footer-note{margin-top:20px;font-size:11px;color:#64748b;text-align:center;font-style:italic}
+@media print{.no-print{display:none}body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.page{padding:20px}}
+</style></head><body>
+<div class="page">
+  <div class="no-print">
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+  </div>
+  <div class="header">
+    <div class="header-left">
+      <h1>${esc(company)}</h1>
+      <p>NOTA DE CRÉDITO</p>
+    </div>
+    <div class="header-right">
+      <div class="nc-num">${esc(ret.credit_note_number)}</div>
+      <div class="nc-date">${fmtDateTime(ret.created_at)}</div>
+    </div>
+  </div>
+  <span class="badge" style="background:${typeColor.bg};color:${typeColor.txt}">${esc(typeLabel)}</span>
+  <div class="info-grid">
+    <div class="info-item"><label>Cliente</label><p>${esc(order.customer_name)}</p></div>
+    <div class="info-item"><label>Condición IVA</label><p>${esc(custRow ? custRow.iva_condition : 'Consumidor Final')}</p></div>
+    <div class="info-item"><label>Pedido de referencia</label><p>#${esc(order.order_number)}</p></div>
+    <div class="info-item"><label>Registrado por</label><p>${esc(ret.created_by_name || '—')}</p></div>
+    ${custRow && custRow.cuit ? `<div class="info-item"><label>CUIT</label><p>${esc(fmtCuit(custRow.cuit))}</p></div>` : ''}
+  </div>
+  <h3>Ítems devueltos</h3>
+  <table>
+    <thead><tr>
+      <th>Producto / Descripción</th>
+      <th class="r" style="width:80px">Cant.</th>
+      <th class="r" style="width:120px">Precio unit.</th>
+      <th class="r" style="width:120px">Subtotal</th>
+    </tr></thead>
+    <tbody>
+      ${items.map(item => `<tr>
+        <td>${esc(item.product_name)}</td>
+        <td class="r">${item.quantity_returned}</td>
+        <td class="r">${fmtMoney(item.unit_price)}</td>
+        <td class="r">${fmtMoney(item.subtotal_returned)}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  <div class="totals-wrap">
+    <table class="totals">
+      <tr><td class="t-label">Subtotal</td><td class="t-val">${fmtMoney(subtotal)}</td></tr>
+      ${ivaExempt
+        ? `<tr><td class="t-label">IVA</td><td class="t-val" style="color:#16a34a;font-weight:600">Exento</td></tr>`
+        : `<tr><td class="t-label">IVA 21%</td><td class="t-val">${fmtMoney(iva)}</td></tr>`
+      }
+      <tr class="t-final"><td>TOTAL NC</td><td class="t-val">${fmtMoney(total)}</td></tr>
+    </table>
+  </div>
+  ${ret.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(ret.notes)}</div>` : ''}
+  <div class="footer-note">Este comprobante acredita la devolución de mercadería del pedido referenciado.</div>
+  <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>
+</div>
+<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));</script>
+</body></html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) { res.status(500).send(err.message); }
 });
 
 // ── DELETE /api/orders/:id ────────────────────────────────────────────────────
