@@ -117,10 +117,22 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .table tbody tr:hover{background:var(--primary-light)}
 .table tbody td{padding:11px 14px;vertical-align:middle}
 
+/* Scrollable wrapper for tables with sticky head/column: both axes must
+   scroll in THIS same box, otherwise sticky positioning breaks when the
+   vertical scroll happens on an outer ancestor (e.g. .app-content). */
+.table-wrap-scroll{overflow:auto;max-height:70vh;-webkit-overflow-scrolling:touch}
+
 /* Sticky 2-row group header (e.g. Producción → Potencial para armar) */
 .table-sticky-head thead th{position:sticky;z-index:5;line-height:16px}
 .table-sticky-head thead tr:nth-child(1) th{top:0;z-index:6}
 .table-sticky-head thead tr:nth-child(2) th{top:37px}
+/* Sticky first column (Artículo) — pinned left while scrolling horizontally.
+   Scoped to thead's first row specifically: with the 2-row header, the
+   second row's own first <th> (e.g. "Pul.") is also a :first-child of its
+   <tr>, so a bare th:first-child selector would wrongly pin it too. */
+.table-sticky-head tbody td:first-child{position:sticky;left:0;z-index:2;background-color:var(--white)}
+.table-sticky-head tbody tr[class*="prod-row-"] td:first-child{background-color:inherit}
+.table-sticky-head thead tr:first-child th:first-child{position:sticky;left:0;z-index:9;background-color:var(--bg)}
 .order-num{font-weight:700;font-family:'SF Mono','Fira Code',monospace;color:var(--primary);font-size:.92rem}
 
 /* ============================================================ BADGES */
