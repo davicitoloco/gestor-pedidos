@@ -333,6 +333,7 @@ function renderOrders(orders, searchQuery = '', modeloQuery = '') {
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(o.vendor_name||'—')}</td>` : ''}
       <td class="text-center col-mobile-hide">${o.total_units % 1 === 0 ? o.total_units : (o.total_units || 0).toFixed(2)}</td>
       <td class="text-right" style="font-weight:600">${fmtMoney(o.total)}</td>
+      <td class="text-center" onclick="event.stopPropagation()">${renderCobroCell(o)}</td>
       <td class="col-mobile-hide">${fmtDate(o.delivery_date)}</td>
       <td class="col-mobile-hide" style="color:var(--text-muted);font-size:.82rem">${fmtDateTime(o.created_at)}</td>
       <td class="text-center" style="white-space:nowrap">
@@ -349,6 +350,31 @@ function renderOrders(orders, searchQuery = '', modeloQuery = '') {
   tbody.querySelectorAll('tr[data-id]').forEach(row => row.addEventListener('click', () => openOrderForm(row.dataset.id)));
   tbody.querySelectorAll('.btn-edit').forEach(btn => btn.addEventListener('click', () => openOrderForm(btn.dataset.id)));
   tbody.querySelectorAll('.btn-delete').forEach(btn => btn.addEventListener('click', () => deleteOrder(btn.dataset.id, btn.dataset.num)));
+  tbody.querySelectorAll('.btn-cobro-total').forEach(btn => btn.addEventListener('click', () => openCobroModal(btn.dataset.id, 'total')));
+  tbody.querySelectorAll('.btn-cobro-parcial').forEach(btn => btn.addEventListener('click', () => openCobroModal(btn.dataset.id, 'parcial')));
+}
+
+// Celda "Cobro" de la lista de pedidos: estado calculado a partir de los pagos
+// ya vinculados a los remitos del pedido (cobro_status viene armado en el backend
+// con lib/cobro.js) + acciones rápidas para admin.
+function renderCobroCell(o) {
+  const cls  = { pendiente:'warning', parcial:'partial', cobrado:'success' };
+  const label = o.cobro_status === 'parcial'
+    ? `Parcial ${fmtMoney(o.cobro_cobrado)} / ${fmtMoney(o.cobro_entregado)}`
+    : o.cobro_status === 'cobrado' ? 'Cobrado'
+    : o.cobro_status === 'pendiente' ? 'Pendiente'
+    : '—';
+  const badge = o.cobro_status
+    ? `<span class="badge badge-${cls[o.cobro_status]}" style="white-space:normal">${esc(label)}</span>`
+    : `<span style="color:var(--text-muted)">—</span>`;
+
+  const canAct = isAdmin() && o.cobro_status && o.cobro_status !== 'cobrado';
+  const actions = canAct ? `
+    <div style="display:flex;gap:4px;justify-content:center;margin-top:3px">
+      <button type="button" class="btn-icon btn-cobro-total" data-id="${o.id}" title="Cobrado total">✓</button>
+      <button type="button" class="btn-icon btn-cobro-parcial" data-id="${o.id}" title="Cobrado parcial">½</button>
+    </div>` : '';
+  return `<div>${badge}</div>${actions}`;
 }
 
 document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -1410,6 +1436,7 @@ async function loadReports() {
   initQtyReport('sold');
   initQtyReport('delivered');
   loadPurchasesReport(from, to);
+  if ($('pl-product-input')) loadProductLedger();
 }
 
 if ($('rpt-month-picker')) {
@@ -1439,6 +1466,48 @@ async function loadRankings() {
       .catch(() => {})
     )
   );
+}
+
+/* ── Ficha de Producto ── */
+async function loadProductLedger() {
+  const product = ($('pl-product-input').value || '').trim();
+  if (!product) { toast('Ingresá un producto', 'error'); return; }
+  try {
+    const data = await api('GET', `/reports/product-ledger?product=${encodeURIComponent(product)}`);
+    $('pl-total-entregado').textContent = fmtMoney(data.total_entregado);
+    $('pl-total-cobrado').textContent   = fmtMoney(data.total_cobrado);
+    $('pl-saldo-pendiente').textContent = fmtMoney(data.saldo_pendiente);
+    $('pl-product-label').textContent   = `— "${data.product}"`;
+
+    const tbody = $('pl-tbody');
+    const emptyEl = $('pl-empty');
+    if (!data.remitos.length) {
+      tbody.innerHTML = '';
+      emptyEl.classList.remove('hidden');
+    } else {
+      emptyEl.classList.add('hidden');
+      const cls = { pendiente:'warning', parcial:'partial', cobrado:'success' };
+      tbody.innerHTML = data.remitos.map(r => {
+        const label = r.status === 'parcial'
+          ? `Parcial ${fmtMoney(r.paid)} / ${fmtMoney(r.total)}`
+          : r.status === 'cobrado' ? 'Cobrado' : 'Pendiente';
+        return `<tr>
+          <td style="font-weight:600">${esc(r.remito_number)}</td>
+          <td>${esc(r.customer_name)}</td>
+          <td>${esc(r.order_number)}</td>
+          <td>${fmtDate(r.created_at)}</td>
+          <td class="text-right">${fmtMoney(r.total)}</td>
+          <td class="text-center"><span class="badge badge-${cls[r.status]||'default'}" style="white-space:normal">${esc(label)}</span></td>
+        </tr>`;
+      }).join('');
+    }
+  } catch (err) { toast(err.message, 'error'); }
+}
+if ($('btn-product-ledger-search')) {
+  $('btn-product-ledger-search').addEventListener('click', loadProductLedger);
+  $('pl-product-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); loadProductLedger(); }
+  });
 }
 
 let _discountsPieChart = null;
@@ -2059,6 +2128,9 @@ window.openClientForm = function(id) {
 
 /* ================================================================ CUENTA CORRIENTE */
 let _accountCustomerId = null;
+let _cobroOrderId  = null; // seteado cuando el modal de pago se abre desde el "Cobro" de un pedido puntual
+let _cobroRemitos  = null; // remitos con saldo pendiente de ese pedido, para armar las allocations
+let _cobroPendiente = 0;
 
 window.openAccountView = async function(customerId) {
   _accountCustomerId = customerId;
@@ -2216,9 +2288,12 @@ $('inp-payment-amount').addEventListener('input', () => {
   $('inp-payment-amount').dataset.manual = '1';
 });
 
-$('btn-new-payment').addEventListener('click', async () => {
+async function openPaymentModal() {
   $('inp-payment-method').value    = 'efectivo';
   $('inp-payment-amount').value    = '';
+  $('inp-payment-amount').readOnly = false;
+  $('inp-payment-amount').removeAttribute('max');
+  $('inp-payment-amount').placeholder = '0.00';
   delete $('inp-payment-amount').dataset.manual;
   $('inp-payment-date').value      = new Date().toISOString().slice(0,10);
   $('inp-payment-reference').value = '';
@@ -2230,9 +2305,10 @@ $('btn-new-payment').addEventListener('click', async () => {
   updatePaymentFields();
   await populateBankSelect($('inp-payment-bank-account'));
 
-  // Cargar remitos pendientes
+  // Cargar remitos pendientes (no aplica cuando se cobra puntualmente un pedido,
+  // ahí las allocations se arman automáticamente contra los remitos de ESE pedido)
   const remitosSection = $('payment-remitos-section');
-  if (_accountCustomerId) {
+  if (_accountCustomerId && !_cobroOrderId) {
     try {
       const pending = await api('GET', `/customers/${_accountCustomerId}/pending-remitos`);
       if (pending.length) {
@@ -2281,9 +2357,49 @@ $('btn-new-payment').addEventListener('click', async () => {
   }
 
   $('payment-modal').classList.remove('hidden');
-});
-$('btn-payment-cancel').addEventListener('click', () => $('payment-modal').classList.add('hidden'));
-$('payment-modal').addEventListener('click', e => { if (e.target === $('payment-modal')) $('payment-modal').classList.add('hidden'); });
+}
+$('btn-new-payment').addEventListener('click', openPaymentModal);
+
+function closePaymentModal() {
+  $('payment-modal').classList.add('hidden');
+  if (_cobroOrderId) { _cobroOrderId = null; _cobroRemitos = null; loadOrders(); }
+}
+$('btn-payment-cancel').addEventListener('click', closePaymentModal);
+$('payment-modal').addEventListener('click', e => { if (e.target === $('payment-modal')) closePaymentModal(); });
+
+// ── "Cobro" de un pedido puntual (lista de pedidos) ───────────────────────────
+// Reutiliza el modal de "Registrar pago" de siempre: precarga el monto y, al
+// confirmar, arma las allocations contra los remitos de ESE pedido para que
+// POST /api/payments las vincule y genere el asiento — misma lógica de siempre,
+// sólo que apuntada a un pedido específico en vez de a la cuenta corriente general.
+async function openCobroModal(orderId, mode) {
+  try {
+    const info = await api('GET', `/orders/${orderId}/cobro-info`);
+    const pendientes = (info.remitos || []).filter(r => r.balance > 0.005);
+    if (!pendientes.length) { toast('Este pedido no tiene remitos con saldo pendiente', 'error'); return; }
+
+    _accountCustomerId = info.customer_id;
+    _cobroOrderId   = orderId;
+    _cobroRemitos   = pendientes;
+    _cobroPendiente = info.pendiente;
+
+    await openPaymentModal();
+    const amtInp = $('inp-payment-amount');
+    if (mode === 'total') {
+      amtInp.value = info.pendiente.toFixed(2);
+      amtInp.readOnly = true;
+      amtInp.dataset.manual = '1';
+    } else {
+      amtInp.value = '';
+      amtInp.max = info.pendiente.toFixed(2);
+      amtInp.placeholder = `Máx. ${fmtMoney(info.pendiente)}`;
+    }
+    $('inp-payment-reference').value = `Pedido #${info.order_number}`;
+    $('inp-payment-notes').value = mode === 'total'
+      ? `Cobro total pedido #${info.order_number}`
+      : `Cobro parcial pedido #${info.order_number}`;
+  } catch (err) { toast(err.message, 'error'); }
+}
 
 $('btn-payment-confirm').addEventListener('click', async () => {
   const btn    = $('btn-payment-confirm');
@@ -2314,6 +2430,24 @@ $('btn-payment-confirm').addEventListener('click', async () => {
       }
     }
 
+    // Cobro de un pedido puntual: armar las allocations automáticamente contra
+    // los remitos con saldo de ESE pedido (los más viejos primero).
+    let cobroAllocations = null;
+    if (_cobroOrderId) {
+      let remaining = Math.round(amount * 100) / 100;
+      cobroAllocations = [];
+      for (const r of _cobroRemitos) {
+        if (remaining <= 0.004) break;
+        const take = Math.min(r.balance, remaining);
+        cobroAllocations.push({ remito_id: r.id, amount: Math.round(take * 100) / 100 });
+        remaining = Math.round((remaining - take) * 100) / 100;
+      }
+      if (remaining > 0.02) {
+        toast(`El monto ingresado (${fmtMoney(amount)}) supera el saldo pendiente del pedido (${fmtMoney(_cobroPendiente)})`, 'error');
+        btn.disabled = false; return;
+      }
+    }
+
     const payload = {
       customer_id:  _accountCustomerId,
       amount,
@@ -2321,7 +2455,7 @@ $('btn-payment-confirm').addEventListener('click', async () => {
       payment_date: payDate,
       notes:        $('inp-payment-notes').value.trim(),
       reference:    $('inp-payment-reference').value.trim(),
-      allocations:  allocations.length ? allocations : undefined,
+      allocations:  cobroAllocations || (allocations.length ? allocations : undefined),
     };
     if (['transferencia','tarjeta'].includes(method)) {
       payload.bank_account_id = $('inp-payment-bank-account').value;
@@ -2343,10 +2477,17 @@ $('btn-payment-confirm').addEventListener('click', async () => {
         payload.cuit_librador = cuit;
       }
     }
-    await api('POST', '/payments', payload);
+    const created = await api('POST', '/payments', payload);
     $('payment-modal').classList.add('hidden');
-    toast('Pago registrado', 'success');
-    loadAccount();
+    if (_cobroOrderId) {
+      _cobroOrderId = null;
+      _cobroRemitos = null;
+      toast('Cobro registrado', 'success');
+      loadOrders();
+    } else {
+      toast('Pago registrado', 'success');
+      loadAccount();
+    }
   } catch (err) { toast(err.message, 'error'); }
   finally { btn.disabled = false; }
 });

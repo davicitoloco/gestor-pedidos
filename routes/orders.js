@@ -3,6 +3,7 @@ const router = express.Router();
 const { db, withTransaction } = require('../db');
 const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
 const { acctBySubtype, acctByCode, recordJournal } = require('../lib/accounting');
+const { cobroStatus } = require('../lib/cobro');
 
 // Fallback lookups que no requieren accepts_movements=1, para no fallar
 // silenciosamente en DBs donde el flag está en 0.
@@ -96,7 +97,12 @@ router.get('/', (req, res) => {
           * (1.0 - o.discount/100.0)
           * (1.0 - COALESCE(o.discount2,0)/100.0)
           * (1.0 - COALESCE(o.discount3,0)/100.0)
-          * (1.0 - COALESCE(o.discount4,0)/100.0) AS total
+          * (1.0 - COALESCE(o.discount4,0)/100.0) AS total,
+        COALESCE((SELECT SUM(r.total) FROM remitos r WHERE r.order_id = o.id), 0) AS cobro_entregado,
+        COALESCE((
+          SELECT SUM(pra.amount) FROM payment_remito_allocations pra
+          JOIN remitos r2 ON pra.remito_id = r2.id WHERE r2.order_id = o.id
+        ), 0) AS cobro_cobrado
         ${modeloQtySelect}
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
@@ -105,7 +111,11 @@ router.get('/', (req, res) => {
       GROUP BY o.id
       ORDER BY o.order_sequence DESC
     `;
-    res.json(db.prepare(sql).all(...params));
+    const rows = db.prepare(sql).all(...params).map(o => ({
+      ...o,
+      cobro_status: cobroStatus(o.cobro_entregado, o.cobro_cobrado),
+    }));
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -507,6 +517,48 @@ tbody tr:nth-child(even) td{background:#f8fafc}
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err) { res.status(500).send(err.message); }
+});
+
+// ── GET /api/orders/:id/cobro-info ────────────────────────────────────────────
+// Estado de cobro del pedido, calculado a partir de los remitos generados por
+// sus entregas y los pagos ya vinculados a cada uno (payment_remito_allocations).
+// Alimenta el modal de "Cobro" en la lista de pedidos: no crea nada, sólo
+// informa para armar el payload que después va a POST /api/payments.
+router.get('/:id/cobro-info', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'Acceso denegado' });
+
+    const cust = db.prepare("SELECT id, name FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
+    if (!cust) return res.status(400).json({ error: `No existe un cliente llamado "${order.customer_name}". Creá el cliente antes de registrar el cobro.` });
+
+    const remitos = db.prepare(`
+      SELECT r.id, printf('R-%03d', r.remito_sequence) AS remito_number, r.total, r.created_at,
+             COALESCE((SELECT SUM(pra.amount) FROM payment_remito_allocations pra WHERE pra.remito_id = r.id), 0) AS paid
+      FROM remitos r
+      WHERE r.order_id = ?
+      ORDER BY r.created_at ASC, r.id ASC
+    `).all(id).map(r => ({
+      ...r,
+      balance: Math.round((r.total - r.paid) * 100) / 100,
+      status: cobroStatus(r.total, r.paid),
+    }));
+
+    const entregado = Math.round(remitos.reduce((s, r) => s + r.total, 0) * 100) / 100;
+    const cobrado    = Math.round(remitos.reduce((s, r) => s + r.paid, 0) * 100) / 100;
+    const pendiente  = Math.round((entregado - cobrado) * 100) / 100;
+
+    res.json({
+      customer_id: cust.id,
+      customer_name: cust.name,
+      order_number: String(order.order_sequence).padStart(3, '0'),
+      entregado, cobrado, pendiente,
+      remitos,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── POST /api/orders ──────────────────────────────────────────────────────────

@@ -152,6 +152,7 @@
                 <th class="admin-only-col" style="width:140px">Vendedor</th>
                 <th style="width:75px" class="text-center col-mobile-hide">Unidades</th>
                 <th style="width:130px" class="text-right">Total</th>
+                <th style="width:150px" class="text-center">Cobro</th>
                 <th style="width:105px" class="col-mobile-hide">Entrega</th>
                 <th style="width:126px" class="col-mobile-hide">Creado</th>
                 <th style="width:88px" class="text-center">Acciones</th>
@@ -1122,6 +1123,45 @@
         </div>
       </div><!-- /compras materia prima -->
 
+      <!-- ── Ficha de Producto ── -->
+      <div style="margin-top:28px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="font-size:1.05rem;font-weight:700;margin:0">Ficha de Producto</h3>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <input type="text" id="pl-product-input" class="input" list="products-datalist" placeholder="Producto (ej. DUE)" style="width:220px;padding:5px 8px" value="DUE" autocomplete="off">
+            <button class="btn btn-secondary btn-sm" id="btn-product-ledger-search">Buscar</button>
+          </div>
+        </div>
+
+        <div class="stats-grid" style="margin-bottom:16px">
+          <div class="stat-card"><div class="stat-value" id="pl-total-entregado">—</div><div class="stat-label">Total Entregado</div></div>
+          <div class="stat-card"><div class="stat-value" id="pl-total-cobrado">—</div><div class="stat-label">Total Cobrado</div></div>
+          <div class="stat-card"><div class="stat-value" id="pl-saldo-pendiente">—</div><div class="stat-label">Saldo Pendiente</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header card-header-flex">
+            <span>Detalle de remitos <span id="pl-product-label" style="font-weight:400;color:var(--text-muted)"></span></span>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrap">
+              <table class="table" style="font-size:.88rem">
+                <thead><tr>
+                  <th style="width:90px">Remito</th>
+                  <th>Cliente</th>
+                  <th style="width:90px">Pedido</th>
+                  <th style="width:105px">Fecha</th>
+                  <th style="width:140px" class="text-right">Monto</th>
+                  <th style="width:170px" class="text-center">Estado de cobro</th>
+                </tr></thead>
+                <tbody id="pl-tbody"></tbody>
+              </table>
+            </div>
+            <div id="pl-empty" class="empty-state hidden"><p>No se encontraron remitos para ese producto</p></div>
+          </div>
+        </div>
+      </div><!-- /ficha de producto -->
+
     </div><!-- /section-reportes -->
 
     <!-- ======================== SECCIÓN: COMPRAS -->
@@ -2023,15 +2063,15 @@
               </tr>
               <tr>
                 <th class="text-center" style="width:48px;background:#fce4ec">Pul.</th>
-                <th class="text-center" style="width:48px;background:#f8bbd0;border-right:1px solid #e2e8f0">Sin.</th>
+                <th class="text-center" style="width:48px;background:#f8bbd0;border-right:1px solid #e2e8f0">Zin.</th>
                 <th class="text-center" style="width:48px;background:#e8f5e9">Pul.</th>
-                <th class="text-center" style="width:48px;background:#c8e6c9;border-right:1px solid #e2e8f0">Sin.</th>
+                <th class="text-center" style="width:48px;background:#c8e6c9;border-right:1px solid #e2e8f0">Zin.</th>
                 <th class="text-center" style="width:48px;background:#fff9c4">Pul.</th>
-                <th class="text-center" style="width:48px;background:#fff176;border-right:1px solid #e2e8f0">Sin.</th>
+                <th class="text-center" style="width:48px;background:#fff176;border-right:1px solid #e2e8f0">Zin.</th>
                 <th class="text-center" style="width:48px;background:#e3f2fd">Pul.</th>
-                <th class="text-center" style="width:48px;background:#b3e5fc;border-right:1px solid #e2e8f0">Sin.</th>
+                <th class="text-center" style="width:48px;background:#b3e5fc;border-right:1px solid #e2e8f0">Zin.</th>
                 <th class="text-center" style="width:48px;background:#fce4ec">Pul.</th>
-                <th class="text-center" style="width:48px;background:#f8bbd0;border-right:1px solid #e2e8f0">Sin.</th>
+                <th class="text-center" style="width:48px;background:#f8bbd0;border-right:1px solid #e2e8f0">Zin.</th>
               </tr>
             </thead>
             <tbody id="prod-proceso-tbody"></tbody>

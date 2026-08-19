@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 const { getSucursalFilter } = require('../lib/sucursal');
+const { cobroStatus } = require('../lib/cobro');
 
 function requireAdmin(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -698,6 +699,47 @@ tfoot td{font-weight:700;border-top:2px solid #2563eb;padding-top:10px}
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err) { res.status(500).send(err.message); }
+});
+
+// ── GET /api/reports/product-ledger ── Ficha de Producto ─────────────────────
+// Para un producto dado, junta todos los remitos de pedidos hechos 100% de ese
+// producto (sin mezclar con otros) y calcula lo entregado / cobrado / pendiente
+// usando los pagos ya vinculados a cada remito (payment_remito_allocations).
+// Genérico: sirve para cualquier producto, no sólo DUE.
+router.get('/product-ledger', (req, res) => {
+  try {
+    const product = (req.query.product || '').trim();
+    if (!product) return res.status(400).json({ error: 'Ingresá un producto' });
+    const like = `%${product.toLowerCase()}%`;
+    const sf = getSucursalFilter(req, 'r');
+
+    // Pedidos "100% de ese producto": al menos un ítem lo matchea y NINGÚN
+    // ítem del pedido queda afuera del filtro.
+    const rows = db.prepare(`
+      SELECT r.id, printf('R-%03d', r.remito_sequence) AS remito_number,
+             r.customer_name, printf('#%03d', o.order_sequence) AS order_number,
+             r.created_at, r.total,
+             COALESCE((SELECT SUM(pra.amount) FROM payment_remito_allocations pra WHERE pra.remito_id = r.id), 0) AS paid
+      FROM remitos r
+      JOIN orders o ON r.order_id = o.id
+      WHERE EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND LOWER(oi.product_name) LIKE ?)
+        AND NOT EXISTS (SELECT 1 FROM order_items oi2 WHERE oi2.order_id = o.id AND LOWER(oi2.product_name) NOT LIKE ?)
+        ${sf.clause}
+      ORDER BY r.remito_sequence ASC
+    `).all(like, like, ...sf.params);
+
+    const remitos = rows.map(r => ({
+      ...r,
+      balance: Math.round((r.total - r.paid) * 100) / 100,
+      status: cobroStatus(r.total, r.paid),
+    }));
+
+    const total_entregado = Math.round(remitos.reduce((s, r) => s + r.total, 0) * 100) / 100;
+    const total_cobrado   = Math.round(remitos.reduce((s, r) => s + r.paid, 0) * 100) / 100;
+    const saldo_pendiente = Math.round((total_entregado - total_cobrado) * 100) / 100;
+
+    res.json({ product, total_entregado, total_cobrado, saldo_pendiente, remitos });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── GET /api/reports/purchases ── Reporte de compras de materia prima ─────────
