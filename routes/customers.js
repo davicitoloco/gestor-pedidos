@@ -419,4 +419,169 @@ router.get('/:id/composicion-saldos', (req, res) => {
   }
 });
 
+// POST /api/customers/export-pdf — Lista de Clientes en PDF.
+// El frontend ya filtró/agrupó (getClientsViewState/groupClientsByVendor en
+// app.js) exactamente lo que se ve en pantalla; acá sólo se dibuja ese mismo
+// resultado. Se generа con PDFKit (layout:'landscape' explícito en CADA
+// página) en vez de HTML + window.print(): el diálogo de impresión del
+// navegador puede recordar "Portrait" de una impresión anterior e ignorar el
+// @page CSS, dando un PDF vertical con columnas cortadas — PDFKit no depende
+// de eso, así que el resultado es siempre horizontal.
+function formatCuitPdf(c) {
+  const d = String(c || '').replace(/\D/g, '');
+  if (d.length !== 11) return d || '';
+  return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`;
+}
+router.post('/export-pdf', (req, res) => {
+  try {
+    const { subtitle, groups } = req.body;
+    if (!Array.isArray(groups)) return res.status(400).json({ error: 'Datos inválidos' });
+
+    const todayStr = fmtDatePdf(new Date().toISOString().slice(0, 10));
+
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40, bufferPages: true, info: { Title: 'Lista de Clientes' } });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="clientes.pdf"');
+    doc.pipe(res);
+
+    const mL = 40, mR = 40;
+    const pageW = doc.page.width;
+    const cW    = pageW - mL - mR;
+
+    // Nombre | CUIT | Teléfono | Email | Dirección | Localidad | Provincia | Vendedor | Deuda
+    const COL = {
+      nombre:    { x: mL,       w: 100 },
+      cuit:      { x: mL + 100, w: 75  },
+      telefono:  { x: mL + 175, w: 52  },
+      email:     { x: mL + 227, w: 120 },
+      direccion: { x: mL + 347, w: 108 },
+      localidad: { x: mL + 455, w: 66  },
+      provincia: { x: mL + 521, w: 45  },
+      vendedor:  { x: mL + 566, w: 63  },
+      deuda:     { x: mL + 629, w: 100 }, // nunca se trunca — ver balanceText()/widthOfString abajo
+    };
+    const ROW_H = 16;
+
+    // Recorta con "…" midiendo el ancho real (no por cantidad de caracteres):
+    // así ningún campo se corta a mitad de línea sin importar la fuente/tamaño.
+    function truncate(text, maxWidth) {
+      const s = String(text || '');
+      if (doc.widthOfString(s) <= maxWidth) return s;
+      let lo = 0, hi = s.length;
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (doc.widthOfString(s.slice(0, mid) + '…') <= maxWidth) lo = mid; else hi = mid - 1;
+      }
+      return s.slice(0, lo) + '…';
+    }
+
+    function balanceColor(b) {
+      const v = b || 0;
+      if (v > 0.005)  return '#c0392b';
+      if (v < -0.005) return '#27ae60';
+      return '#888888';
+    }
+    function balanceText(b) {
+      const v = b || 0;
+      if (v > 0.005)  return fmtArs(v);
+      if (v < -0.005) return `A favor ${fmtArs(-v)}`;
+      return 'Sin deuda';
+    }
+    function drawTableHeader(y) {
+      doc.rect(mL, y, cW, 18).fill('#1a4731');
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#ffffff');
+      doc.text('Nombre',    COL.nombre.x + 3,    y + 5, { width: COL.nombre.w - 3,    lineBreak: false });
+      doc.text('CUIT',      COL.cuit.x + 3,      y + 5, { width: COL.cuit.w - 3,      lineBreak: false });
+      doc.text('Teléfono',  COL.telefono.x + 3,  y + 5, { width: COL.telefono.w - 3,  lineBreak: false });
+      doc.text('Email',     COL.email.x + 3,     y + 5, { width: COL.email.w - 3,     lineBreak: false });
+      doc.text('Dirección', COL.direccion.x + 3, y + 5, { width: COL.direccion.w - 3, lineBreak: false });
+      doc.text('Localidad', COL.localidad.x + 3, y + 5, { width: COL.localidad.w - 3, lineBreak: false });
+      doc.text('Provincia', COL.provincia.x + 3, y + 5, { width: COL.provincia.w - 3, lineBreak: false });
+      doc.text('Vendedor',  COL.vendedor.x + 3,  y + 5, { width: COL.vendedor.w - 3,  lineBreak: false });
+      doc.text('Deuda',     COL.deuda.x,         y + 5, { width: COL.deuda.w - 3, align: 'right', lineBreak: false });
+      return y + 18;
+    }
+    function ensureSpace(y, needed) {
+      if (y + needed > doc.page.height - 60) {
+        doc.addPage({ size: 'A4', layout: 'landscape', margin: 40 });
+        return drawTableHeader(40);
+      }
+      return y;
+    }
+
+    // ── HEADER ────────────────────────────────────────────────────────────────
+    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1a1a1a')
+       .text('Lista de Clientes', mL, 40, { lineBreak: false });
+    doc.fontSize(9).font('Helvetica').fillColor('#666666')
+       .text(`Exportado el ${todayStr}${subtitle ? ' — ' + subtitle : ''}`, mL, 62, { width: cW, lineBreak: false });
+
+    let y = drawTableHeader(82);
+    let rowIdx = 0, totalClients = 0, grandTotal = 0;
+
+    for (const g of groups) {
+      if (g.name) {
+        y = ensureSpace(y, 16);
+        doc.rect(mL, y, cW, 16).fill('#e8f0ec');
+        doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a1a1a')
+           .text(`${g.name}  (${g.clients.length} cliente${g.clients.length !== 1 ? 's' : ''})`, mL + 4, y + 4, { lineBreak: false });
+        y += 16;
+        rowIdx = 0;
+      }
+
+      for (const c of g.clients) {
+        y = ensureSpace(y, ROW_H);
+        if (rowIdx % 2 === 0) doc.rect(mL, y, cW, ROW_H).fill('#f5f9f7');
+
+        doc.fontSize(8).font('Helvetica').fillColor('#1a1a1a');
+        doc.text(truncate(c.name, COL.nombre.w - 6),                            COL.nombre.x + 3,    y + 4, { lineBreak: false });
+        doc.text(truncate(formatCuitPdf(c.cuit), COL.cuit.w - 6),               COL.cuit.x + 3,      y + 4, { lineBreak: false });
+        doc.text(truncate(c.phone, COL.telefono.w - 6),                        COL.telefono.x + 3,  y + 4, { lineBreak: false });
+        doc.text(truncate(c.email, COL.email.w - 6),                           COL.email.x + 3,     y + 4, { lineBreak: false });
+        doc.text(truncate(c.address, COL.direccion.w - 6),                     COL.direccion.x + 3, y + 4, { lineBreak: false });
+        doc.text(truncate(c.localidad, COL.localidad.w - 6),                   COL.localidad.x + 3, y + 4, { lineBreak: false });
+        doc.text(truncate(c.provincia, COL.provincia.w - 6),                   COL.provincia.x + 3, y + 4, { lineBreak: false });
+        doc.text(truncate(c.vendor_name, COL.vendedor.w - 6),                  COL.vendedor.x + 3,  y + 4, { lineBreak: false });
+
+        const balTxt = balanceText(c.balance);
+        doc.fontSize(8).font('Helvetica-Bold').fillColor(balanceColor(c.balance));
+        const balW = doc.widthOfString(balTxt);
+        doc.text(balTxt, COL.deuda.x + COL.deuda.w - balW, y + 4, { lineBreak: false });
+
+        y += ROW_H;
+        rowIdx++; totalClients++;
+        grandTotal += (c.balance || 0);
+      }
+
+      if (g.name) {
+        y = ensureSpace(y, ROW_H);
+        doc.rect(mL, y, cW, ROW_H).fill('#e8f0ec');
+        const subtotal = g.clients.reduce((s, c) => s + (c.balance || 0), 0);
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#475569')
+           .text('Subtotal', COL.vendedor.x, y + 4, { width: COL.vendedor.w + COL.deuda.w - 60, align: 'right', lineBreak: false });
+        const subTxt = balanceText(subtotal);
+        doc.fillColor(balanceColor(subtotal));
+        const subW = doc.widthOfString(subTxt);
+        doc.text(subTxt, COL.deuda.x + COL.deuda.w - subW, y + 4, { lineBreak: false });
+        y += ROW_H;
+      }
+    }
+
+    // ── FOOTER ────────────────────────────────────────────────────────────────
+    y = ensureSpace(y, 26);
+    y += 6;
+    doc.moveTo(mL, y).lineTo(mL + cW, y).strokeColor('#1a4731').lineWidth(1).stroke();
+    y += 10;
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a1a1a')
+       .text(`Total: ${totalClients} cliente${totalClients !== 1 ? 's' : ''}`, mL, y, { lineBreak: false });
+    const totTxt = balanceText(grandTotal);
+    doc.fillColor(balanceColor(grandTotal));
+    const totW = doc.widthOfString(totTxt);
+    doc.text(totTxt, COL.deuda.x + COL.deuda.w - totW, y, { lineBreak: false });
+
+    doc.end();
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

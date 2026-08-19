@@ -2136,36 +2136,14 @@ $('clients-vendor-filter').addEventListener('change', () => {
   renderClients(_allClients, ($('client-search') || {}).value || '');
 });
 
-function pdfBalance(bal) {
-  const b = bal || 0;
-  if (b > 0.005)  return `<span style="color:#dc2626;font-weight:600">${fmtMoney(b)}</span>`;
-  if (b < -0.005) return `<span style="color:#16a34a;font-weight:600">A favor ${fmtMoney(-b)}</span>`;
-  return `<span style="color:#64748b">Sin deuda</span>`;
-}
-function clientPdfRow(c) {
-  return `<tr>
-      <td class="col-nombre" title="${esc(c.name||'')}">${esc(c.name)}</td>
-      <td class="col-cuit" title="${esc(formatCuit(c.cuit)||'')}">${esc(formatCuit(c.cuit)||'')}</td>
-      <td class="col-tel" title="${esc(c.phone||'')}">${esc(c.phone||'')}</td>
-      <td class="col-email" title="${esc(c.email||'')}">${esc(c.email||'')}</td>
-      <td class="col-dir" title="${esc(c.address||'')}">${esc(c.address||'')}</td>
-      <td class="col-loc" title="${esc(c.localidad||'')}">${esc(c.localidad||'')}</td>
-      <td class="col-prov" title="${esc(c.provincia||'')}">${esc(c.provincia||'')}</td>
-      <td class="col-vend" title="${esc(c.vendor_name||'')}">${esc(c.vendor_name||'')}</td>
-      <td class="col-deuda" style="text-align:right">${pdfBalance(c.balance)}</td>
-    </tr>`;
-}
-function clientPdfGroupHeaderRow(label, count) {
-  return `<tr class="grp"><td colspan="9">${esc(label)} <span style="font-weight:400;color:#64748b">(${count} cliente${count !== 1 ? 's' : ''})</span></td></tr>`;
-}
-function clientPdfSubtotalRow(subtotal) {
-  return `<tr class="subtotal"><td colspan="8" style="text-align:right;font-weight:600;color:#475569">Subtotal</td><td style="text-align:right;font-weight:700">${pdfBalance(subtotal)}</td></tr>`;
-}
-
 // Exporta EXACTAMENTE lo que el usuario está viendo: reusa getClientsViewState()/
-// groupClientsByVendor() (misma lógica que renderClients()) en vez de tener una
-// query/filtro propio — así el PDF nunca puede desincronizarse de la pantalla.
-$('btn-clients-export-pdf').addEventListener('click', () => {
+// groupClientsByVendor() (misma lógica que renderClients()) para decidir QUÉ
+// exportar, y le pasa ese resultado ya armado a POST /api/customers/export-pdf,
+// que lo dibuja con PDFKit en el servidor (no HTML + window.print()). El
+// diálogo de impresión del navegador puede "recordar" Portrait de una
+// impresión anterior e ignorar el @page CSS — PDFKit no depende de eso, así
+// que el PDF sale siempre horizontal sin importar qué filtro esté activo.
+$('btn-clients-export-pdf').addEventListener('click', async () => {
   if (!_allClients.length) { toast('No hay clientes para exportar', 'error'); return; }
 
   const searchQuery = ($('client-search') || {}).value || '';
@@ -2174,65 +2152,33 @@ $('btn-clients-export-pdf').addEventListener('click', () => {
   if (vendorModeNeedsPick) { toast('Elegí un vendedor para exportar', 'error'); return; }
   if (!filtered.length) { toast('No hay clientes para exportar con este filtro', 'error'); return; }
 
-  const fecha = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
-
-  let rows;
-  if (mode === 'grouped') {
-    rows = groupClientsByVendor(filtered).map(g => {
-      const subtotal = g.clients.reduce((s, c) => s + (c.balance || 0), 0);
-      return clientPdfGroupHeaderRow(g.name, g.clients.length) + g.clients.map(clientPdfRow).join('') + clientPdfSubtotalRow(subtotal);
-    }).join('');
-  } else {
-    rows = filtered.map(clientPdfRow).join('');
-  }
-  const grandTotal = filtered.reduce((s, c) => s + (c.balance || 0), 0);
+  const groups = mode === 'grouped'
+    ? groupClientsByVendor(filtered)
+    : [{ name: null, clients: filtered }];
 
   const filterParts = [];
   if (q) filterParts.push(`Búsqueda: "${searchQuery.trim()}"`);
   if (state.clientsProduct) filterParts.push(`Producto: ${state.clientsProduct}`);
   if (mode === 'vendor' && state.clientsVendorId) filterParts.push(`Vendedor: ${filtered[0].vendor_name || '—'}`);
   else if (mode === 'grouped') filterParts.push('Agrupado por vendedor');
-  const subLabel = filterParts.length ? ` — ${filterParts.join(' · ')}` : '';
+  const subtitle = filterParts.join(' · ');
 
-  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-    <title>Clientes</title>
-    <style>
-      @page{size:A4 landscape;margin:10mm}
-      body{font-family:Arial,sans-serif;font-size:11px;margin:20px}
-      h1{font-size:16px;margin:0 0 4px}
-      .sub{font-size:11px;color:#666;margin-bottom:14px}
-      table{width:100%;border-collapse:collapse;table-layout:fixed}
-      th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      td{padding:5px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
-      tr:nth-child(even) td{background:#f8fafc}
-      tr.grp td{background:#f1f5f9;font-weight:700;border-bottom:1px solid #cbd5e1;white-space:normal}
-      tr.subtotal td{background:#f1f5f9;border-bottom:2px solid #cbd5e1}
-      tfoot td{font-weight:600;background:#f1f5f9;border-top:2px solid #cbd5e1}
-      .col-nombre{width:15%} .col-cuit{width:10%} .col-tel{width:8%} .col-email{width:15%}
-      .col-dir{width:15%} .col-loc{width:9%} .col-prov{width:6%} .col-vend{width:8%} .col-deuda{width:14%}
-      @media print{body{margin:10mm}}
-    </style>
-  </head><body>
-    <h1>Lista de Clientes</h1>
-    <div class="sub">Exportado el ${fecha}${esc(subLabel)}</div>
-    <table>
-      <thead><tr>
-        <th class="col-nombre">Nombre</th><th class="col-cuit">CUIT</th><th class="col-tel">Teléfono</th>
-        <th class="col-email">Email</th><th class="col-dir">Dirección</th><th class="col-loc">Localidad</th>
-        <th class="col-prov">Provincia</th><th class="col-vend">Vendedor</th>
-        <th class="col-deuda" style="text-align:right">Deuda</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr>
-        <td colspan="8">Total: ${filtered.length} cliente${filtered.length!==1?'s':''}</td>
-        <td style="text-align:right">${pdfBalance(grandTotal)}</td>
-      </tr></tfoot>
-    </table>
-    <script>window.onload=()=>window.print()<\/script>
-  </body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
+  const btn = $('btn-clients-export-pdf');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/customers/export-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subtitle, groups }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'No se pudo generar el PDF');
+    }
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
 });
 
 $('btn-clients-export-excel').addEventListener('click', () => {
