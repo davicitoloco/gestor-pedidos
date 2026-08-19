@@ -333,6 +333,7 @@ function renderOrders(orders, searchQuery = '', modeloQuery = '') {
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(o.vendor_name||'—')}</td>` : ''}
       <td class="text-center col-mobile-hide">${o.total_units % 1 === 0 ? o.total_units : (o.total_units || 0).toFixed(2)}</td>
       <td class="text-right" style="font-weight:600">${fmtMoney(o.total)}</td>
+      <td class="text-center" onclick="event.stopPropagation()">${renderEntregaCell(o)}</td>
       <td class="text-center" onclick="event.stopPropagation()">${renderCobroCell(o)}</td>
       <td class="col-mobile-hide">${fmtDate(o.delivery_date)}</td>
       <td class="col-mobile-hide" style="color:var(--text-muted);font-size:.82rem">${fmtDateTime(o.created_at)}</td>
@@ -352,6 +353,22 @@ function renderOrders(orders, searchQuery = '', modeloQuery = '') {
   tbody.querySelectorAll('.btn-delete').forEach(btn => btn.addEventListener('click', () => deleteOrder(btn.dataset.id, btn.dataset.num)));
   tbody.querySelectorAll('.btn-cobro-total').forEach(btn => btn.addEventListener('click', () => openCobroModal(btn.dataset.id, 'total')));
   tbody.querySelectorAll('.btn-cobro-parcial').forEach(btn => btn.addEventListener('click', () => openCobroModal(btn.dataset.id, 'parcial')));
+  tbody.querySelectorAll('.btn-entrega-total').forEach(btn => btn.addEventListener('click', () => quickDeliverTotal(btn.dataset.id, btn.dataset.num)));
+  tbody.querySelectorAll('.btn-entrega-parcial').forEach(btn => btn.addEventListener('click', () => openDeliveryModal(btn.dataset.id)));
+}
+
+// Celda "Entrega" de la lista de pedidos: acciones rápidas que reutilizan el
+// mismo endpoint/lógica de siempre (POST /orders/:id/deliveries) — no hay
+// estado paralelo, se lee directo de o.status (Pendiente/En preparación/
+// Entrega parcial/Entregado/Cancelado), igual que la columna "Estado".
+function renderEntregaCell(o) {
+  const canAct = isAdmin() && !['Entregado', 'Cancelado'].includes(o.status);
+  if (!canAct) return `<span style="color:var(--text-muted)">—</span>`;
+  return `
+    <div style="display:flex;gap:4px;justify-content:center">
+      <button type="button" class="btn-icon btn-entrega-total" data-id="${o.id}" data-num="${esc(o.order_number)}" title="Entrega total">✓</button>
+      <button type="button" class="btn-icon btn-entrega-parcial" data-id="${o.id}" title="Entrega parcial">½</button>
+    </div>`;
 }
 
 // Celda "Cobro" de la lista de pedidos: estado calculado a partir de los pagos
@@ -2617,13 +2634,19 @@ function renderDeliveries(deliveries) {
   `).join('');
 }
 
-$('btn-register-delivery').addEventListener('click', openDeliveryModal);
+$('btn-register-delivery').addEventListener('click', () => openDeliveryModal());
 $('btn-delivery-cancel').addEventListener('click',  () => $('delivery-modal').classList.add('hidden'));
 $('delivery-modal').addEventListener('click', e => { if (e.target === $('delivery-modal')) $('delivery-modal').classList.add('hidden'); });
 
-async function openDeliveryModal() {
-  const orderId = state.editingOrderId;
+// orderId explícito → se puede abrir desde la Lista de Pedidos (acción "½ Entrega
+// parcial") sin necesidad de entrar al formulario de edición. Si no se pasa, usa
+// el pedido que está abierto en el formulario (comportamiento de siempre).
+let _deliveryModalOrderId = null;
+
+async function openDeliveryModal(orderId) {
+  orderId = orderId || state.editingOrderId;
   if (!orderId) return;
+  _deliveryModalOrderId = orderId;
 
   try {
     const [order, deliveries] = await Promise.all([
@@ -2680,7 +2703,7 @@ $('chk-delivery-complete').addEventListener('change', function () {
 });
 
 $('btn-delivery-confirm').addEventListener('click', async () => {
-  const orderId = state.editingOrderId;
+  const orderId = _deliveryModalOrderId || state.editingOrderId;
   if (!orderId) return;
 
   const items = [];
@@ -2700,15 +2723,54 @@ $('btn-delivery-confirm').addEventListener('click', async () => {
     });
     $('delivery-modal').classList.add('hidden');
     toast('Entrega registrada', 'success');
+    await afterDeliveryChange(orderId);
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
 
-    // Refrescar estado del pedido en el form
+// Refresca todo lo que puede haber cambiado tras registrar/cancelar una entrega:
+// la lista de pedidos (estado, Entrega, Cobro) y, si el formulario de edición de
+// ESE pedido está abierto, también su badge de estado y el historial de entregas.
+async function afterDeliveryChange(orderId) {
+  if (String(state.editingOrderId) === String(orderId)) {
     const updated = await api('GET', `/orders/${orderId}`);
     $('inp-status').value = updated.status;
     $('form-status-badge').innerHTML = statusBadge(updated.status);
     loadDeliveries(orderId);
+  }
+  if (!$('list-view').classList.contains('hidden')) loadOrders();
+}
+
+// ── "✓ Entrega total" desde la Lista de Pedidos ───────────────────────────────
+// Sin modal: entrega automáticamente todo lo que falta (total del pedido menos
+// lo ya entregado en entregas previas) reutilizando el mismo POST /deliveries.
+async function quickDeliverTotal(orderId, orderNumber) {
+  try {
+    const [order, deliveries] = await Promise.all([
+      api('GET', `/orders/${orderId}`),
+      api('GET', `/orders/${orderId}/deliveries`)
+    ]);
+
+    const deliveredMap = {};
+    for (const d of deliveries) {
+      for (const di of d.items) {
+        deliveredMap[di.order_item_id] = (deliveredMap[di.order_item_id] || 0) + di.quantity_delivered;
+      }
+    }
+    const items = order.items
+      .map(it => ({ order_item_id: it.id, quantity_delivered: Math.max(0, it.quantity - (deliveredMap[it.id] || 0)) }))
+      .filter(it => it.quantity_delivered > 0.0000001);
+
+    if (!items.length) { toast('Este pedido ya está completamente entregado', 'error'); return; }
+
+    const ok = await confirm(`¿Confirmar la entrega total de lo que falta del pedido #${orderNumber}?`);
+    if (!ok) return;
+
+    await api('POST', `/orders/${orderId}/deliveries`, { notes: 'Entrega total', items });
+    toast('Entrega registrada', 'success');
+    await afterDeliveryChange(orderId);
   } catch (err) { toast(err.message, 'error'); }
-  finally { btn.disabled = false; }
-});
+}
 
 /* ================================================================ IMPORTAR PRODUCTOS */
 
