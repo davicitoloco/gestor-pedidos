@@ -2106,33 +2106,40 @@ $('btn-clients-export-pdf').addEventListener('click', () => {
   const fecha = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
   const rows = _allClients.map(c => `
     <tr>
-      <td>${esc(c.name)}</td>
-      <td>${esc(formatCuit(c.cuit)||'')}</td>
-      <td>${esc(c.phone||'')}</td>
-      <td>${esc(c.email||'')}</td>
-      <td>${esc(c.address||'')}</td>
-      <td>${esc(c.localidad||'')}</td>
-      <td>${esc(c.provincia||'')}</td>
-      <td>${esc(c.vendor_name||'')}</td>
+      <td class="col-nombre" title="${esc(c.name||'')}">${esc(c.name)}</td>
+      <td class="col-cuit" title="${esc(formatCuit(c.cuit)||'')}">${esc(formatCuit(c.cuit)||'')}</td>
+      <td class="col-tel" title="${esc(c.phone||'')}">${esc(c.phone||'')}</td>
+      <td class="col-email" title="${esc(c.email||'')}">${esc(c.email||'')}</td>
+      <td class="col-dir" title="${esc(c.address||'')}">${esc(c.address||'')}</td>
+      <td class="col-loc" title="${esc(c.localidad||'')}">${esc(c.localidad||'')}</td>
+      <td class="col-prov" title="${esc(c.provincia||'')}">${esc(c.provincia||'')}</td>
+      <td class="col-vend" title="${esc(c.vendor_name||'')}">${esc(c.vendor_name||'')}</td>
     </tr>`).join('');
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
     <title>Clientes</title>
     <style>
+      @page{size:A4 landscape;margin:10mm}
       body{font-family:Arial,sans-serif;font-size:11px;margin:20px}
       h1{font-size:16px;margin:0 0 4px}
       .sub{font-size:11px;color:#666;margin-bottom:14px}
-      table{width:100%;border-collapse:collapse}
-      th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
-      td{padding:5px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      td{padding:5px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
       tr:nth-child(even) td{background:#f8fafc}
       tfoot td{font-weight:600;background:#f1f5f9;border-top:2px solid #cbd5e1}
+      .col-nombre{width:17%} .col-cuit{width:11%} .col-tel{width:9%} .col-email{width:17%}
+      .col-dir{width:18%} .col-loc{width:12%} .col-prov{width:8%} .col-vend{width:8%}
       @media print{body{margin:10mm}}
     </style>
   </head><body>
     <h1>Lista de Clientes</h1>
     <div class="sub">Exportado el ${fecha}</div>
     <table>
-      <thead><tr><th>Nombre</th><th>CUIT</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Localidad</th><th>Provincia</th><th>Vendedor</th></tr></thead>
+      <thead><tr>
+        <th class="col-nombre">Nombre</th><th class="col-cuit">CUIT</th><th class="col-tel">Teléfono</th>
+        <th class="col-email">Email</th><th class="col-dir">Dirección</th><th class="col-loc">Localidad</th>
+        <th class="col-prov">Provincia</th><th class="col-vend">Vendedor</th>
+      </tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr><td colspan="8">Total: ${_allClients.length} cliente${_allClients.length!==1?'s':''}</td></tr></tfoot>
     </table>
