@@ -48,7 +48,9 @@ const state = {
   customerList:      [],
   allSucursales:     [],
   charts:            {},
-  discountOver:      false
+  discountOver:      false,
+  clientsViewMode:   'all',   // 'all' | 'vendor' | 'grouped'
+  clientsVendorId:   ''
 };
 
 /* ================================================================ API */
@@ -1963,43 +1965,27 @@ async function loadClients() {
   } catch (err) { toast(err.message, 'error'); }
 }
 
-function renderClients(clients, searchQuery) {
-  const tbody = $('clients-tbody');
-  const noEl  = $('no-clients');
-  const noMsg = $('no-clients-msg');
+// Saldo deudor: mismo campo `balance` que ya devuelve GET /api/customers
+// (Total Facturado - Total Pagado + notas), la misma fuente que usa la ficha
+// individual (openAccountView) — no se recalcula acá.
+function balanceBadge(bal) {
+  const b = bal || 0;
+  if (b > 0.005)  return `<span style="color:var(--danger);font-weight:600">${fmtMoney(b)}</span>`;
+  if (b < -0.005) return `<span style="color:var(--success-txt);font-weight:600">A favor ${fmtMoney(-b)}</span>`;
+  return `<span style="color:var(--text-muted)">Sin deuda</span>`;
+}
 
-  const q = (searchQuery || '').toLowerCase().trim();
-  const filtered = q
-    ? clients.filter(c => [c.name, c.cuit, c.localidad, c.provincia, c.email, c.phone]
-        .some(v => v && v.toLowerCase().includes(q)))
-    : clients;
-
-  $('clients-count').textContent = `${filtered.length} cliente${filtered.length !== 1 ? 's' : ''}`;
-
-  if (!filtered.length) {
-    tbody.innerHTML = '';
-    if (noMsg) noMsg.textContent = q ? 'No se encontraron clientes' : 'No hay clientes cargados todavía';
-    noEl.classList.remove('hidden');
-    return;
-  }
-  noEl.classList.add('hidden');
-
-  tbody.innerHTML = filtered.map(c => {
-    const bal = c.balance || 0;
-    const balFmt = bal > 0.005
-      ? `<span style="color:var(--danger);font-weight:600">${fmtMoney(bal)}</span>`
-      : bal < -0.005
-        ? `<span style="color:var(--success-txt);font-weight:600">A favor ${fmtMoney(-bal)}</span>`
-        : `<span style="color:var(--text-muted)">Sin deuda</span>`;
-    return `<tr>
-      <td style="font-weight:500">${esc(c.name)}</td>
-      <td style="color:var(--text-muted);font-size:.85rem;font-family:monospace">${esc(formatCuit(c.cuit) || '—')}</td>
-      <td style="color:var(--text-muted)">${esc(c.phone || '—')}</td>
-      <td style="color:var(--text-muted);font-size:.85rem">${esc(c.email || '—')}</td>
-      ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(c.vendor_name || '—')}</td>` : ''}
-      <td style="color:var(--text-muted);font-size:.85rem">${esc(c.address || '—')}</td>
-      <td style="color:var(--text-muted);font-size:.85rem">${esc([c.localidad, c.provincia].filter(Boolean).join(', ') || '—')}</td>
-      <td class="text-right">${balFmt}</td>
+function clientRowHtml(c) {
+  const localidadProv = [c.localidad, c.provincia].filter(Boolean).join(', ');
+  return `<tr data-client-id="${c.id}">
+      <td style="font-weight:500" title="${esc(c.name)}">${esc(c.name)}</td>
+      <td style="color:var(--text-muted);font-size:.85rem;font-family:monospace" title="${esc(formatCuit(c.cuit) || '')}">${esc(formatCuit(c.cuit) || '—')}</td>
+      <td style="color:var(--text-muted)" title="${esc(c.phone || '')}">${esc(c.phone || '—')}</td>
+      <td style="color:var(--text-muted);font-size:.85rem" title="${esc(c.email || '')}">${esc(c.email || '—')}</td>
+      ${isAdminLike() ? `<td style="color:var(--text-muted);font-size:.83rem" title="${esc(c.vendor_name || '')}">${esc(c.vendor_name || '—')}</td>` : ''}
+      <td style="color:var(--text-muted);font-size:.85rem" title="${esc(c.address || '')}">${esc(c.address || '—')}</td>
+      <td style="color:var(--text-muted);font-size:.85rem" title="${esc(localidadProv)}">${esc(localidadProv || '—')}</td>
+      <td class="text-right">${balanceBadge(c.balance)}</td>
       <td class="text-center" style="white-space:nowrap;position:sticky;right:0;background:var(--white);box-shadow:-2px 0 4px rgba(0,0,0,0.06)">
         <button class="btn-icon" onclick="openAccountView(${c.id})" title="Cuenta corriente">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
@@ -2015,8 +2001,105 @@ function renderClients(clients, searchQuery) {
         </button>
       </td>
     </tr>`;
-  }).join('');
 }
+
+function clientGroupHeaderRow(label, count) {
+  const colspan = isAdminLike() ? 9 : 8;
+  return `<tr class="client-group-header">
+    <td colspan="${colspan}" style="background:var(--bg-secondary);font-weight:700;padding:8px 14px">
+      ${esc(label)} <span style="font-weight:400;color:var(--text-muted);font-size:.82rem">(${count} cliente${count !== 1 ? 's' : ''})</span>
+    </td>
+  </tr>`;
+}
+
+function clientGroupSubtotalRow(subtotal) {
+  const colspanLeft = (isAdminLike() ? 7 : 6);
+  return `<tr class="client-group-subtotal" style="background:var(--bg-secondary)">
+    <td colspan="${colspanLeft}" style="text-align:right;color:var(--text-muted);font-size:.82rem;font-weight:600">Subtotal</td>
+    <td class="text-right" style="font-weight:700">${balanceBadge(subtotal)}</td>
+    <td style="position:sticky;right:0;background:var(--bg-secondary)"></td>
+  </tr>`;
+}
+
+function populateClientsVendorFilter(clients) {
+  const sel = $('clients-vendor-filter');
+  const current = sel.value;
+  const vendors = [];
+  const seen = new Set();
+  clients.forEach(c => {
+    if (c.vendor_id && !seen.has(c.vendor_id)) { seen.add(c.vendor_id); vendors.push({ id: c.vendor_id, name: c.vendor_name || `Vendedor #${c.vendor_id}` }); }
+  });
+  vendors.sort((a, b) => a.name.localeCompare(b.name));
+  sel.innerHTML = '<option value="">— Elegí un vendedor —</option>'
+    + vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+  if (vendors.some(v => String(v.id) === String(current))) sel.value = current;
+}
+
+function renderClients(clients, searchQuery) {
+  const tbody = $('clients-tbody');
+  const noEl  = $('no-clients');
+  const noMsg = $('no-clients-msg');
+
+  populateClientsVendorFilter(clients);
+
+  const q = (searchQuery || '').toLowerCase().trim();
+  let filtered = q
+    ? clients.filter(c => [c.name, c.cuit, c.localidad, c.provincia, c.email, c.phone]
+        .some(v => v && v.toLowerCase().includes(q)))
+    : clients;
+
+  const mode = isAdminLike() ? state.clientsViewMode : 'all';
+  const vendorModeNeedsPick = mode === 'vendor' && !state.clientsVendorId;
+  if (mode === 'vendor' && state.clientsVendorId) {
+    filtered = filtered.filter(c => String(c.vendor_id) === String(state.clientsVendorId));
+  } else if (vendorModeNeedsPick) {
+    filtered = [];
+  }
+
+  $('clients-count').textContent = vendorModeNeedsPick ? '' : `${filtered.length} cliente${filtered.length !== 1 ? 's' : ''}`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = '';
+    if (noMsg) noMsg.textContent = vendorModeNeedsPick
+      ? 'Elegí un vendedor para ver sus clientes'
+      : (q ? 'No se encontraron clientes' : (mode === 'vendor' ? 'Este vendedor no tiene clientes' : 'No hay clientes cargados todavía'));
+    noEl.classList.remove('hidden');
+    return;
+  }
+  noEl.classList.add('hidden');
+
+  if (mode === 'grouped') {
+    const groups = new Map(); // vendor_id (or '' for sin asignar) -> { name, clients }
+    filtered.forEach(c => {
+      const key = c.vendor_id || '';
+      if (!groups.has(key)) groups.set(key, { name: c.vendor_name || 'Sin vendedor asignado', clients: [] });
+      groups.get(key).clients.push(c);
+    });
+    const sortedGroups = [...groups.entries()].sort((a, b) => {
+      if (a[0] === '') return 1;
+      if (b[0] === '') return -1;
+      return a[1].name.localeCompare(b[1].name);
+    });
+    tbody.innerHTML = sortedGroups.map(([, g]) => {
+      const subtotal = g.clients.reduce((s, c) => s + (c.balance || 0), 0);
+      return clientGroupHeaderRow(g.name, g.clients.length)
+        + g.clients.map(clientRowHtml).join('')
+        + clientGroupSubtotalRow(subtotal);
+    }).join('');
+  } else {
+    tbody.innerHTML = filtered.map(clientRowHtml).join('');
+  }
+}
+
+$('clients-view-mode').addEventListener('change', () => {
+  state.clientsViewMode = $('clients-view-mode').value;
+  $('clients-vendor-filter').classList.toggle('hidden', state.clientsViewMode !== 'vendor');
+  renderClients(_allClients, ($('client-search') || {}).value || '');
+});
+$('clients-vendor-filter').addEventListener('change', () => {
+  state.clientsVendorId = $('clients-vendor-filter').value;
+  renderClients(_allClients, ($('client-search') || {}).value || '');
+});
 
 $('btn-clients-export-pdf').addEventListener('click', () => {
   if (!_allClients.length) { toast('No hay clientes para exportar', 'error'); return; }

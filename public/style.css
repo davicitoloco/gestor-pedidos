@@ -117,6 +117,12 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .table tbody tr:hover{background:var(--primary-light)}
 .table tbody td{padding:11px 14px;vertical-align:middle}
 
+/* One row per record, no vertical wrap — long values truncate with ellipsis
+   (pair with a title="" attribute on the cell for the full value on hover). */
+.table-fixed-clients{table-layout:fixed}
+.table-fixed-clients tbody td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.table-fixed-clients tbody tr.client-group-header td{white-space:normal;overflow:visible;text-overflow:clip}
+
 /* Scrollable wrapper for tables with sticky head/column: both axes must
    scroll in THIS same box, otherwise sticky positioning breaks when the
    vertical scroll happens on an outer ancestor (e.g. .app-content). */

@@ -367,21 +367,31 @@
             </button>
           </div>
         </div>
-        <div style="margin-bottom:12px">
+        <div style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <input type="search" id="client-search" class="input" placeholder="Buscar por nombre, CUIT, localidad, provincia, email o teléfono…" style="width:100%;max-width:480px">
+          <div class="admin-only" style="display:flex;gap:8px;align-items:center">
+            <select id="clients-view-mode" class="input select" style="width:210px;padding:7px 10px">
+              <option value="all">Todos</option>
+              <option value="vendor">Vendedor específico</option>
+              <option value="grouped">Todos agrupados por vendedor</option>
+            </select>
+            <select id="clients-vendor-filter" class="input select hidden" style="width:200px;padding:7px 10px">
+              <option value="">— Elegí un vendedor —</option>
+            </select>
+          </div>
         </div>
         <div class="table-wrap" style="overflow-x:auto">
-          <table class="table">
+          <table class="table table-fixed-clients">
             <thead><tr>
-              <th>Nombre</th>
+              <th style="width:190px">Nombre</th>
               <th style="width:130px">CUIT</th>
               <th style="width:105px">Teléfono</th>
-              <th style="width:140px;max-width:140px;overflow:hidden;text-overflow:ellipsis">Email</th>
-              <th class="admin-only-col" style="width:110px">Vendedor</th>
-              <th style="width:140px;max-width:140px">Dirección</th>
-              <th style="width:140px">Localidad / Prov.</th>
-              <th style="width:105px" class="text-right">Saldo</th>
-              <th style="width:110px;position:sticky;right:0;background:var(--bg);z-index:2;box-shadow:-2px 0 4px rgba(0,0,0,0.06)" class="text-center">Acciones</th>
+              <th style="width:170px">Email</th>
+              <th class="admin-only-col" style="width:120px">Vendedor</th>
+              <th style="width:170px">Dirección</th>
+              <th style="width:150px">Localidad / Prov.</th>
+              <th style="width:110px" class="text-right">Deuda</th>
+              <th style="width:130px;position:sticky;right:0;background:var(--bg);z-index:2;box-shadow:-2px 0 4px rgba(0,0,0,0.06)" class="text-center">Acciones</th>
             </tr></thead>
             <tbody id="clients-tbody"></tbody>
           </table>
