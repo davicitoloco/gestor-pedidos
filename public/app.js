@@ -339,7 +339,7 @@ function renderOrders(orders, searchQuery = '', modeloQuery = '') {
       <td class="text-center" onclick="event.stopPropagation()">${renderCobroCell(o)}</td>
       <td class="col-mobile-hide">${fmtDate(o.delivery_date)}</td>
       <td class="col-mobile-hide" style="color:var(--text-muted);font-size:.82rem">${fmtDateTime(o.created_at)}</td>
-      <td class="text-center" style="white-space:nowrap">
+      <td class="text-center" style="white-space:nowrap;position:sticky;right:0;background:var(--white);box-shadow:-2px 0 4px rgba(0,0,0,0.06)">
         <button class="btn-icon btn-edit" data-id="${o.id}" onclick="event.stopPropagation()" title="Editar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
