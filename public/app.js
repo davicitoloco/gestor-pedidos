@@ -50,7 +50,8 @@ const state = {
   charts:            {},
   discountOver:      false,
   clientsViewMode:   'all',   // 'all' | 'vendor' | 'grouped'
-  clientsVendorId:   ''
+  clientsVendorId:   '',
+  clientsProduct:    ''
 };
 
 /* ================================================================ API */
@@ -1959,10 +1960,28 @@ let _allClients = [];
 
 async function loadClients() {
   try {
-    _allClients = await api('GET', '/customers');
+    const qs = state.clientsProduct ? `?product=${encodeURIComponent(state.clientsProduct)}` : '';
+    _allClients = await api('GET', `/customers${qs}`);
     const q = ($('client-search') || {}).value || '';
     renderClients(_allClients, q);
   } catch (err) { toast(err.message, 'error'); }
+}
+
+let _clientsProductTimer = null;
+function applyClientsProductFilter() {
+  $('btn-clients-product-clear').style.display = $('clients-product-filter').value ? '' : 'none';
+  state.clientsProduct = $('clients-product-filter').value.trim();
+  clearTimeout(_clientsProductTimer);
+  _clientsProductTimer = setTimeout(loadClients, 250);
+}
+if ($('clients-product-filter')) {
+  $('clients-product-filter').addEventListener('input', applyClientsProductFilter);
+  $('btn-clients-product-clear').addEventListener('click', () => {
+    $('clients-product-filter').value = '';
+    $('btn-clients-product-clear').style.display = 'none';
+    state.clientsProduct = '';
+    loadClients();
+  });
 }
 
 // Saldo deudor: mismo campo `balance` que ya devuelve GET /api/customers
@@ -2035,13 +2054,11 @@ function populateClientsVendorFilter(clients) {
   if (vendors.some(v => String(v.id) === String(current))) sel.value = current;
 }
 
-function renderClients(clients, searchQuery) {
-  const tbody = $('clients-tbody');
-  const noEl  = $('no-clients');
-  const noMsg = $('no-clients-msg');
-
-  populateClientsVendorFilter(clients);
-
+// Filtro de búsqueda + modo (Todos / Vendedor específico / Agrupado) — ÚNICA
+// fuente de verdad para qué clientes están "en pantalla" ahora mismo. La
+// reusan tanto renderClients() como la exportación a PDF, para que el PDF
+// nunca pueda quedar desincronizado de lo que el usuario está viendo.
+function getClientsViewState(clients, searchQuery) {
   const q = (searchQuery || '').toLowerCase().trim();
   let filtered = q
     ? clients.filter(c => [c.name, c.cuit, c.localidad, c.provincia, c.email, c.phone]
@@ -2055,6 +2072,35 @@ function renderClients(clients, searchQuery) {
   } else if (vendorModeNeedsPick) {
     filtered = [];
   }
+  return { filtered, mode, vendorModeNeedsPick, q };
+}
+
+// Agrupa por vendedor (mismo criterio que el modo "grouped" en pantalla) —
+// también reutilizado por la exportación a PDF.
+function groupClientsByVendor(filtered) {
+  const groups = new Map(); // vendor_id (or '' for sin asignar) -> { name, clients }
+  filtered.forEach(c => {
+    const key = c.vendor_id || '';
+    if (!groups.has(key)) groups.set(key, { name: c.vendor_name || 'Sin vendedor asignado', clients: [] });
+    groups.get(key).clients.push(c);
+  });
+  return [...groups.entries()]
+    .sort((a, b) => {
+      if (a[0] === '') return 1;
+      if (b[0] === '') return -1;
+      return a[1].name.localeCompare(b[1].name);
+    })
+    .map(([, g]) => g);
+}
+
+function renderClients(clients, searchQuery) {
+  const tbody = $('clients-tbody');
+  const noEl  = $('no-clients');
+  const noMsg = $('no-clients-msg');
+
+  populateClientsVendorFilter(clients);
+
+  const { filtered, mode, vendorModeNeedsPick, q } = getClientsViewState(clients, searchQuery);
 
   $('clients-count').textContent = vendorModeNeedsPick ? '' : `${filtered.length} cliente${filtered.length !== 1 ? 's' : ''}`;
 
@@ -2069,18 +2115,7 @@ function renderClients(clients, searchQuery) {
   noEl.classList.add('hidden');
 
   if (mode === 'grouped') {
-    const groups = new Map(); // vendor_id (or '' for sin asignar) -> { name, clients }
-    filtered.forEach(c => {
-      const key = c.vendor_id || '';
-      if (!groups.has(key)) groups.set(key, { name: c.vendor_name || 'Sin vendedor asignado', clients: [] });
-      groups.get(key).clients.push(c);
-    });
-    const sortedGroups = [...groups.entries()].sort((a, b) => {
-      if (a[0] === '') return 1;
-      if (b[0] === '') return -1;
-      return a[1].name.localeCompare(b[1].name);
-    });
-    tbody.innerHTML = sortedGroups.map(([, g]) => {
+    tbody.innerHTML = groupClientsByVendor(filtered).map(g => {
       const subtotal = g.clients.reduce((s, c) => s + (c.balance || 0), 0);
       return clientGroupHeaderRow(g.name, g.clients.length)
         + g.clients.map(clientRowHtml).join('')
@@ -2101,11 +2136,14 @@ $('clients-vendor-filter').addEventListener('change', () => {
   renderClients(_allClients, ($('client-search') || {}).value || '');
 });
 
-$('btn-clients-export-pdf').addEventListener('click', () => {
-  if (!_allClients.length) { toast('No hay clientes para exportar', 'error'); return; }
-  const fecha = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
-  const rows = _allClients.map(c => `
-    <tr>
+function pdfBalance(bal) {
+  const b = bal || 0;
+  if (b > 0.005)  return `<span style="color:#dc2626;font-weight:600">${fmtMoney(b)}</span>`;
+  if (b < -0.005) return `<span style="color:#16a34a;font-weight:600">A favor ${fmtMoney(-b)}</span>`;
+  return `<span style="color:#64748b">Sin deuda</span>`;
+}
+function clientPdfRow(c) {
+  return `<tr>
       <td class="col-nombre" title="${esc(c.name||'')}">${esc(c.name)}</td>
       <td class="col-cuit" title="${esc(formatCuit(c.cuit)||'')}">${esc(formatCuit(c.cuit)||'')}</td>
       <td class="col-tel" title="${esc(c.phone||'')}">${esc(c.phone||'')}</td>
@@ -2114,7 +2152,48 @@ $('btn-clients-export-pdf').addEventListener('click', () => {
       <td class="col-loc" title="${esc(c.localidad||'')}">${esc(c.localidad||'')}</td>
       <td class="col-prov" title="${esc(c.provincia||'')}">${esc(c.provincia||'')}</td>
       <td class="col-vend" title="${esc(c.vendor_name||'')}">${esc(c.vendor_name||'')}</td>
-    </tr>`).join('');
+      <td class="col-deuda" style="text-align:right">${pdfBalance(c.balance)}</td>
+    </tr>`;
+}
+function clientPdfGroupHeaderRow(label, count) {
+  return `<tr class="grp"><td colspan="9">${esc(label)} <span style="font-weight:400;color:#64748b">(${count} cliente${count !== 1 ? 's' : ''})</span></td></tr>`;
+}
+function clientPdfSubtotalRow(subtotal) {
+  return `<tr class="subtotal"><td colspan="8" style="text-align:right;font-weight:600;color:#475569">Subtotal</td><td style="text-align:right;font-weight:700">${pdfBalance(subtotal)}</td></tr>`;
+}
+
+// Exporta EXACTAMENTE lo que el usuario está viendo: reusa getClientsViewState()/
+// groupClientsByVendor() (misma lógica que renderClients()) en vez de tener una
+// query/filtro propio — así el PDF nunca puede desincronizarse de la pantalla.
+$('btn-clients-export-pdf').addEventListener('click', () => {
+  if (!_allClients.length) { toast('No hay clientes para exportar', 'error'); return; }
+
+  const searchQuery = ($('client-search') || {}).value || '';
+  const { filtered, mode, vendorModeNeedsPick, q } = getClientsViewState(_allClients, searchQuery);
+
+  if (vendorModeNeedsPick) { toast('Elegí un vendedor para exportar', 'error'); return; }
+  if (!filtered.length) { toast('No hay clientes para exportar con este filtro', 'error'); return; }
+
+  const fecha = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+
+  let rows;
+  if (mode === 'grouped') {
+    rows = groupClientsByVendor(filtered).map(g => {
+      const subtotal = g.clients.reduce((s, c) => s + (c.balance || 0), 0);
+      return clientPdfGroupHeaderRow(g.name, g.clients.length) + g.clients.map(clientPdfRow).join('') + clientPdfSubtotalRow(subtotal);
+    }).join('');
+  } else {
+    rows = filtered.map(clientPdfRow).join('');
+  }
+  const grandTotal = filtered.reduce((s, c) => s + (c.balance || 0), 0);
+
+  const filterParts = [];
+  if (q) filterParts.push(`Búsqueda: "${searchQuery.trim()}"`);
+  if (state.clientsProduct) filterParts.push(`Producto: ${state.clientsProduct}`);
+  if (mode === 'vendor' && state.clientsVendorId) filterParts.push(`Vendedor: ${filtered[0].vendor_name || '—'}`);
+  else if (mode === 'grouped') filterParts.push('Agrupado por vendedor');
+  const subLabel = filterParts.length ? ` — ${filterParts.join(' · ')}` : '';
+
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
     <title>Clientes</title>
     <style>
@@ -2126,22 +2205,28 @@ $('btn-clients-export-pdf').addEventListener('click', () => {
       th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       td{padding:5px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
       tr:nth-child(even) td{background:#f8fafc}
+      tr.grp td{background:#f1f5f9;font-weight:700;border-bottom:1px solid #cbd5e1;white-space:normal}
+      tr.subtotal td{background:#f1f5f9;border-bottom:2px solid #cbd5e1}
       tfoot td{font-weight:600;background:#f1f5f9;border-top:2px solid #cbd5e1}
-      .col-nombre{width:17%} .col-cuit{width:11%} .col-tel{width:9%} .col-email{width:17%}
-      .col-dir{width:18%} .col-loc{width:12%} .col-prov{width:8%} .col-vend{width:8%}
+      .col-nombre{width:15%} .col-cuit{width:10%} .col-tel{width:8%} .col-email{width:15%}
+      .col-dir{width:15%} .col-loc{width:9%} .col-prov{width:6%} .col-vend{width:8%} .col-deuda{width:14%}
       @media print{body{margin:10mm}}
     </style>
   </head><body>
     <h1>Lista de Clientes</h1>
-    <div class="sub">Exportado el ${fecha}</div>
+    <div class="sub">Exportado el ${fecha}${esc(subLabel)}</div>
     <table>
       <thead><tr>
         <th class="col-nombre">Nombre</th><th class="col-cuit">CUIT</th><th class="col-tel">Teléfono</th>
         <th class="col-email">Email</th><th class="col-dir">Dirección</th><th class="col-loc">Localidad</th>
         <th class="col-prov">Provincia</th><th class="col-vend">Vendedor</th>
+        <th class="col-deuda" style="text-align:right">Deuda</th>
       </tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td colspan="8">Total: ${_allClients.length} cliente${_allClients.length!==1?'s':''}</td></tr></tfoot>
+      <tfoot><tr>
+        <td colspan="8">Total: ${filtered.length} cliente${filtered.length!==1?'s':''}</td>
+        <td style="text-align:right">${pdfBalance(grandTotal)}</td>
+      </tr></tfoot>
     </table>
     <script>window.onload=()=>window.print()<\/script>
   </body></html>`;

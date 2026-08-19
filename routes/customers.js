@@ -28,10 +28,18 @@ function isVendor(req) { return req.session.role === 'vendedor'; }
 function normalizeCuit(raw) { return String(raw || '').replace(/\D/g, ''); }
 function isValidCuit(c)     { return /^\d{11}$/.test(c); }
 
-// GET /api/customers
+// GET /api/customers?product=X — filtra a clientes con al menos un pedido de ese producto
 router.get('/', (req, res) => {
   try {
     const vc = isVendor(req) ? `AND c.vendor_id = ${req.session.userId}` : '';
+    const product = (req.query.product || '').trim();
+    const productFilter = product ? `AND EXISTS (
+        SELECT 1 FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        WHERE LOWER(TRIM(o.customer_name)) = LOWER(TRIM(c.name))
+          AND LOWER(oi.product_name) LIKE ?
+      )` : '';
+    const params = product ? [`%${product.toLowerCase()}%`] : [];
     const rows = db.prepare(`
       SELECT c.*,
         COALESCE(uv.full_name, uv.username) AS vendor_name,
@@ -40,9 +48,9 @@ router.get('/', (req, res) => {
         + COALESCE((SELECT SUM(CASE WHEN n.note_type='debito' THEN n.amount ELSE -n.amount END) FROM credit_debit_notes n WHERE n.entity_type='customer' AND n.entity_id = c.id), 0) AS balance
       FROM customers c
       LEFT JOIN users uv ON c.vendor_id = uv.id
-      WHERE 1=1 ${vc}
+      WHERE 1=1 ${vc} ${productFilter}
       ORDER BY c.name ASC
-    `).all();
+    `).all(...params);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

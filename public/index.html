@@ -368,7 +368,11 @@
           </div>
         </div>
         <div style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <input type="search" id="client-search" class="input" placeholder="Buscar por nombre, CUIT, localidad, provincia, email o teléfono…" style="width:100%;max-width:480px">
+          <input type="search" id="client-search" class="input" placeholder="Buscar por nombre, CUIT, localidad, provincia, email o teléfono…" style="width:100%;max-width:420px">
+          <div class="modelo-filter-wrap" style="position:relative;display:flex;align-items:center">
+            <input type="text" id="clients-product-filter" class="input" list="products-datalist" placeholder="Filtrar por producto…" autocomplete="off" style="width:200px;padding:7px 28px 7px 10px">
+            <button type="button" id="btn-clients-product-clear" title="Limpiar filtro" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;padding:2px">✕</button>
+          </div>
           <div class="admin-only" style="display:flex;gap:8px;align-items:center">
             <select id="clients-view-mode" class="input select" style="width:210px;padding:7px 10px">
               <option value="all">Todos</option>
