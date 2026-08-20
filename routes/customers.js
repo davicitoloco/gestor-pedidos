@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db, withTransaction } = require('../db');
 const PDFDocument = require('pdfkit');
+const { getProductBalanceByCustomer } = require('../lib/productLedger');
 
 function fmtDatePdf(d) {
   if (!d) return '';
@@ -28,7 +29,10 @@ function isVendor(req) { return req.session.role === 'vendedor'; }
 function normalizeCuit(raw) { return String(raw || '').replace(/\D/g, ''); }
 function isValidCuit(c)     { return /^\d{11}$/.test(c); }
 
-// GET /api/customers?product=X — filtra a clientes con al menos un pedido de ese producto
+// GET /api/customers?product=X — filtra a clientes con al menos un pedido de
+// ese producto, y en ese caso "balance" pasa a ser el saldo pendiente
+// específico de ese producto (entregado - cobrado, misma fuente que la Ficha
+// de Producto vía lib/productLedger) en vez de la deuda total del cliente.
 router.get('/', (req, res) => {
   try {
     const vc = isVendor(req) ? `AND c.vendor_id = ${req.session.userId}` : '';
@@ -51,6 +55,12 @@ router.get('/', (req, res) => {
       WHERE 1=1 ${vc} ${productFilter}
       ORDER BY c.name ASC
     `).all(...params);
+
+    if (product) {
+      const productBalances = getProductBalanceByCustomer(product, { clause: '', params: [] });
+      rows.forEach(c => { c.balance = productBalances.get(c.id) || 0; });
+    }
+
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
