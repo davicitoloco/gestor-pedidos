@@ -51,7 +51,8 @@ const state = {
   discountOver:      false,
   clientsViewMode:   'all',   // 'all' | 'vendor' | 'grouped'
   clientsVendorId:   '',
-  clientsProduct:    ''
+  clientsProduct:    '',
+  clientsDebtFilter: 'all'    // 'all' | 'debt' | 'nodebt' — sobre c.balance (total o por producto, según haya filtro de producto)
 };
 
 /* ================================================================ API */
@@ -2072,6 +2073,14 @@ function getClientsViewState(clients, searchQuery) {
   } else if (vendorModeNeedsPick) {
     filtered = [];
   }
+
+  // Con deuda / Sin deuda — sobre c.balance, que ya viene calculado por el
+  // backend (deuda total del cliente, o saldo pendiente de un producto
+  // puntual si hay filtro de producto activo). Se aplica último, sobre lo
+  // que ya quedó filtrado por búsqueda/vendedor.
+  if (state.clientsDebtFilter === 'debt')        filtered = filtered.filter(c => (c.balance || 0) > 0.005);
+  else if (state.clientsDebtFilter === 'nodebt') filtered = filtered.filter(c => (c.balance || 0) <= 0.005);
+
   return { filtered, mode, vendorModeNeedsPick, q };
 }
 
@@ -2106,9 +2115,12 @@ function renderClients(clients, searchQuery) {
 
   if (!filtered.length) {
     tbody.innerHTML = '';
+    const debtSuffix = state.clientsDebtFilter === 'debt' ? ' con deuda' : state.clientsDebtFilter === 'nodebt' ? ' sin deuda' : '';
     if (noMsg) noMsg.textContent = vendorModeNeedsPick
       ? 'Elegí un vendedor para ver sus clientes'
-      : (q ? 'No se encontraron clientes' : (mode === 'vendor' ? 'Este vendedor no tiene clientes' : 'No hay clientes cargados todavía'));
+      : (q ? 'No se encontraron clientes'
+           : (mode === 'vendor' ? `Este vendedor no tiene clientes${debtSuffix}`
+             : (debtSuffix ? `No hay clientes${debtSuffix}` : 'No hay clientes cargados todavía')));
     noEl.classList.remove('hidden');
     return;
   }
@@ -2133,6 +2145,10 @@ $('clients-view-mode').addEventListener('change', () => {
 });
 $('clients-vendor-filter').addEventListener('change', () => {
   state.clientsVendorId = $('clients-vendor-filter').value;
+  renderClients(_allClients, ($('client-search') || {}).value || '');
+});
+$('clients-debt-filter').addEventListener('change', () => {
+  state.clientsDebtFilter = $('clients-debt-filter').value;
   renderClients(_allClients, ($('client-search') || {}).value || '');
 });
 
@@ -2161,6 +2177,8 @@ $('btn-clients-export-pdf').addEventListener('click', async () => {
   if (state.clientsProduct) filterParts.push(`Producto: ${state.clientsProduct}`);
   if (mode === 'vendor' && state.clientsVendorId) filterParts.push(`Vendedor: ${filtered[0].vendor_name || '—'}`);
   else if (mode === 'grouped') filterParts.push('Agrupado por vendedor');
+  if (state.clientsDebtFilter === 'debt') filterParts.push('Con deuda');
+  else if (state.clientsDebtFilter === 'nodebt') filterParts.push('Sin deuda');
   const subtitle = filterParts.join(' · ');
 
   const btn = $('btn-clients-export-pdf');

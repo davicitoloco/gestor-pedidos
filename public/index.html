@@ -373,6 +373,11 @@
             <input type="text" id="clients-product-filter" class="input" list="products-datalist" placeholder="Filtrar por producto…" autocomplete="off" style="width:200px;padding:7px 28px 7px 10px">
             <button type="button" id="btn-clients-product-clear" title="Limpiar filtro" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;padding:2px">✕</button>
           </div>
+          <select id="clients-debt-filter" class="input select" style="width:130px;padding:7px 10px">
+            <option value="all">Todos</option>
+            <option value="debt">Con deuda</option>
+            <option value="nodebt">Sin deuda</option>
+          </select>
           <div class="admin-only" style="display:flex;gap:8px;align-items:center">
             <select id="clients-view-mode" class="input select" style="width:210px;padding:7px 10px">
               <option value="all">Todos</option>
