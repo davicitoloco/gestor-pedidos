@@ -2,7 +2,19 @@ const express = require('express');
 const router = express.Router();
 const { db, withTransaction } = require('../db');
 const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
-const { acctBySubtype, recordJournal } = require('../lib/accounting');
+const { acctBySubtype, acctByCode, recordJournal } = require('../lib/accounting');
+const { cobroStatus } = require('../lib/cobro');
+
+// Fallback lookups que no requieren accepts_movements=1, para no fallar
+// silenciosamente en DBs donde el flag está en 0.
+function findAcctBySubtype(subtype) {
+  return acctBySubtype(subtype)
+      || db.prepare('SELECT id FROM accounts WHERE subtype=? LIMIT 1').get(subtype);
+}
+function findAcctByCode(code) {
+  return acctByCode(code)
+      || db.prepare('SELECT id FROM accounts WHERE code=? LIMIT 1').get(code);
+}
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
@@ -12,10 +24,21 @@ router.use(requireAuth);
 
 function isVendor(req) { return req.session.role === 'vendedor'; }
 function isAdminLike(req) { return ['admin','subadmin'].includes(req.session.role); }
+function isAdmin(req)  { return req.session.role === 'admin'; }
 function checkPeriodClosed(date) {
   const period = (date || new Date().toISOString().slice(0,10)).slice(0,7);
   const closed = db.prepare('SELECT id FROM accounting_closes WHERE period=?').get(period);
   if (closed) throw new Error(`El período ${period} está cerrado. No se pueden crear ni modificar asientos en períodos cerrados.`);
+}
+
+const DISC_LIMIT = 0.278 + 1e-9; // 1 − 0.80 × 0.95 × 0.95
+
+function exceedsDiscountLimit(d1, d2, d3, d4, items) {
+  const maxItem = (items && items.length)
+    ? Math.max(0, ...items.map(it => parseFloat(it.discount) || 0))
+    : 0;
+  const eff = 1 - (1 - maxItem/100) * (1 - d1/100) * (1 - d2/100) * (1 - d3/100) * (1 - d4/100);
+  return eff > DISC_LIMIT;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -49,14 +72,20 @@ function getCompanyName() {
 // ── GET /api/orders ───────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, modelo } = req.query;
     const vendorFilter = isVendor(req) ? `AND o.created_by = ${req.session.userId}` : '';
     const statusFilter = (status && status !== 'Todos') ? `AND o.status = ?` : '';
-    const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ?)` : '';
+    const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ? OR LOWER(COALESCE(u.full_name, u.username)) LIKE ?)` : '';
+    const modeloFilter = modelo ? `AND EXISTS (SELECT 1 FROM order_items oim WHERE oim.order_id = o.id AND LOWER(oim.product_name) LIKE ?)` : '';
+    const modeloQtySelect = modelo
+      ? `, COALESCE((SELECT SUM(oiq.quantity) FROM order_items oiq WHERE oiq.order_id = o.id AND LOWER(oiq.product_name) LIKE ?), 0) AS modelo_qty`
+      : '';
     const sf = getSucursalFilter(req, 'o');
     const params = [];
+    if (modelo) params.push(`%${modelo.toLowerCase()}%`);
     if (status && status !== 'Todos') params.push(status);
-    if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q); }
+    if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q, q); }
+    if (modelo) params.push(`%${modelo.toLowerCase()}%`);
     params.push(...sf.params);
 
     const sql = `
@@ -68,6 +97,7 @@ router.get('/', (req, res) => {
         o.created_at, o.updated_at,
         COALESCE(u.full_name, u.username)        AS vendor_name,
         COUNT(oi.id)                              AS item_count,
+        COALESCE(SUM(oi.quantity), 0)             AS total_units,
         COALESCE(SUM(oi.quantity * oi.unit_price * (1.0 - oi.discount/100.0)), 0) AS subtotal,
         COALESCE(SUM(oi.quantity * oi.unit_price * (1.0 - oi.discount/100.0)), 0)
           * (1.0 - o.discount/100.0)
@@ -75,15 +105,25 @@ router.get('/', (req, res) => {
           * (1.0 - COALESCE(o.discount3,0)/100.0)
           * (1.0 - COALESCE(o.discount4,0)/100.0) AS total,
         EXISTS(SELECT 1 FROM order_returns r WHERE r.order_id = o.id AND r.return_type = 'rechazo') AS has_rechazo,
-        EXISTS(SELECT 1 FROM repair_stock rs WHERE rs.origin_order_id = o.id AND rs.status = 'en_reparacion') AS has_repair_pending
+        EXISTS(SELECT 1 FROM repair_stock rs WHERE rs.origin_order_id = o.id AND rs.status = 'en_reparacion') AS has_repair_pending,
+        COALESCE((SELECT SUM(r.total) FROM remitos r WHERE r.order_id = o.id), 0) AS cobro_entregado,
+        COALESCE((
+          SELECT SUM(pra.amount) FROM payment_remito_allocations pra
+          JOIN remitos r2 ON pra.remito_id = r2.id WHERE r2.order_id = o.id
+        ), 0) AS cobro_cobrado
+        ${modeloQtySelect}
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      LEFT JOIN users u ON o.created_by = u.id
-      WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter} ${sf.clause}
+      LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
+      WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter} ${modeloFilter} ${sf.clause}
       GROUP BY o.id
       ORDER BY o.order_sequence DESC
     `;
-    res.json(db.prepare(sql).all(...params));
+    const rows = db.prepare(sql).all(...params).map(o => ({
+      ...o,
+      cobro_status: cobroStatus(o.cobro_entregado, o.cobro_cobrado),
+    }));
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -94,7 +134,7 @@ router.get('/:id', (req, res) => {
     const order = db.prepare(`
       SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
              COALESCE(u.full_name, u.username) AS vendor_name
-      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+      FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
       WHERE o.id = ?
     `).get(id);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -111,8 +151,11 @@ router.get('/:id/print', (req, res) => {
     const id = Number(req.params.id);
     const order = db.prepare(`
       SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
-             COALESCE(u.full_name, u.username) AS vendor_name
-      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+             COALESCE(u.full_name, u.username) AS vendor_name,
+             COALESCE(pl.nombre, (SELECT nombre FROM price_lists WHERE active = 1 ORDER BY id DESC LIMIT 1)) AS price_list_name
+      FROM orders o
+      LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
+      LEFT JOIN price_lists pl ON o.price_list_id = pl.id
       WHERE o.id = ?
     `).get(id);
     if (!order) return res.status(404).send('Pedido no encontrado');
@@ -236,6 +279,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
     <div class="info-item"><label>Estado</label>
       <p><span class="badge" style="background:${statusBg[order.status]||'#f1f5f9'};color:${statusColor[order.status]||'#475569'}">${esc(order.status)}</span></p>
     </div>
+    ${order.price_list_name ? `<div class="info-item"><label>Lista de precios</label><p>${esc(order.price_list_name)}</p></div>` : ''}
   </div>
   <h3>Detalle del pedido</h3>
   <table>
@@ -359,7 +403,7 @@ router.get('/:id/print-deposito', (req, res) => {
     const order = db.prepare(`
       SELECT o.*, printf('%03d', o.order_sequence) AS order_number,
              COALESCE(u.full_name, u.username) AS vendor_name
-      FROM orders o LEFT JOIN users u ON o.created_by = u.id
+      FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
       WHERE o.id = ?
     `).get(id);
     if (!order) return res.status(404).send('Pedido no encontrado');
@@ -435,8 +479,8 @@ tbody tr:nth-child(even) td{background:#f8fafc}
     </div>
     <div class="banner">USO INTERNO — DEPÓSITO</div>
     <div class="header">
-      <h1>${esc(company)}</h1>
-      <h2>Orden de Preparación</h2>
+      <h1>${esc(order.customer_name)}</h1>
+      <h2>Orden de Preparación — ${esc(company)}</h2>
     </div>
     <div class="info-grid">
       <div class="info-item"><label>Número de pedido</label><p>#${esc(order.order_number)}</p></div>
@@ -483,27 +527,77 @@ tbody tr:nth-child(even) td{background:#f8fafc}
   } catch (err) { res.status(500).send(err.message); }
 });
 
+// ── GET /api/orders/:id/cobro-info ────────────────────────────────────────────
+// Estado de cobro del pedido, calculado a partir de los remitos generados por
+// sus entregas y los pagos ya vinculados a cada uno (payment_remito_allocations).
+// Alimenta el modal de "Cobro" en la lista de pedidos: no crea nada, sólo
+// informa para armar el payload que después va a POST /api/payments.
+router.get('/:id/cobro-info', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'Acceso denegado' });
+
+    const cust = db.prepare("SELECT id, name FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(order.customer_name);
+    if (!cust) return res.status(400).json({ error: `No existe un cliente llamado "${order.customer_name}". Creá el cliente antes de registrar el cobro.` });
+
+    const remitos = db.prepare(`
+      SELECT r.id, printf('R-%03d', r.remito_sequence) AS remito_number, r.total, r.created_at,
+             COALESCE((SELECT SUM(pra.amount) FROM payment_remito_allocations pra WHERE pra.remito_id = r.id), 0) AS paid
+      FROM remitos r
+      WHERE r.order_id = ?
+      ORDER BY r.created_at ASC, r.id ASC
+    `).all(id).map(r => ({
+      ...r,
+      balance: Math.round((r.total - r.paid) * 100) / 100,
+      status: cobroStatus(r.total, r.paid),
+    }));
+
+    const entregado = Math.round(remitos.reduce((s, r) => s + r.total, 0) * 100) / 100;
+    const cobrado    = Math.round(remitos.reduce((s, r) => s + r.paid, 0) * 100) / 100;
+    const pendiente  = Math.round((entregado - cobrado) * 100) / 100;
+
+    res.json({
+      customer_id: cust.id,
+      customer_name: cust.name,
+      order_number: String(order.order_sequence).padStart(3, '0'),
+      entregado, cobrado, pendiente,
+      remitos,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id, price_list_id } = req.body;
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
+
+    if (!isAdmin(req) && exceedsDiscountLimit(
+      parseFloat(discount) || 0, parseFloat(discount2) || 0,
+      parseFloat(discount3) || 0, parseFloat(discount4) || 0,
+      items
+    )) return res.status(403).json({ error: 'Descuento supera el máximo permitido (27.8%)' });
 
     const orderId = withTransaction(() => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
       const efe = payment_efectivo ? 1 : 0;
       const chq = efe ? 0 : (payment_cheque ? 1 : 0);
-      const sucursalId = getInsertSucursalId(req);
+      const orderSucursalId = sucursal_id != null ? Number(sucursal_id) : getInsertSucursalId(req);
       const result = db.prepare(`
-        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (order_sequence, customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, created_by, sucursal_id, vendor_id, price_list_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(next, customer_name.trim(), notes || '', delivery_date || null,
              status || 'Pendiente',
              parseFloat(discount)  || 0, parseFloat(discount2) || 0,
              parseFloat(discount3) || 0, parseFloat(discount4) || 0,
              iva_exempt ? 1 : 0, efe, chq,
-             req.session.userId, sucursalId);
+             req.session.userId, orderSucursalId,
+             vendor_id ? Number(vendor_id) : null,
+             price_list_id ? Number(price_list_id) : null);
       const oid = Number(result.lastInsertRowid);
       if (items && items.length > 0) {
         const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
@@ -517,7 +611,7 @@ router.post('/', (req, res) => {
       return oid;
     });
 
-    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON o.created_by = u.id WHERE o.id = ?`).get(orderId);
+    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id WHERE o.id = ?`).get(orderId);
     const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(orderId);
     res.status(201).json({ ...order, items: orderItems });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -532,11 +626,36 @@ router.put('/:id', (req, res) => {
     if (isVendor(req) && existing.created_by !== req.session.userId)
       return res.status(403).json({ error: 'No podés editar pedidos de otros vendedores' });
 
-    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items } = req.body;
+    const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id, price_list_id } = req.body;
+
+    if (isVendor(req) && status !== undefined && status !== 'Cancelado')
+      return res.status(403).json({ error: 'Solo podés cambiar el estado a Cancelado' });
+
+    if (!isAdmin(req)) {
+      const fd1 = discount  !== undefined ? (parseFloat(discount)  || 0) : (existing.discount  || 0);
+      const fd2 = discount2 !== undefined ? (parseFloat(discount2) || 0) : (existing.discount2 || 0);
+      const fd3 = discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0);
+      const fd4 = discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0);
+      const checkItems = items !== undefined
+        ? items
+        : db.prepare('SELECT discount FROM order_items WHERE order_id = ?').all(id);
+      if (exceedsDiscountLimit(fd1, fd2, fd3, fd4, checkItems))
+        return res.status(403).json({ error: 'Descuento supera el máximo permitido (27.8%)' });
+    }
+
     withTransaction(() => {
       const efe = payment_efectivo !== undefined ? (payment_efectivo ? 1 : 0) : (existing.payment_efectivo || 0);
       const chq = payment_cheque  !== undefined ? (payment_cheque  ? 1 : 0) : (existing.payment_cheque  || 0);
-      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      const newSucursalId = sucursal_id !== undefined
+        ? (sucursal_id != null ? Number(sucursal_id) : null)
+        : existing.sucursal_id;
+      const newVendorId = req.session.role === 'admin' && vendor_id !== undefined
+        ? (vendor_id ? Number(vendor_id) : null)
+        : existing.vendor_id;
+      const newPriceListId = req.session.role === 'admin' && price_list_id !== undefined
+        ? (price_list_id ? Number(price_list_id) : null)
+        : existing.price_list_id;
+      db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, sucursal_id=?, vendor_id=?, price_list_id=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         customer_name !== undefined ? customer_name.trim() : existing.customer_name,
         notes !== undefined ? notes : existing.notes,
         delivery_date !== undefined ? (delivery_date || null) : existing.delivery_date,
@@ -546,7 +665,7 @@ router.put('/:id', (req, res) => {
         discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0),
         discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0),
         iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0),
-        efe, chq,
+        efe, chq, newSucursalId, newVendorId, newPriceListId,
         id
       );
       if (items !== undefined) {
@@ -561,9 +680,70 @@ router.put('/:id', (req, res) => {
           }
         }
       }
+
+      // ── Asiento contable ─────────────────────────────────────────────────────
+      const prevStatus  = existing.status;
+      const finalStatus = status || existing.status;
+      const DELIVERY_STATUSES = ['Entrega parcial', 'Entregado'];
+
+      if (DELIVERY_STATUSES.includes(finalStatus) && !DELIVERY_STATUSES.includes(prevStatus)) {
+        const dup = db.prepare(
+          "SELECT id FROM journal_entries WHERE ref_type='order' AND ref_id=? AND is_reversed=0"
+        ).get(id);
+        if (!dup) {
+          const currentItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id);
+          const sub = currentItems.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+          const fd1 = discount  !== undefined ? (parseFloat(discount)  || 0) : (existing.discount  || 0);
+          const fd2 = discount2 !== undefined ? (parseFloat(discount2) || 0) : (existing.discount2 || 0);
+          const fd3 = discount3 !== undefined ? (parseFloat(discount3) || 0) : (existing.discount3 || 0);
+          const fd4 = discount4 !== undefined ? (parseFloat(discount4) || 0) : (existing.discount4 || 0);
+          const total = sub * (1 - fd1/100) * (1 - fd2/100) * (1 - fd3/100) * (1 - fd4/100);
+          const finalIvaExempt = iva_exempt !== undefined ? (iva_exempt ? 1 : 0) : (existing.iva_exempt || 0);
+
+          if (total > 0.005) {
+            const deudores  = findAcctBySubtype('Clientes');
+            const ventas    = findAcctByCode('4.1.01');
+            const ivaVentas = findAcctByCode('2.1.03');
+            if (deudores && ventas) {
+              const orderNum = String(existing.order_sequence).padStart(3, '0');
+              // total es el monto NETO (sin IVA) — los precios de la app son sin IVA.
+              // El cliente debe el BRUTO (neto + IVA), por eso DEBE Deudores = total * 1.21.
+              let lines;
+              if (finalIvaExempt || !ivaVentas) {
+                lines = [
+                  { account_id: deudores.id, debit: total, credit: 0    },
+                  { account_id: ventas.id,   debit: 0,     credit: total },
+                ];
+              } else {
+                const iva   = Math.round(total * 0.21 * 100) / 100;
+                const gross = total + iva;
+                lines = [
+                  { account_id: deudores.id,  debit: gross, credit: 0    },
+                  { account_id: ventas.id,    debit: 0,     credit: total },
+                  { account_id: ivaVentas.id, debit: 0,     credit: iva   },
+                ];
+              }
+              recordJournal({
+                date:     new Date().toISOString().slice(0, 10),
+                desc:     `Venta pedido #${orderNum} - cliente ${existing.customer_name}`,
+                ref_type: 'order',
+                ref_id:   id,
+                lines,
+                userId:   req.session.userId
+              });
+            }
+          }
+        }
+      }
+
+      if (finalStatus === 'Cancelado' && prevStatus !== 'Cancelado') {
+        db.prepare(
+          "UPDATE journal_entries SET is_reversed=1 WHERE ref_type='order' AND ref_id=? AND is_reversed=0"
+        ).run(id);
+      }
     });
 
-    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON o.created_by = u.id WHERE o.id = ?`).get(id);
+    const order = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id WHERE o.id = ?`).get(id);
     const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
     res.json({ ...order, items: orderItems });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -634,7 +814,7 @@ router.post('/:id/deliveries', (req, res) => {
         }
         if (productId) {
           const qty = parseFloat(item.quantity_delivered);
-          db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(qty, productId);
+          db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').run(qty, productId);
           db.prepare(`INSERT INTO stock_movements (product_id, type, quantity, reference, created_by, sucursal_id) VALUES (?, 'egreso', ?, ?, ?, ?)`)
             .run(productId, qty, ref, req.session.userId, getInsertSucursalId(req));
         }
@@ -654,6 +834,55 @@ router.post('/:id/deliveries', (req, res) => {
       const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
       db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
         .run(newStatus, id);
+
+      // Asiento contable de venta — solo en la primera entrega
+      const DELIVERY_STATUSES = ['Entrega parcial', 'Entregado'];
+      if (DELIVERY_STATUSES.includes(newStatus) && !DELIVERY_STATUSES.includes(order.status)) {
+        const dup = db.prepare(
+          "SELECT id FROM journal_entries WHERE ref_type='order' AND ref_id=? AND is_reversed=0"
+        ).get(id);
+        if (!dup) {
+          const currentItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id);
+          const sub = currentItems.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
+          const total = sub
+            * (1 - (order.discount  || 0) / 100)
+            * (1 - (order.discount2 || 0) / 100)
+            * (1 - (order.discount3 || 0) / 100)
+            * (1 - (order.discount4 || 0) / 100);
+
+          if (total > 0.005) {
+            const deudores  = findAcctBySubtype('Clientes');
+            const ventas    = findAcctByCode('4.1.01');
+            const ivaVentas = findAcctByCode('2.1.03');
+            if (deudores && ventas) {
+              const orderNum = String(order.order_sequence).padStart(3, '0');
+              let lines;
+              if (order.iva_exempt || !ivaVentas) {
+                lines = [
+                  { account_id: deudores.id, debit: total, credit: 0     },
+                  { account_id: ventas.id,   debit: 0,     credit: total },
+                ];
+              } else {
+                const iva   = Math.round(total * 0.21 * 100) / 100;
+                const gross = total + iva;
+                lines = [
+                  { account_id: deudores.id,  debit: gross, credit: 0     },
+                  { account_id: ventas.id,    debit: 0,     credit: total },
+                  { account_id: ivaVentas.id, debit: 0,     credit: iva   },
+                ];
+              }
+              recordJournal({
+                date:     new Date().toISOString().slice(0, 10),
+                desc:     `Venta pedido #${orderNum} - cliente ${order.customer_name}`,
+                ref_type: 'order',
+                ref_id:   id,
+                lines,
+                userId:   req.session.userId
+              });
+            }
+          }
+        }
+      }
 
       // Auto-crear remito
       const remitoItems = validItems.map(item => {

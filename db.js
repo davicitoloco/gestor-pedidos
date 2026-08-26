@@ -331,6 +331,37 @@ db.exec(`
     sucursal_id INTEGER REFERENCES sucursales(id),
     created_at TEXT DEFAULT (datetime('now','localtime'))
   );
+  CREATE TABLE IF NOT EXISTS price_lists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    fecha_vigencia TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS price_list_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    price_list_id INTEGER NOT NULL REFERENCES price_lists(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    precio REAL NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS mp_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    proveedor TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'pendiente',
+    notas TEXT NOT NULL DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS mp_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mp_order_id INTEGER NOT NULL REFERENCES mp_orders(id) ON DELETE CASCADE,
+    seccion INTEGER NOT NULL,
+    descripcion TEXT NOT NULL,
+    cantidad REAL,
+    unidad TEXT NOT NULL DEFAULT 'kg',
+    notas TEXT NOT NULL DEFAULT ''
+  );
 `);
 
 // Migraciones seguras (agrega columnas si no existen)
@@ -357,6 +388,12 @@ addColIfMissing('cheques',           'deposited_to',    'INTEGER REFERENCES bank
 addColIfMissing('supplier_payments', 'purchase_id',     'INTEGER REFERENCES purchases(id)');
 addColIfMissing('journal_entries',    'reference',        "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('journal_entry_lines','line_description', "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('payments',   'cuit_librador',            "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('payments',   'fecha_vencimiento_cheque', "TEXT");
+addColIfMissing('purchases',  'iva_condition',             "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('purchases',  'subtotal_neto',             'REAL NOT NULL DEFAULT 0');
+addColIfMissing('purchases',  'iva_percent',               'REAL NOT NULL DEFAULT 0');
+addColIfMissing('purchases',  'iva_monto',                 'REAL NOT NULL DEFAULT 0');
 addColIfMissing('stock_movements',    'previous_qty',     'REAL');
 addColIfMissing('stock_movements',    'new_qty',          'REAL');
 addColIfMissing('orders',  'iva_exempt',        'INTEGER NOT NULL DEFAULT 0');
@@ -365,9 +402,16 @@ addColIfMissing('orders',  'payment_efectivo',  'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('orders',  'payment_cheque',    'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('customers', 'cuit', "TEXT NOT NULL DEFAULT ''");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_cuit ON customers(cuit) WHERE cuit != ''");
-addColIfMissing('customers', 'localidad', "TEXT NOT NULL DEFAULT ''");
-addColIfMissing('customers', 'provincia', "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('customers', 'localidad',  "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('customers', 'provincia',  "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('customers', 'vendor_id',  'INTEGER REFERENCES users(id)');
 addColIfMissing('orders',           'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('orders',           'vendor_id',      'INTEGER REFERENCES users(id)');
+addColIfMissing('orders',           'price_list_id',  'INTEGER REFERENCES price_lists(id)');
+addColIfMissing('mp_orders',        'supplier_id',    'INTEGER REFERENCES suppliers(id)');
+addColIfMissing('purchases',        'origin',         "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('purchases',        'origin_id',      'INTEGER');
+addColIfMissing('suppliers',        'celular',        "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('remitos',          'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('cash_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('bank_movements',   'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
@@ -375,6 +419,161 @@ addColIfMissing('payments',         'sucursal_id', 'INTEGER REFERENCES sucursale
 addColIfMissing('supplier_payments','sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('cheques',          'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
 addColIfMissing('stock_movements',  'sucursal_id', 'INTEGER REFERENCES sucursales(id)');
+addColIfMissing('products', 'pending_extra', 'INTEGER NOT NULL DEFAULT 0');
+db.exec(`CREATE TABLE IF NOT EXISTS supplier_visibility (
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (supplier_id, user_id)
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS payment_remito_allocations (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  remito_id  INTEGER NOT NULL REFERENCES remitos(id),
+  amount     REAL NOT NULL
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS mp_receipts (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  mp_order_id         INTEGER NOT NULL REFERENCES mp_orders(id) ON DELETE CASCADE,
+  sucursal            TEXT NOT NULL,
+  tipo_comprobante    TEXT NOT NULL DEFAULT 'Factura A',
+  numero_comprobante  TEXT NOT NULL DEFAULT '',
+  fecha_comprobante   TEXT NOT NULL,
+  monto_total         REAL NOT NULL DEFAULT 0,
+  iva                 TEXT NOT NULL DEFAULT '21%',
+  notas               TEXT NOT NULL DEFAULT '',
+  created_at          TEXT DEFAULT (datetime('now', 'localtime')),
+  created_by          INTEGER REFERENCES users(id)
+)`);
+
+// ── Módulo de Producción ──────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS prod_mp_cruda (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id  INTEGER NOT NULL UNIQUE REFERENCES products(id),
+    cajas       REAL NOT NULL DEFAULT 0,
+    llaves      REAL NOT NULL DEFAULT 0,
+    nueces      REAL NOT NULL DEFAULT 0,
+    pestillos   REAL NOT NULL DEFAULT 0,
+    updated_at  TEXT DEFAULT (datetime('now','localtime')),
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_mp_proceso (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id        INTEGER NOT NULL UNIQUE REFERENCES products(id),
+    cajas_disponibles REAL NOT NULL DEFAULT 0,
+    cajas_estanteria  REAL NOT NULL DEFAULT 0,
+    llaves            REAL NOT NULL DEFAULT 0,
+    nueces            REAL NOT NULL DEFAULT 0,
+    pestillos         REAL NOT NULL DEFAULT 0,
+    observaciones     TEXT NOT NULL DEFAULT '',
+    updated_at        TEXT DEFAULT (datetime('now','localtime')),
+    created_at        TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_terminadas (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id  INTEGER NOT NULL UNIQUE REFERENCES products(id),
+    cantidad    REAL NOT NULL DEFAULT 0,
+    updated_at  TEXT DEFAULT (datetime('now','localtime')),
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_movimientos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo        TEXT NOT NULL,
+    product_id  INTEGER NOT NULL REFERENCES products(id),
+    cajas       REAL NOT NULL DEFAULT 0,
+    cajas_est   REAL NOT NULL DEFAULT 0,
+    llaves      REAL NOT NULL DEFAULT 0,
+    nueces      REAL NOT NULL DEFAULT 0,
+    pestillos   REAL NOT NULL DEFAULT 0,
+    terminadas  REAL NOT NULL DEFAULT 0,
+    etapa       TEXT NOT NULL DEFAULT '',
+    notas       TEXT NOT NULL DEFAULT '',
+    purchase_id INTEGER REFERENCES purchases(id),
+    created_by  INTEGER REFERENCES users(id),
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_chapa (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    categoria  INTEGER NOT NULL UNIQUE,
+    kilos      REAL NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS prod_chapa_movs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo        TEXT NOT NULL DEFAULT 'ingreso_chapa',
+    categoria   INTEGER NOT NULL,
+    cantidad    REAL NOT NULL DEFAULT 0,
+    notas       TEXT NOT NULL DEFAULT '',
+    mp_order_id INTEGER REFERENCES mp_orders(id),
+    purchase_id INTEGER REFERENCES purchases(id),
+    created_by  INTEGER REFERENCES users(id),
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+
+// ── Migraciones producción ────────────────────────────────────
+// Nuevas columnas en prod_mp_proceso (circuito completo)
+['cajas_pulidas','cajas_sincadas','tapas_pulidas','tapas_sincadas',
+ 'cremalleras_pulidas','cremalleras_sincadas','combinaciones_pulidas','combinaciones_sincadas',
+ 'contrafrentes_pulidos','contrafrentes_sincados'].forEach(col =>
+  addColIfMissing('prod_mp_proceso', col, 'REAL NOT NULL DEFAULT 0')
+);
+// Nuevas columnas en prod_movimientos
+addColIfMissing('prod_movimientos', 'pieza',     "TEXT NOT NULL DEFAULT ''");
+addColIfMissing('prod_movimientos', 'cantidad',  'REAL NOT NULL DEFAULT 0');
+addColIfMissing('prod_movimientos', 'kg_usados', 'REAL NOT NULL DEFAULT 0');
+addColIfMissing('prod_movimientos', 'categoria', 'INTEGER');
+
+// Seed prod_chapa con las 9 categorías
+{
+  const cnt = db.prepare('SELECT COUNT(*) AS c FROM prod_chapa').get().c;
+  if (cnt === 0) {
+    const ins = db.prepare('INSERT INTO prod_chapa (categoria) VALUES (?)');
+    for (let i = 1; i <= 9; i++) ins.run(i);
+  }
+}
+
+// ── Depósito de insumos ───────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS deposito_insumos (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo         TEXT NOT NULL DEFAULT 'tornillo',
+    descripcion  TEXT NOT NULL,
+    stock_actual REAL NOT NULL DEFAULT 0,
+    activo       INTEGER NOT NULL DEFAULT 1,
+    updated_at   TEXT DEFAULT (datetime('now','localtime')),
+    created_at   TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS deposito_movimientos (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    insumo_id     INTEGER NOT NULL REFERENCES deposito_insumos(id),
+    tipo          TEXT NOT NULL,
+    cantidad      REAL NOT NULL,
+    motivo        TEXT NOT NULL DEFAULT '',
+    observaciones TEXT NOT NULL DEFAULT '',
+    created_by    INTEGER REFERENCES users(id),
+    created_at    TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+{
+  const cnt = db.prepare('SELECT COUNT(*) AS c FROM deposito_insumos').get().c;
+  if (cnt === 0) {
+    const ins = db.prepare("INSERT INTO deposito_insumos (tipo, descripcion) VALUES (?,?)");
+    for (let i = 1; i <= 4; i++) ins.run('tornillo', `Tornillo modelo ${i}`);
+    for (let i = 1; i <= 3; i++) ins.run('caja', `Caja modelo ${i}`);
+  }
+}
+// Renombrar insumos genéricos (solo si aún conservan el nombre original)
+{
+  const upd = db.prepare("UPDATE deposito_insumos SET descripcion=? WHERE descripcion=? AND tipo=?");
+  upd.run('Tornillos 7x1',   'Tornillo modelo 1', 'tornillo');
+  upd.run('Tornillos 4x5/8', 'Tornillo modelo 2', 'tornillo');
+  upd.run('Tornillos 4x1/4', 'Tornillo modelo 3', 'tornillo');
+  upd.run('Caja Cerradura',  'Caja modelo 1',     'caja');
+  upd.run('Caja Cerrojo',    'Caja modelo 2',     'caja');
+  db.prepare("UPDATE deposito_insumos SET activo=0 WHERE descripcion='Caja modelo 3' AND tipo='caja'").run();
+}
 
 // Seed sucursales
 {
@@ -394,6 +593,21 @@ addColIfMissing('stock_movements',  'sucursal_id', 'INTEGER REFERENCES sucursale
     for (const s of subs) ins.run(admin.id, s.id);
   }
 };
+
+// Seed lista de precios inicial (migra precios actuales si no existe ninguna lista)
+{
+  const plCount = db.prepare('SELECT COUNT(*) AS c FROM price_lists').get().c;
+  if (plCount === 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { lastInsertRowid } = db.prepare(
+      "INSERT INTO price_lists (nombre, fecha_vigencia, active) VALUES ('Lista anterior', ?, 0)"
+    ).run(today);
+    const listId = Number(lastInsertRowid);
+    const products = db.prepare('SELECT id, base_price FROM products WHERE active=1').all();
+    const ins = db.prepare('INSERT INTO price_list_items (price_list_id, product_id, precio) VALUES (?,?,?)');
+    for (const p of products) ins.run(listId, p.id, p.base_price);
+  }
+}
 
 // Seed plan de cuentas
 {
@@ -443,6 +657,12 @@ addColIfMissing('stock_movements',  'sucursal_id', 'INTEGER REFERENCES sucursale
       }
     }
   } catch(e) {}
+  // IVA Ventas — cuenta de pasivo para IVA repercutido
+  db.prepare("INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code) VALUES ('2.1.03','IVA Ventas','Pasivo','IVAVentas',1,'2.1')").run();
+  // IVA Crédito Fiscal — activo por IVA soportado en compras de materias primas.
+  // Clave para el asiento de compra MP. Se agrega aquí para garantizar que esté
+  // en cualquier instancia (Railway incluida) aunque no tenga el plan importado.
+  db.prepare("INSERT OR IGNORE INTO accounts (code,name,type,subtype,accepts_movements,parent_code) VALUES ('1.1.06','IVA Crédito Fiscal','Activo','IVACompras',1,'1.1')").run();
 }
 
 // Settings por defecto
@@ -457,6 +677,8 @@ if (userCount.c === 0) {
 }
 // Asegurar que admin tenga rol admin
 db.exec("UPDATE users SET role = 'admin' WHERE username = 'admin' AND role = 'vendedor'");
+// Migrar rol fabrica → mp
+db.exec("UPDATE users SET role = 'mp' WHERE role = 'fabrica'");
 
 function withTransaction(fn) {
   db.exec('BEGIN');

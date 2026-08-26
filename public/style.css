@@ -116,6 +116,29 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .table tbody tr:last-child{border-bottom:none}
 .table tbody tr:hover{background:var(--primary-light)}
 .table tbody td{padding:11px 14px;vertical-align:middle}
+
+/* One row per record, no vertical wrap — long values truncate with ellipsis
+   (pair with a title="" attribute on the cell for the full value on hover). */
+.table-fixed-clients{table-layout:fixed}
+.table-fixed-clients tbody td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.table-fixed-clients tbody tr.client-group-header td{white-space:normal;overflow:visible;text-overflow:clip}
+
+/* Scrollable wrapper for tables with sticky head/column: both axes must
+   scroll in THIS same box, otherwise sticky positioning breaks when the
+   vertical scroll happens on an outer ancestor (e.g. .app-content). */
+.table-wrap-scroll{overflow:auto;max-height:70vh;-webkit-overflow-scrolling:touch}
+
+/* Sticky 2-row group header (e.g. Producción → Potencial para armar) */
+.table-sticky-head thead th{position:sticky;z-index:5;line-height:16px}
+.table-sticky-head thead tr:nth-child(1) th{top:0;z-index:6}
+.table-sticky-head thead tr:nth-child(2) th{top:37px}
+/* Sticky first column (Artículo) — pinned left while scrolling horizontally.
+   Scoped to thead's first row specifically: with the 2-row header, the
+   second row's own first <th> (e.g. "Pul.") is also a :first-child of its
+   <tr>, so a bare th:first-child selector would wrongly pin it too. */
+.table-sticky-head tbody td:first-child{position:sticky;left:0;z-index:2;background-color:var(--white)}
+.table-sticky-head tbody tr[class*="prod-row-"] td:first-child{background-color:inherit}
+.table-sticky-head thead tr:first-child th:first-child{position:sticky;left:0;z-index:9;background-color:var(--bg)}
 .order-num{font-weight:700;font-family:'SF Mono','Fira Code',monospace;color:var(--primary);font-size:.92rem}
 
 /* ============================================================ BADGES */
@@ -306,6 +329,19 @@ tr.stock-critical td { background:#fff1f2 }
 .finance-card-value{font-size:1.4rem;font-weight:700}
 
 .purchase-item-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+
+/* ── Producción — colores de fila en tabla MP en proceso ──── */
+.prod-tab{background:none;border:none;padding:8px 16px;font-size:.9rem;cursor:pointer;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .15s,border-color .15s}
+.prod-tab:hover{color:var(--text)}
+.prod-tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.prod-row-rosa       {background:#fce4ec!important}.prod-row-rosa:hover       {background:#f8bbd0!important}
+.prod-row-verde      {background:#e8f5e9!important}.prod-row-verde:hover      {background:#c8e6c9!important}
+.prod-row-verde-int  {background:#c8e6c9!important}.prod-row-verde-int:hover  {background:#a5d6a7!important}
+.prod-row-celeste    {background:#e1f5fe!important}.prod-row-celeste:hover    {background:#b3e5fc!important}
+.prod-section-header{display:flex;align-items:center;justify-content:space-between;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:14px 0 8px;border-bottom:2px solid var(--border);margin-bottom:14px}
+.prod-obs-cell{cursor:pointer;min-width:140px}
+.prod-obs-cell:hover{background:rgba(0,0,0,.04)}
+.prod-obs-input{width:100%;padding:4px 6px;border:1.5px solid var(--primary);border-radius:4px;font-size:.85rem;font-family:inherit}
 
 /* ── Balance view ───────────────────────────────────────────── */
 .balance-section{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--white)}

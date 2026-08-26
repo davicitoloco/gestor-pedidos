@@ -32,14 +32,16 @@ router.get('/', requireAdmin, (req, res) => {
   try {
     const rows = db.prepare(`
       SELECT *, (stock - pending_orders) AS difference FROM (
-        SELECT p.id, p.name, p.stock, p.stock_min, p.active,
+        SELECT p.id, p.name, p.stock, p.stock_min, p.active, p.pending_extra,
           COALESCE((
-            SELECT SUM(oi.quantity)
+            SELECT SUM(oi.quantity - COALESCE((
+              SELECT SUM(di.quantity_delivered) FROM delivery_items di WHERE di.order_item_id = oi.id
+            ), 0))
             FROM order_items oi
             JOIN orders o ON oi.order_id = o.id
             WHERE oi.product_id = p.id
               AND o.status NOT IN ('Entregado', 'Entregado con devolución', 'Cancelado')
-          ), 0) AS pending_orders,
+          ), 0) + p.pending_extra AS pending_orders,
           (SELECT sm.created_at
            FROM stock_movements sm
            WHERE sm.product_id = p.id
@@ -111,7 +113,7 @@ router.put('/:article_id', requireAdmin, (req, res) => {
     if (!product) return res.status(404).json({ error: 'Artículo no encontrado' });
 
     const newQty = parseFloat(req.body.quantity);
-    if (isNaN(newQty) || newQty < 0) return res.status(400).json({ error: 'Cantidad inválida' });
+    if (isNaN(newQty)) return res.status(400).json({ error: 'Cantidad inválida' });
 
     const prevQty = product.stock;
     const delta   = Math.abs(newQty - prevQty);
@@ -126,6 +128,21 @@ router.put('/:article_id', requireAdmin, (req, res) => {
       `).run(id, type, delta, note, prevQty, newQty, req.session.userId, getInsertSucursalId(req));
     });
 
+    res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/stock/:article_id/pending-extra — ajuste manual de pedidos pendientes extra (admin only)
+router.put('/:article_id/pending-extra', requireAdmin, (req, res) => {
+  try {
+    const id      = Number(req.params.article_id);
+    const product = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(id);
+    if (!product) return res.status(404).json({ error: 'Artículo no encontrado' });
+
+    const extra = parseInt(req.body.pending_extra, 10);
+    if (isNaN(extra) || extra < 0) return res.status(400).json({ error: 'Cantidad inválida (debe ser ≥ 0)' });
+
+    db.prepare('UPDATE products SET pending_extra = ? WHERE id = ?').run(extra, id);
     res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

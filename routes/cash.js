@@ -13,6 +13,16 @@ function requireAdmin(req, res, next) {
 }
 router.use(requireAuth, requireAdmin);
 
+function getCajaBalance() {
+  const { balance } = db.prepare(`
+    SELECT COALESCE(SUM(jel.debit) - SUM(jel.credit), 0) AS balance
+    FROM journal_entry_lines jel
+    JOIN accounts a ON jel.account_id = a.id
+    WHERE a.code = '1.1.01'
+  `).get();
+  return balance;
+}
+
 // GET /api/cash — movements with running balance
 router.get('/', (req, res) => {
   try {
@@ -32,7 +42,7 @@ router.get('/', (req, res) => {
     });
     withBalance.reverse();
 
-    res.json({ movements: withBalance, balance: running });
+    res.json({ movements: withBalance, balance: getCajaBalance() });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -42,7 +52,7 @@ router.get('/summary', (req, res) => {
     const sf = getSucursalFilter(req, 'cm');
     const { ingreso } = db.prepare(`SELECT COALESCE(SUM(amount),0) AS ingreso FROM cash_movements cm WHERE type='ingreso' ${sf.clause}`).get(...sf.params);
     const { egreso  } = db.prepare(`SELECT COALESCE(SUM(amount),0) AS egreso  FROM cash_movements cm WHERE type='egreso'  ${sf.clause}`).get(...sf.params);
-    res.json({ ingreso, egreso, balance: ingreso - egreso });
+    res.json({ ingreso, egreso, balance: getCajaBalance() });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

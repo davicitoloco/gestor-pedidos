@@ -13,7 +13,15 @@
       "Bash(curl:*)",
       "Bash(wc:*)",
       "Bash(rsync -a --exclude='node_modules' --exclude='.git' --exclude='data/sessions' --exclude='data/*.db-shm' --exclude='data/*.db-wal' /Users/davidpatini/Documents/app/ /Users/davidpatini/Documents/app-linea2/ echo \"Copia terminada. Archivos:\" find /Users/davidpatini/Documents/app-linea2 -not -path '*/data/*')",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(PORT=3001 node server.js)",
+      "Bash(git init *)",
+      "Bash(git rm *)",
+      "Bash(pkill -f \"node.*index\\\\|node.*server\\\\|node.*app\")",
+      "Bash(pkill -f \"node.*server\")",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(grep -v \"Use \\\\`node\")"
     ]
   }
 }

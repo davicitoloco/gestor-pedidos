@@ -77,6 +77,14 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
         Contable
       </a>
+      <a class="nav-item mp-visible hidden" data-section="mp" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4a1 1 0 011 1v10a1 1 0 01-1 1H8a1 1 0 01-1-1v-4"/><line x1="7" y1="11" x2="13" y2="11"/><line x1="7" y1="15" x2="10" y2="15"/></svg>
+        Pedidos MP
+      </a>
+      <a class="nav-item prod-visible hidden" data-section="produccion" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        Producción
+      </a>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-user">
@@ -128,8 +136,13 @@
           <button class="filter-btn" data-status="Entregado">Entregado</button>
           <button class="filter-btn" data-status="Cancelado">Cancelado</button>
           <input type="search" id="inp-orders-search" class="search-orders" placeholder="Buscar por nº o cliente…" autocomplete="off">
+          <div class="modelo-filter-wrap" style="position:relative;display:flex;align-items:center">
+            <input type="text" id="inp-orders-modelo" class="search-orders" list="products-datalist" placeholder="Filtrar por modelo de cerradura…" autocomplete="off" style="padding-right:28px">
+            <button type="button" id="btn-orders-modelo-clear" title="Limpiar filtro" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;padding:2px">✕</button>
+          </div>
         </div>
-        <div class="table-wrap">
+        <p id="orders-modelo-info" class="page-subtitle" style="display:none;margin:-6px 0 10px"></p>
+        <div class="table-wrap" style="overflow-x:auto">
           <table class="table">
             <thead>
               <tr>
@@ -137,11 +150,13 @@
                 <th>Cliente</th>
                 <th style="width:155px">Estado</th>
                 <th class="admin-only-col" style="width:140px">Vendedor</th>
-                <th style="width:75px" class="text-center col-mobile-hide">Ítems</th>
+                <th style="width:75px" class="text-center col-mobile-hide">Unidades</th>
                 <th style="width:130px" class="text-right">Total</th>
-                <th style="width:105px" class="col-mobile-hide">Entrega</th>
+                <th style="width:130px" class="text-center">Entrega</th>
+                <th style="width:150px" class="text-center">Cobro</th>
+                <th style="width:105px" class="col-mobile-hide">Fecha entrega</th>
                 <th style="width:126px" class="col-mobile-hide">Creado</th>
-                <th style="width:88px" class="text-center">Acciones</th>
+                <th style="width:88px;position:sticky;right:0;background:var(--bg);z-index:2;box-shadow:-2px 0 4px rgba(0,0,0,0.06)" class="text-center">Acciones</th>
               </tr>
             </thead>
             <tbody id="orders-tbody"></tbody>
@@ -212,7 +227,23 @@
                 </div>
                 <div class="field admin-only-field hidden">
                   <label class="label">Vendedor</label>
-                  <input type="text" id="inp-vendor-display" class="input" disabled placeholder="—">
+                  <select id="inp-vendor-id" class="input select">
+                    <option value="">— Sin asignar —</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="label required">Sucursal</label>
+                  <select id="inp-sucursal-id" class="input select">
+                    <option value="">— Seleccioná —</option>
+                    <option value="1">Candex</option>
+                    <option value="2">Estadistica</option>
+                  </select>
+                </div>
+                <div class="field admin-only-field hidden">
+                  <label class="label">Lista de precios</label>
+                  <select id="inp-price-list-id" class="input select">
+                    <option value="">— Vigente —</option>
+                  </select>
                 </div>
               </div>
               <div class="field" style="margin-top:16px">
@@ -314,6 +345,10 @@
             <div class="card-body" id="returns-body" style="padding:0"></div>
           </div>
 
+          <div id="disc-limit-error" class="hidden" style="color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px 14px;font-size:.88rem;font-weight:600;margin-bottom:8px">
+            El descuento máximo permitido es 20+5+5 (27.8%)
+          </div>
+
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" id="btn-cancel-form">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btn-save">
@@ -332,6 +367,8 @@
         <div class="page-header">
           <div><h2 class="page-title">Clientes</h2><p class="page-subtitle" id="clients-count"></p></div>
           <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="btn-clients-export-pdf">Exportar PDF</button>
+            <button class="btn btn-secondary btn-sm" id="btn-clients-export-excel">Exportar Excel</button>
             <button class="btn btn-secondary btn-sm" id="btn-import-clients">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Importar
@@ -342,24 +379,46 @@
             </button>
           </div>
         </div>
+        <div style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <input type="search" id="client-search" class="input" placeholder="Buscar por nombre, CUIT, localidad, provincia, email o teléfono…" style="width:100%;max-width:420px">
+          <div class="modelo-filter-wrap" style="position:relative;display:flex;align-items:center">
+            <input type="text" id="clients-product-filter" class="input" list="products-datalist" placeholder="Filtrar por producto…" autocomplete="off" style="width:200px;padding:7px 28px 7px 10px">
+            <button type="button" id="btn-clients-product-clear" title="Limpiar filtro" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;padding:2px">✕</button>
+          </div>
+          <select id="clients-debt-filter" class="input select" style="width:130px;padding:7px 10px">
+            <option value="all">Todos</option>
+            <option value="debt">Con deuda</option>
+            <option value="nodebt">Sin deuda</option>
+          </select>
+          <div class="admin-only" style="display:flex;gap:8px;align-items:center">
+            <select id="clients-view-mode" class="input select" style="width:210px;padding:7px 10px">
+              <option value="all">Todos</option>
+              <option value="vendor">Vendedor específico</option>
+              <option value="grouped">Todos agrupados por vendedor</option>
+            </select>
+            <select id="clients-vendor-filter" class="input select hidden" style="width:200px;padding:7px 10px">
+              <option value="">— Elegí un vendedor —</option>
+            </select>
+          </div>
+        </div>
         <div class="table-wrap" style="overflow-x:auto">
-          <table class="table">
+          <table class="table table-fixed-clients">
             <thead><tr>
-              <th>Nombre</th>
+              <th style="width:190px">Nombre</th>
               <th style="width:130px">CUIT</th>
               <th style="width:105px">Teléfono</th>
-              <th style="width:140px;max-width:140px;overflow:hidden;text-overflow:ellipsis">Email</th>
-              <th class="admin-only-col" style="width:110px">Vendedor</th>
-              <th style="width:140px;max-width:140px">Dirección</th>
-              <th style="width:140px">Localidad / Prov.</th>
-              <th style="width:105px" class="text-right">Saldo</th>
-              <th style="width:110px;position:sticky;right:0;background:var(--bg);z-index:2;box-shadow:-2px 0 4px rgba(0,0,0,0.06)" class="text-center">Acciones</th>
+              <th style="width:170px">Email</th>
+              <th class="admin-only-col" style="width:120px">Vendedor</th>
+              <th style="width:170px">Dirección</th>
+              <th style="width:150px">Localidad / Prov.</th>
+              <th style="width:110px" class="text-right">Deuda</th>
+              <th style="width:130px;position:sticky;right:0;background:var(--bg);z-index:2;box-shadow:-2px 0 4px rgba(0,0,0,0.06)" class="text-center">Acciones</th>
             </tr></thead>
             <tbody id="clients-tbody"></tbody>
           </table>
           <div id="no-clients" class="empty-state hidden">
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <p>No hay clientes cargados todavía</p>
+            <p id="no-clients-msg">No hay clientes cargados todavía</p>
           </div>
         </div>
       </div>
@@ -376,7 +435,7 @@
         </div>
         <form id="client-form" novalidate>
           <div class="card">
-            <div class="card-header">Datos del cliente <span style="font-size:.78rem;font-weight:400;color:var(--text-muted);margin-left:8px">* Obligatorios: Nombre y CUIT</span></div>
+            <div class="card-header">Datos del cliente</div>
             <div class="card-body">
               <div class="form-grid-2">
                 <div class="field">
@@ -384,27 +443,27 @@
                   <input type="text" id="inp-client-name" class="input" placeholder="Ej: Juan García">
                 </div>
                 <div class="field">
-                  <label class="label" id="lbl-client-cuit">CUIT</label>
+                  <label class="label required" id="lbl-client-cuit">CUIT</label>
                   <input type="text" id="inp-client-cuit" class="input" placeholder="XX-XXXXXXXX-X" maxlength="13">
                 </div>
                 <div class="field">
-                  <label class="label">Teléfono</label>
+                  <label class="label required">Teléfono</label>
                   <input type="text" id="inp-client-phone" class="input" placeholder="Ej: 11 1234-5678">
                 </div>
                 <div class="field">
-                  <label class="label">Email</label>
+                  <label class="label required">Email</label>
                   <input type="email" id="inp-client-email" class="input" placeholder="correo@ejemplo.com">
                 </div>
                 <div class="field" style="grid-column:1/-1">
-                  <label class="label">Dirección</label>
+                  <label class="label required">Dirección</label>
                   <input type="text" id="inp-client-address" class="input" placeholder="Calle y número">
                 </div>
                 <div class="field">
-                  <label class="label">Localidad</label>
+                  <label class="label required">Localidad</label>
                   <input type="text" id="inp-client-localidad" class="input" placeholder="Ej: Rosario">
                 </div>
                 <div class="field">
-                  <label class="label">Provincia</label>
+                  <label class="label required">Provincia</label>
                   <select id="inp-client-provincia" class="input select">
                     <option value="">— Sin especificar —</option>
                     <option>Buenos Aires</option>
@@ -433,6 +492,12 @@
                     <option>Tucumán</option>
                   </select>
                 </div>
+              </div>
+              <div class="field strict-admin-only hidden">
+                <label class="label required">Vendedor</label>
+                <select id="inp-client-vendor" class="input select">
+                  <option value="">— Seleccioná un vendedor —</option>
+                </select>
               </div>
               <div class="field">
                 <label class="label">Condición IVA</label>
@@ -471,6 +536,10 @@
             </div>
           </div>
           <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="btn-composicion-saldos" title="Descargar PDF de composición de saldos">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>
+              Exportar PDF
+            </button>
             <button class="btn btn-ghost admin-only" id="btn-new-client-note">Nota Déb/Cré</button>
             <button class="btn btn-primary admin-only" id="btn-new-payment">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -516,6 +585,7 @@
               <th style="width:140px">Método</th>
               <th>Detalle</th>
               <th class="text-right" style="width:140px">Monto</th>
+              <th style="width:60px" class="text-center">Recibo</th>
               <th style="width:50px" class="text-center admin-only"></th>
             </tr></thead><tbody id="account-payments-tbody"></tbody></table>
             <div id="no-account-payments" class="empty-state hidden"><p>Sin pagos registrados</p></div>
@@ -543,11 +613,31 @@
     <!-- ======================== SECCIÓN: CATÁLOGO -->
     <div id="section-catalogo" class="app-section hidden">
       <div class="page-header">
-        <div><h2 class="page-title">Catálogo de Productos</h2><p class="page-subtitle" id="catalog-count"></p></div>
+        <div>
+          <h2 class="page-title">Catálogo de Productos</h2>
+          <p class="page-subtitle" id="catalog-count"></p>
+          <p id="active-price-list-info" style="font-size:.82rem;color:var(--text-muted);margin-top:2px"></p>
+          <label class="admin-only" style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--text-muted);margin-top:6px;cursor:pointer">
+            <input type="checkbox" id="chk-catalog-show-inactive">
+            Ver inactivos
+          </label>
+        </div>
         <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm admin-only" id="btn-new-price-list">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            Nueva lista de precios
+          </button>
+          <button class="btn btn-secondary btn-sm admin-only" id="btn-import-price-list">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Importar lista
+          </button>
           <button class="btn btn-secondary btn-sm admin-only" id="btn-import-products">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Importar
+          </button>
+          <button class="btn btn-secondary btn-sm admin-only" id="btn-dedup-products" title="Eliminar productos duplicados conservando el de menor precio">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+            Limpiar duplicados
           </button>
           <button class="btn btn-primary admin-only" id="btn-new-product">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -603,12 +693,13 @@
             <thead><tr>
               <th>Artículo</th>
               <th class="text-center" style="width:120px">Stock actual</th>
-              <th class="text-center" style="width:150px">Pedidos pendientes</th>
+              <th class="text-center" style="width:150px">Ganchera</th>
               <th class="text-center" style="width:120px">Diferencia</th>
               <th style="width:150px">Última actualiz.</th>
               <th class="text-center" style="width:90px">Editar</th>
             </tr></thead>
             <tbody id="stock-tbody"></tbody>
+            <tfoot id="stock-tfoot"></tfoot>
           </table>
           <div id="no-stock" class="empty-state hidden">
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/></svg>
@@ -767,6 +858,7 @@
                   <select id="inp-user-role" class="input select">
                     <option value="vendedor">Vendedor</option>
                     <option value="subadmin">Subadmin</option>
+                    <option value="mp">MP / Fábrica</option>
                     <option value="admin">Administrador</option>
                   </select>
                 </div>
@@ -774,6 +866,17 @@
               <div class="field" style="margin-top:12px">
                 <label class="label">Sucursales asignadas</label>
                 <div id="user-sucursal-checkboxes" style="display:flex;gap:16px;flex-wrap:wrap;padding-top:4px"></div>
+              </div>
+            </div>
+          </div>
+          <div id="user-mp-suppliers-section" class="hidden" style="margin-top:12px">
+            <div class="card">
+              <div class="card-header">Proveedores asignados (MP)</div>
+              <div class="card-body">
+                <div id="user-mp-supplier-checkboxes" style="display:flex;gap:16px;flex-wrap:wrap;padding-top:2px;min-height:24px">
+                  <span style="color:var(--text-muted);font-size:.88rem">Cargando...</span>
+                </div>
+                <p style="font-size:.8rem;color:var(--text-muted);margin:6px 0 0">Proveedores visibles para este usuario al crear pedidos MP</p>
               </div>
             </div>
           </div>
@@ -790,7 +893,8 @@
     <div id="section-reportes" class="app-section hidden">
       <div class="page-header">
         <div><h2 class="page-title">Reportes</h2><p class="page-subtitle" id="reports-period"></p></div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="month" id="rpt-month-picker" class="input" style="width:160px;padding:5px 8px">
           <button class="btn btn-secondary btn-sm" id="btn-report-pdf">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             PDF
@@ -808,12 +912,15 @@
         <div class="stat-card"><div class="stat-value" id="stat-month-orders">—</div><div class="stat-label">Pedidos este mes</div></div>
         <div class="stat-card"><div class="stat-value" id="stat-month-sales">—</div><div class="stat-label">Ventas este mes</div></div>
         <div class="stat-card"><div class="stat-value" id="stat-avg">—</div><div class="stat-label">Ticket promedio</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-total-units">—</div><div class="stat-label">Total unidades pedidas</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-month-units">—</div><div class="stat-label">Unidades pedidas este mes</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-month-units-delivered">—</div><div class="stat-label">Unidades entregadas este mes</div></div>
       </div>
 
       <!-- Charts row -->
       <div class="charts-row">
         <div class="card" style="flex:2">
-          <div class="card-header">Pedidos por semana (últimas 8 semanas)</div>
+          <div class="card-header">Unidades vendidas por día (últimos 28 días)</div>
           <div class="card-body" style="position:relative;height:240px">
             <canvas id="chart-weekly"></canvas>
           </div>
@@ -841,6 +948,90 @@
             <tbody id="top-products-tbody"></tbody>
           </table>
           <div id="no-top-products" class="empty-state hidden"><p>Sin datos todavía</p></div>
+        </div>
+      </div>
+
+      <!-- ── Cantidades Vendidas ── -->
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header">Cantidades Vendidas</div>
+        <div class="card-body" style="padding:12px 16px 0">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="today">Hoy</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="week">Esta semana</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="month">Este mes</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="prevmonth">Mes anterior</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="sold" data-range="year">Este año</button>
+            <span style="color:var(--text-muted);margin:0 4px">|</span>
+            <input type="date" id="sold-from" class="input" style="width:140px;padding:5px 8px">
+            <span style="color:var(--text-muted);font-size:.85rem">—</span>
+            <input type="date" id="sold-to" class="input" style="width:140px;padding:5px 8px">
+            <button class="btn btn-secondary btn-sm" id="btn-sold-apply">Aplicar</button>
+            <span style="color:var(--text-muted);margin:0 2px">|</span>
+            <button class="btn btn-secondary btn-sm" id="btn-sold-excel">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+              Excel
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-sold-pdf">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              PDF
+            </button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0">
+          <table class="table">
+            <thead><tr>
+              <th style="width:36px">#</th>
+              <th>Producto</th>
+              <th class="text-right" style="width:160px">Unidades vendidas</th>
+              <th class="text-right" style="width:100px">% del total</th>
+              <th class="text-right" style="width:90px">Pedidos</th>
+            </tr></thead>
+            <tbody id="sold-tbody"></tbody>
+            <tfoot id="sold-tfoot"></tfoot>
+          </table>
+          <div id="no-sold" class="empty-state hidden"><p>Sin datos para el período seleccionado</p></div>
+        </div>
+      </div>
+
+      <!-- ── Cantidades Entregadas ── -->
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header">Cantidades Entregadas</div>
+        <div class="card-body" style="padding:12px 16px 0">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="today">Hoy</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="week">Esta semana</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="month">Este mes</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="prevmonth">Mes anterior</button>
+            <button class="btn btn-ghost btn-sm qty-quick" data-mode="delivered" data-range="year">Este año</button>
+            <span style="color:var(--text-muted);margin:0 4px">|</span>
+            <input type="date" id="deliv-from" class="input" style="width:140px;padding:5px 8px">
+            <span style="color:var(--text-muted);font-size:.85rem">—</span>
+            <input type="date" id="deliv-to" class="input" style="width:140px;padding:5px 8px">
+            <button class="btn btn-secondary btn-sm" id="btn-deliv-apply">Aplicar</button>
+            <span style="color:var(--text-muted);margin:0 2px">|</span>
+            <button class="btn btn-secondary btn-sm" id="btn-deliv-excel">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+              Excel
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-deliv-pdf">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              PDF
+            </button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0">
+          <table class="table">
+            <thead><tr>
+              <th style="width:36px">#</th>
+              <th>Producto</th>
+              <th class="text-right" style="width:160px">Unidades entregadas</th>
+              <th class="text-right" style="width:100px">% del total</th>
+              <th class="text-right" style="width:90px">Pedidos</th>
+            </tr></thead>
+            <tbody id="deliv-tbody"></tbody>
+            <tfoot id="deliv-tfoot"></tfoot>
+          </table>
+          <div id="no-deliv" class="empty-state hidden"><p>Sin datos para el período seleccionado</p></div>
         </div>
       </div>
 
@@ -950,6 +1141,113 @@
         </div>
 
       </div><!-- /rankings-grid -->
+
+      <!-- ── Reportes de Compras de Materia Prima ── -->
+      <div style="margin-top:28px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="font-size:1.05rem;font-weight:700;margin:0">Compras de Materia Prima</h3>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <input type="date" id="rpt-pur-from" class="input" style="width:145px;padding:5px 8px">
+            <span style="color:var(--text-muted);font-size:.85rem">—</span>
+            <input type="date" id="rpt-pur-to" class="input" style="width:145px;padding:5px 8px">
+            <button class="btn btn-secondary btn-sm" id="btn-rpt-pur-filter">Aplicar</button>
+            <button class="btn btn-ghost btn-sm" id="btn-rpt-pur-reset">Limpiar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-rpt-pur-excel">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+              Excel
+            </button>
+          </div>
+        </div>
+
+        <!-- Cards resumen -->
+        <div class="stats-grid" style="margin-bottom:16px">
+          <div class="stat-card"><div class="stat-value" id="rpt-pur-count">—</div><div class="stat-label">Comprobantes</div></div>
+          <div class="stat-card"><div class="stat-value" id="rpt-pur-total">—</div><div class="stat-label">Total comprado</div></div>
+          <div class="stat-card"><div class="stat-value" id="rpt-pur-suppliers">—</div><div class="stat-label">Proveedores distintos</div></div>
+          <div class="stat-card"><div class="stat-value" id="rpt-pur-products">—</div><div class="stat-label">Productos distintos</div></div>
+        </div>
+
+        <!-- Tabla comprobantes -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header">Comprobantes de compra</div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrap">
+              <table class="table" style="font-size:.88rem">
+                <thead><tr>
+                  <th>N°</th><th>Proveedor</th><th>Tipo</th><th>N° Doc.</th><th>Fecha</th><th class="text-right">Total</th>
+                </tr></thead>
+                <tbody id="rpt-pur-tbody"></tbody>
+              </table>
+            </div>
+            <div id="rpt-pur-empty" class="empty-state hidden"><p>Sin compras en el período</p></div>
+          </div>
+        </div>
+
+        <!-- Por proveedor -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;flex-wrap:wrap">
+          <div class="card">
+            <div class="card-header">Por proveedor</div>
+            <div class="card-body" style="padding:0">
+              <table class="table" style="font-size:.88rem">
+                <thead><tr><th>Proveedor</th><th class="text-right">Comprobantes</th><th class="text-right">Total</th></tr></thead>
+                <tbody id="rpt-pur-by-supplier-tbody"></tbody>
+              </table>
+              <div id="rpt-pur-by-supplier-empty" class="empty-state hidden"><p>Sin datos</p></div>
+            </div>
+          </div>
+          <!-- Por producto -->
+          <div class="card">
+            <div class="card-header">Materiales más comprados</div>
+            <div class="card-body" style="padding:0">
+              <table class="table" style="font-size:.88rem">
+                <thead><tr><th>Producto</th><th class="text-right">Cant.</th><th class="text-right">Total $</th></tr></thead>
+                <tbody id="rpt-pur-by-product-tbody"></tbody>
+              </table>
+              <div id="rpt-pur-by-product-empty" class="empty-state hidden"><p>Sin datos</p></div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /compras materia prima -->
+
+      <!-- ── Ficha de Producto ── -->
+      <div style="margin-top:28px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="font-size:1.05rem;font-weight:700;margin:0">Ficha de Producto</h3>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <input type="text" id="pl-product-input" class="input" list="products-datalist" placeholder="Producto (ej. DUE)" style="width:220px;padding:5px 8px" value="DUE" autocomplete="off">
+            <button class="btn btn-secondary btn-sm" id="btn-product-ledger-search">Buscar</button>
+          </div>
+        </div>
+
+        <div class="stats-grid" style="margin-bottom:16px">
+          <div class="stat-card"><div class="stat-value" id="pl-total-entregado">—</div><div class="stat-label">Total Entregado</div></div>
+          <div class="stat-card"><div class="stat-value" id="pl-total-cobrado">—</div><div class="stat-label">Total Cobrado</div></div>
+          <div class="stat-card"><div class="stat-value" id="pl-saldo-pendiente">—</div><div class="stat-label">Saldo Pendiente</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header card-header-flex">
+            <span>Detalle de remitos <span id="pl-product-label" style="font-weight:400;color:var(--text-muted)"></span></span>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrap">
+              <table class="table" style="font-size:.88rem">
+                <thead><tr>
+                  <th style="width:90px">Remito</th>
+                  <th>Cliente</th>
+                  <th style="width:90px">Pedido</th>
+                  <th style="width:105px">Fecha</th>
+                  <th style="width:140px" class="text-right">Monto</th>
+                  <th style="width:170px" class="text-center">Estado de cobro</th>
+                </tr></thead>
+                <tbody id="pl-tbody"></tbody>
+              </table>
+            </div>
+            <div id="pl-empty" class="empty-state hidden"><p>No se encontraron remitos para ese producto</p></div>
+          </div>
+        </div>
+      </div><!-- /ficha de producto -->
+
     </div><!-- /section-reportes -->
 
     <!-- ======================== SECCIÓN: COMPRAS -->
@@ -966,12 +1264,16 @@
         <div id="proveedores-list-view">
           <div class="page-header">
             <h2 class="page-title">Proveedores</h2>
-            <button class="btn btn-primary" id="btn-new-supplier">+ Nuevo Proveedor</button>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-secondary btn-sm" id="btn-sup-export-pdf">Exportar PDF</button>
+              <button class="btn btn-secondary btn-sm" id="btn-sup-export-excel">Exportar Excel</button>
+              <button class="btn btn-primary" id="btn-new-supplier">+ Nuevo Proveedor</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table class="table">
               <thead><tr>
-                <th>Nombre</th><th>CUIT</th><th>Cond. IVA</th><th>Teléfono</th>
+                <th>Nombre</th><th>CUIT</th><th>Cond. IVA</th><th>Teléfono</th><th>Celular</th>
                 <th class="text-right">Saldo deuda</th><th class="text-center">Acciones</th>
               </tr></thead>
               <tbody id="suppliers-tbody"></tbody>
@@ -1007,6 +1309,10 @@
                 <input type="text" id="inp-sup-phone" class="input">
               </div>
               <div class="field">
+                <label class="label">Celular</label>
+                <input type="text" id="inp-sup-celular" class="input">
+              </div>
+              <div class="field">
                 <label class="label">Email</label>
                 <input type="email" id="inp-sup-email" class="input">
               </div>
@@ -1017,6 +1323,13 @@
               <div class="field" style="grid-column:1/-1">
                 <label class="label">Notas</label>
                 <input type="text" id="inp-sup-notes" class="input">
+              </div>
+              <div class="field" style="grid-column:1/-1;margin-top:4px">
+                <label class="label">Acceso MP</label>
+                <div id="sup-mp-users-checkboxes" style="display:flex;gap:16px;flex-wrap:wrap;padding-top:6px;min-height:24px">
+                  <span style="color:var(--text-muted);font-size:.88rem">Cargando...</span>
+                </div>
+                <p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 0">Usuarios MP que pueden ver este proveedor al crear pedidos</p>
               </div>
             </div>
             <div class="form-actions" style="margin-top:20px">
@@ -1046,7 +1359,8 @@
           </div>
           <div class="table-wrap" style="max-height:220px;overflow-y:auto">
             <table class="table"><thead><tr>
-              <th>Fecha</th><th>Método</th><th class="text-right">Monto</th><th>Notas</th><th class="text-center">Eliminar</th>
+              <th>Fecha</th><th>Método</th><th class="text-right">Monto</th><th>Notas</th>
+              <th class="text-center">OP PDF</th><th class="text-center">Eliminar</th>
             </tr></thead><tbody id="sup-payments-tbody"></tbody></table>
           </div>
           <div style="margin:14px 0 6px;font-weight:600">Notas de débito / crédito</div>
@@ -1087,16 +1401,40 @@
                 </select>
               </div>
               <div class="field">
-                <label class="label">Tipo de comprobante</label>
-                <select id="inp-pur-doctype" class="input select">
-                  <option>Factura A</option><option selected>Factura B</option>
-                  <option>Factura C</option><option>Remito</option>
-                  <option>Nota de Crédito</option><option>Otros</option>
+                <label class="label">Condición IVA</label>
+                <select id="inp-pur-iva-condition" class="input select">
+                  <option value="">— Sin especificar —</option>
+                  <option>Responsable Inscripto</option>
+                  <option>Consumidor Final</option>
+                  <option>No Alcanzado</option>
+                  <option>Monotributo</option>
+                  <option>Sujeto Exento</option>
                 </select>
               </div>
               <div class="field">
+                <label class="label">Tipo de comprobante</label>
+                <select id="inp-pur-doctype" class="input select">
+                  <option>Factura A</option><option selected>Factura B</option>
+                  <option>Factura C</option>
+                  <option>Nota de Débito A</option><option>Nota de Débito B</option>
+                  <option>Nota de Crédito A</option><option>Nota de Crédito B</option>
+                  <option>Nota de Crédito</option><option>Remito</option><option>Otros</option>
+                </select>
+              </div>
+              <!-- Nº de documento: prefijo + número separados -->
+              <div class="field">
                 <label class="label">Nº de documento</label>
-                <input type="text" id="inp-pur-docnum" class="input" placeholder="0001-00001234">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input type="text" id="inp-pur-docprefix" class="input"
+                    placeholder="00001" maxlength="5"
+                    style="width:80px;text-align:center;font-variant-numeric:tabular-nums"
+                    pattern="\d{1,5}" inputmode="numeric">
+                  <span style="font-weight:700;color:var(--text-muted)">—</span>
+                  <input type="text" id="inp-pur-docseq" class="input"
+                    placeholder="00000001" maxlength="8"
+                    style="flex:1;font-variant-numeric:tabular-nums"
+                    pattern="\d{1,8}" inputmode="numeric">
+                </div>
               </div>
               <div class="field">
                 <label class="label">Fecha del documento</label>
@@ -1110,7 +1448,31 @@
             <div style="font-weight:600;margin-bottom:8px">Ítems</div>
             <div id="purchase-items-container"></div>
             <button type="button" class="btn btn-ghost btn-sm" id="btn-add-purchase-item" style="margin-top:8px">+ Agregar ítem</button>
-            <div style="margin-top:16px;text-align:right;font-size:16px;font-weight:700">Total: $<span id="purchase-total-display">0.00</span></div>
+
+            <!-- Subtotal / IVA / Total -->
+            <div style="margin-top:16px;background:var(--bg-secondary,#f8fafc);border:1px solid var(--border,#e2e8f0);border-radius:6px;padding:12px 16px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span style="color:var(--text-muted);font-size:.9rem">Subtotal (neto)</span>
+                <span id="pur-display-subtotal" style="font-variant-numeric:tabular-nums">$ 0,00</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="color:var(--text-muted);font-size:.9rem">IVA</span>
+                  <select id="inp-pur-iva-pct" class="input select" style="padding:3px 8px;font-size:.85rem;width:auto">
+                    <option value="0">Exento (0%)</option>
+                    <option value="10.5">10.5%</option>
+                    <option value="21" selected>21%</option>
+                    <option value="27">27%</option>
+                  </select>
+                </div>
+                <span id="pur-display-iva" style="font-variant-numeric:tabular-nums">$ 0,00</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border,#e2e8f0);padding-top:8px;margin-top:4px">
+                <span style="font-size:1rem;font-weight:700">Total</span>
+                <span id="pur-display-total" style="font-size:1.1rem;font-weight:700;font-variant-numeric:tabular-nums">$ 0,00</span>
+              </div>
+            </div>
+
             <div class="form-actions" style="margin-top:20px">
               <button type="button" class="btn btn-ghost" id="btn-pur-form-cancel">Cancelar</button>
               <button type="submit" class="btn btn-primary">Confirmar compra</button>
@@ -1127,6 +1489,7 @@
             <div style="display:flex;gap:8px">
               <button class="btn btn-ghost" id="btn-back-purchase-detail">← Volver</button>
               <a id="pur-detail-print-link" href="#" target="_blank" class="btn btn-secondary">PDF</a>
+              <button class="btn btn-danger btn-sm" id="btn-delete-purchase-detail">Eliminar comprobante</button>
             </div>
           </div>
           <!-- Items table -->
@@ -1143,7 +1506,10 @@
           <!-- Payments section -->
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-weight:600">Pagos aplicados a este comprobante</span>
-            <button class="btn btn-primary btn-sm" id="btn-new-purchase-payment">+ Registrar pago</button>
+            <div style="display:flex;gap:8px">
+              <a id="btn-orden-pago-pdf" href="#" target="_blank" class="btn btn-secondary btn-sm hidden">Orden de pago PDF</a>
+              <button class="btn btn-primary btn-sm" id="btn-new-purchase-payment">+ Registrar pago</button>
+            </div>
           </div>
           <div class="table-wrap" style="margin-bottom:12px">
             <table class="table"><thead><tr>
@@ -1723,6 +2089,332 @@
 
     </div><!-- /section-contable -->
 
+    <!-- ======================== SECCIÓN: PRODUCCIÓN -->
+    <div id="section-produccion" class="app-section hidden">
+
+      <div class="compras-tabs">
+        <button class="prod-tab active" data-prod-tab="proceso">MP En Proceso</button>
+        <button class="prod-tab" data-prod-tab="terminadas">Terminadas</button>
+        <button class="prod-tab" data-prod-tab="deposito">Depósito</button>
+        <button class="prod-tab" data-prod-tab="historial">Historial</button>
+      </div>
+
+      <!-- ── TAB: MP En Proceso ── -->
+      <div id="prod-tab-proceso">
+
+        <!-- SECCIÓN A: Chapa por categoría -->
+        <div class="prod-section-header">
+          <span>Sección A — Chapa (kg)</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-prod-refresh-chapa">Actualizar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-prod-aj-chapa">Ajuste kg</button>
+          </div>
+        </div>
+        <div class="table-wrap" style="margin-bottom:28px">
+          <table class="table">
+            <thead><tr>
+              <th>Categoría</th>
+              <th class="text-right" style="width:120px">Kilos disponibles</th>
+              <th class="text-center" style="width:200px">Acciones</th>
+            </tr></thead>
+            <tbody id="prod-chapa-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- SECCIÓN B: Potencial para armar -->
+        <div class="prod-section-header">
+          <span>Sección B — Potencial para armar</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-prod-refresh-proceso">Actualizar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-prod-aj-proceso">Ajuste manual</button>
+            <button class="btn btn-primary btn-sm" id="btn-prod-ingcomp">+ Ingresar componentes</button>
+          </div>
+        </div>
+        <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:10px">Hacer clic en Observaciones para editar. Sincadas = listas para armar.</p>
+        <div class="table-wrap table-wrap-scroll">
+          <table class="table table-sticky-head" id="tbl-prod-armar" style="font-size:.8rem">
+            <thead>
+              <tr>
+                <th rowspan="2" style="min-width:110px;vertical-align:bottom">Artículo</th>
+                <th colspan="2" class="text-center" style="background:#fce4ec;border-right:1px solid #e2e8f0">Cajas</th>
+                <th colspan="2" class="text-center" style="background:#e8f5e9;border-right:1px solid #e2e8f0">Tapas</th>
+                <th colspan="2" class="text-center" style="background:#fff9c4;border-right:1px solid #e2e8f0">Cremalleras</th>
+                <th colspan="2" class="text-center" style="background:#e3f2fd;border-right:1px solid #e2e8f0">Comb.</th>
+                <th colspan="2" class="text-center" style="background:#fce4ec;border-right:1px solid #e2e8f0">C/Frnts</th>
+                <th rowspan="2" class="text-center" style="width:52px;vertical-align:bottom">Llaves</th>
+                <th rowspan="2" class="text-center" style="width:52px;vertical-align:bottom">Nueces</th>
+                <th rowspan="2" class="text-center" style="width:52px;vertical-align:bottom">Pestillos</th>
+                <th rowspan="2" style="min-width:120px;vertical-align:bottom">Obs.</th>
+                <th rowspan="2" class="text-center" style="width:120px;vertical-align:bottom">Acciones</th>
+              </tr>
+              <tr>
+                <th class="text-center" style="width:48px;background:#fce4ec">Pul.</th>
+                <th class="text-center" style="width:48px;background:#f8bbd0;border-right:1px solid #e2e8f0">Zin.</th>
+                <th class="text-center" style="width:48px;background:#e8f5e9">Pul.</th>
+                <th class="text-center" style="width:48px;background:#c8e6c9;border-right:1px solid #e2e8f0">Zin.</th>
+                <th class="text-center" style="width:48px;background:#fff9c4">Pul.</th>
+                <th class="text-center" style="width:48px;background:#fff176;border-right:1px solid #e2e8f0">Zin.</th>
+                <th class="text-center" style="width:48px;background:#e3f2fd">Pul.</th>
+                <th class="text-center" style="width:48px;background:#b3e5fc;border-right:1px solid #e2e8f0">Zin.</th>
+                <th class="text-center" style="width:48px;background:#fce4ec">Pul.</th>
+                <th class="text-center" style="width:48px;background:#f8bbd0;border-right:1px solid #e2e8f0">Zin.</th>
+              </tr>
+            </thead>
+            <tbody id="prod-proceso-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TAB: Terminadas ── -->
+      <div id="prod-tab-terminadas" class="hidden">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Cerraduras Terminadas</h2>
+            <p class="page-subtitle">Stock de cerraduras ensambladas listas para entregar</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-prod-refresh-term">Actualizar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-prod-aj-term">Ajuste manual</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Artículo</th>
+              <th class="text-center" style="width:130px">Cantidad</th>
+              <th style="width:160px">Últ. actualización</th>
+            </tr></thead>
+            <tbody id="prod-term-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TAB: Depósito ── -->
+      <div id="prod-tab-deposito" class="hidden">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Depósito de insumos</h2>
+            <p class="page-subtitle">Tornillos y cajas de embalaje</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-dep-refresh">Actualizar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-dep-gestionar">Gestionar insumos</button>
+          </div>
+        </div>
+        <!-- Resumen -->
+        <div id="dep-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px"></div>
+        <!-- Tabla -->
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:100px">Tipo</th>
+              <th>Descripción</th>
+              <th class="text-center" style="width:130px">Stock actual</th>
+              <th style="width:160px">Últ. movimiento</th>
+              <th class="text-center" style="width:160px">Acciones</th>
+            </tr></thead>
+            <tbody id="dep-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TAB: Historial ── -->
+      <div id="prod-tab-historial" class="hidden">
+        <div class="page-header">
+          <h2 class="page-title">Historial de Movimientos</h2>
+          <button class="btn btn-ghost btn-sm" id="btn-prod-refresh-hist">Actualizar</button>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="margin:0">
+            <label class="label">Artículo</label>
+            <select id="prod-hist-product" class="input select" style="min-width:180px"><option value="">Todos</option></select>
+          </div>
+          <div class="field" style="margin:0">
+            <label class="label">Tipo</label>
+            <select id="prod-hist-tipo" class="input select" style="min-width:170px">
+              <option value="">Todos</option>
+              <option value="ingreso_chapa">Ingreso chapa</option>
+              <option value="ajuste_chapa">Ajuste chapa</option>
+              <option value="procesado">Procesado</option>
+              <option value="sincado">Sincado</option>
+              <option value="armado">Armado</option>
+              <option value="ingreso_componentes">Ingreso componentes</option>
+              <option value="ajuste_manual">Ajuste manual</option>
+              <option value="ingreso_deposito">Ingreso depósito</option>
+              <option value="egreso_deposito">Egreso depósito</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0"><label class="label">Desde</label><input type="date" id="prod-hist-desde" class="input" style="width:145px"></div>
+          <div class="field" style="margin:0"><label class="label">Hasta</label><input type="date" id="prod-hist-hasta" class="input" style="width:145px"></div>
+          <button class="btn btn-secondary" id="btn-prod-hist-filter" style="margin-top:20px">Filtrar</button>
+          <button class="btn btn-ghost"     id="btn-prod-hist-clear"  style="margin-top:20px">Limpiar</button>
+        </div>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table class="table" style="font-size:.85rem">
+            <thead><tr>
+              <th style="width:140px">Fecha</th>
+              <th>Artículo / Categoría</th>
+              <th class="text-center" style="width:130px">Tipo</th>
+              <th>Pieza</th>
+              <th class="text-right" style="width:80px">Cantidad</th>
+              <th class="text-right" style="width:80px">Kg usados</th>
+              <th>Notas</th>
+              <th style="width:110px">Usuario</th>
+            </tr></thead>
+            <tbody id="prod-hist-tbody"></tbody>
+          </table>
+          <div id="prod-hist-empty" class="empty-state hidden"><p>No hay movimientos registrados</p></div>
+        </div>
+      </div>
+
+    </div><!-- /section-produccion -->
+
+    <!-- ======================== SECCIÓN: PEDIDOS MP -->
+    <div id="section-mp" class="app-section hidden">
+
+      <!-- VISTA LISTA -->
+      <div id="mp-list-view">
+        <div class="page-header">
+          <div><h2 class="page-title">Pedidos de Materia Prima</h2><p class="page-subtitle" id="mp-count"></p></div>
+          <button class="btn btn-primary" id="btn-new-mp">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Nuevo pedido MP
+          </button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm mp-filter-btn active" data-estado="todos">Todos</button>
+            <button class="btn btn-sm mp-filter-btn" data-estado="pendiente">Pendiente</button>
+            <button class="btn btn-sm mp-filter-btn" data-estado="realizado">Realizado</button>
+            <button class="btn btn-sm mp-filter-btn" data-estado="entregado">Entregado</button>
+          </div>
+          <button class="btn btn-secondary btn-sm admin-only hidden" id="btn-mp-reporte">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            Reporte entregados
+          </button>
+        </div>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table class="table">
+            <thead><tr>
+              <th style="width:50px">#</th>
+              <th style="width:100px">Fecha</th>
+              <th>Proveedor</th>
+              <th style="width:110px">Estado</th>
+              <th style="width:140px">Creado por</th>
+              <th style="width:130px" class="text-center">Acciones</th>
+            </tr></thead>
+            <tbody id="mp-tbody"></tbody>
+          </table>
+          <div id="no-mp" class="empty-state hidden">
+            <p>No hay pedidos de materia prima</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- VISTA FORMULARIO NUEVO -->
+      <div id="mp-form-view" class="hidden">
+        <div class="page-header">
+          <h2 class="page-title" id="mp-form-title">Nuevo Pedido MP</h2>
+          <button class="btn btn-ghost" id="btn-mp-cancel">← Volver</button>
+        </div>
+        <form id="mp-form" novalidate>
+          <div class="card" style="margin-bottom:12px;padding:16px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+              <div class="field">
+                <label class="label required">Fecha</label>
+                <input type="date" id="inp-mp-fecha" class="input" required>
+              </div>
+              <div class="field">
+                <label class="label required">Proveedor</label>
+                <select id="inp-mp-supplier" class="input select" required>
+                  <option value="">— Seleccioná un proveedor —</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="label">Notas generales</label>
+                <input type="text" id="inp-mp-notas" class="input" placeholder="Aclaraciones...">
+              </div>
+            </div>
+          </div>
+          <div id="mp-sections-container"></div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+            <button type="button" class="btn btn-ghost" id="btn-mp-cancel2">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-mp-save">Guardar pedido</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- VISTA DETALLE -->
+      <div id="mp-detail-view" class="hidden">
+        <div class="page-header">
+          <h2 class="page-title" id="mp-detail-title">Pedido MP</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="btn-mp-print">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              Exportar PDF
+            </button>
+            <button class="btn btn-danger btn-sm admin-only hidden" id="btn-mp-delete">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+              Eliminar
+            </button>
+            <button class="btn btn-ghost" id="btn-mp-back">← Volver</button>
+          </div>
+        </div>
+        <div id="mp-detail-content"></div>
+      </div>
+
+      <!-- VISTA REPORTE -->
+      <div id="mp-report-view" class="hidden">
+        <div class="page-header">
+          <h2 class="page-title">Reporte MP — Entregados</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="btn-mp-report-print">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              Exportar PDF
+            </button>
+            <button class="btn btn-ghost" id="btn-mp-report-back">← Volver</button>
+          </div>
+        </div>
+        <div class="card" style="padding:14px;margin-bottom:12px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+            <div class="field" style="margin:0">
+              <label class="label">Desde</label>
+              <input type="date" id="inp-mp-report-desde" class="input" style="width:150px">
+            </div>
+            <div class="field" style="margin:0">
+              <label class="label">Hasta</label>
+              <input type="date" id="inp-mp-report-hasta" class="input" style="width:150px">
+            </div>
+            <div class="field" style="margin:0">
+              <label class="label">Proveedor</label>
+              <select id="inp-mp-report-supplier" class="input select" style="width:200px">
+                <option value="">Todos</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btn-mp-report-filter">Filtrar</button>
+          </div>
+        </div>
+        <p id="mp-report-count" style="font-size:.85rem;color:var(--text-muted);margin-bottom:8px"></p>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table class="table">
+            <thead><tr>
+              <th style="width:50px">#</th>
+              <th style="width:100px">Fecha</th>
+              <th>Proveedor</th>
+              <th>Secciones con ítems</th>
+              <th style="width:130px">Creado por</th>
+              <th style="width:110px">Sucursal</th>
+              <th style="width:160px">Comprobante</th>
+              <th style="width:110px" class="text-right">Monto</th>
+            </tr></thead>
+            <tbody id="mp-report-tbody"></tbody>
+          </table>
+          <div id="no-mp-report" class="empty-state hidden"><p>No hay pedidos entregados en el período</p></div>
+        </div>
+      </div>
+
+    </div><!-- /section-mp -->
+
   </main><!-- /app-content -->
 </div><!-- /app -->
 
@@ -1790,20 +2482,56 @@
 <!-- Toast -->
 <div id="toast" class="toast hidden"></div>
 
-<!-- ===================================================== MODAL: Ajustar stock -->
+<!-- ===================================================== MODAL: Editar artículo (tabs) -->
 <div id="stock-edit-modal" class="modal-overlay hidden">
-  <div class="modal" style="max-width:400px">
-    <div class="modal-header"><h3>Ajustar stock</h3></div>
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <h3 id="stock-edit-modal-title">Editar artículo</h3>
+    </div>
     <div class="modal-form-body">
-      <p id="stock-edit-product-name" style="font-weight:600;font-size:1rem;margin-bottom:6px"></p>
-      <p id="stock-edit-prev" style="font-size:.85rem;color:var(--text-muted);margin-bottom:16px"></p>
-      <div class="field">
-        <label class="label required">Nuevo stock</label>
-        <input type="number" id="inp-stock-edit-qty" class="input" min="0" step="0.01" placeholder="0">
+      <p id="stock-edit-product-name" style="font-weight:600;font-size:1rem;margin-bottom:4px"></p>
+      <p id="stock-edit-prev" style="font-size:.85rem;color:var(--text-muted);margin-bottom:14px"></p>
+
+      <!-- Tabs -->
+      <div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:0">
+        <button class="stock-edit-tab active" data-tab="ajuste" style="padding:6px 14px;font-size:.85rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:var(--text-muted);font-weight:500">Ajustar stock</button>
+        <button class="stock-edit-tab" data-tab="ingreso" style="padding:6px 14px;font-size:.85rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:var(--text-muted);font-weight:500">Registrar ingreso</button>
+        <button class="stock-edit-tab" data-tab="pedidos" style="padding:6px 14px;font-size:.85rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:var(--text-muted);font-weight:500">Pedidos extra</button>
       </div>
-      <div class="field" style="margin-top:14px">
-        <label class="label">Nota (opcional)</label>
-        <input type="text" id="inp-stock-edit-note" class="input" placeholder="Ej: Conteo físico, ajuste por merma…">
+
+      <!-- Tab: ajuste de stock -->
+      <div id="stock-edit-tab-ajuste">
+        <div class="field">
+          <label class="label required">Nuevo stock total</label>
+          <input type="number" id="inp-stock-edit-qty" class="input" step="1" placeholder="0">
+        </div>
+        <div class="field" style="margin-top:14px">
+          <label class="label">Nota (opcional)</label>
+          <input type="text" id="inp-stock-edit-note" class="input" placeholder="Ej: Conteo físico, ajuste por merma…">
+        </div>
+      </div>
+
+      <!-- Tab: ingreso de mercadería -->
+      <div id="stock-edit-tab-ingreso" class="hidden">
+        <div class="field">
+          <label class="label required">Cantidad a ingresar</label>
+          <input type="number" id="inp-stock-edit-ingreso-qty" class="input" min="1" step="1" placeholder="0">
+        </div>
+        <div class="field" style="margin-top:14px">
+          <label class="label">Nota (opcional)</label>
+          <input type="text" id="inp-stock-edit-ingreso-note" class="input" placeholder="Ej: Compra proveedor, devolución…">
+        </div>
+      </div>
+
+      <!-- Tab: pedidos pendientes extra -->
+      <div id="stock-edit-tab-pedidos" class="hidden">
+        <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:14px">
+          Pedidos pendientes del sistema anterior. Se suman a los pedidos activos del sistema para calcular la diferencia.
+        </p>
+        <div class="field">
+          <label class="label required">Pedidos extra pendientes</label>
+          <input type="number" id="inp-stock-edit-pending-extra" class="input" min="0" step="1" placeholder="0">
+        </div>
       </div>
     </div>
     <div class="modal-actions">
@@ -1907,6 +2635,36 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-import-products-cancel">Cancelar</button>
       <button class="btn btn-primary hidden" id="btn-import-products-confirm">Importar productos</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Limpiar Duplicados -->
+<div id="dedup-products-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header">Limpiar productos duplicados</div>
+    <div class="modal-form-body">
+      <div id="dedup-loading" style="text-align:center;padding:24px;color:var(--text-muted)">Buscando duplicados…</div>
+      <div id="dedup-none" class="hidden" style="text-align:center;padding:24px;color:var(--text-muted)">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5" style="display:block;margin:0 auto 8px"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        No se encontraron productos duplicados
+      </div>
+      <div id="dedup-found" class="hidden">
+        <p style="font-size:.88rem;color:var(--text-muted);margin-bottom:12px">
+          Se encontraron productos con el mismo nombre. Se conservará el de <strong>menor precio</strong> y se eliminarán los demás.
+        </p>
+        <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+          <table class="table" style="font-size:.85rem">
+            <thead><tr><th>Producto</th><th class="text-right" style="width:120px">Precio menor</th><th class="text-right" style="width:120px">Precio mayor</th><th class="text-center" style="width:80px">Copias</th></tr></thead>
+            <tbody id="dedup-tbody"></tbody>
+          </table>
+        </div>
+        <p id="dedup-summary" style="font-size:.84rem;margin-top:10px;color:var(--text-muted)"></p>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-dedup-cancel">Cancelar</button>
+      <button class="btn btn-danger hidden" id="btn-dedup-confirm">Eliminar duplicados</button>
     </div>
   </div>
 </div>
@@ -2050,9 +2808,22 @@
 
 <!-- ===================================================== MODAL: Registrar Pago -->
 <div id="payment-modal" class="modal-overlay hidden">
-  <div class="modal" style="max-width:460px">
+  <div class="modal" style="max-width:580px;width:95%">
     <div class="modal-header">Registrar pago</div>
     <div class="modal-form-body">
+
+      <!-- Remitos pendientes -->
+      <div id="payment-remitos-section" class="hidden" style="margin-bottom:16px">
+        <div style="font-weight:600;font-size:.9rem;margin-bottom:6px">Remitos pendientes</div>
+        <div id="payment-remitos-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          <!-- generado dinámicamente -->
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:.82rem;color:var(--text-muted)">
+          <span>Dejá sin marcar para registrar pago a cuenta</span>
+          <span>Total asignado: <strong id="payment-alloc-total">$ 0,00</strong></span>
+        </div>
+      </div>
+
       <div class="field">
         <label class="label required">Método de pago</label>
         <select id="inp-payment-method" class="input select">
@@ -2069,8 +2840,8 @@
           <input type="number" id="inp-payment-amount" class="input" min="0.01" step="0.01" placeholder="0.00">
         </div>
         <div class="field">
-          <label class="label">Fecha del pago</label>
-          <input type="date" id="inp-payment-date" class="input">
+          <label class="label required">Fecha de cobro</label>
+          <input type="date" id="inp-payment-date" class="input" required>
         </div>
       </div>
       <!-- Transferencia / Tarjeta: bank account select -->
@@ -2092,9 +2863,15 @@
             <input type="text" id="inp-payment-cheque-number" class="input">
           </div>
         </div>
-        <div class="field" style="margin-top:8px">
-          <label class="label required">Fecha de vencimiento</label>
-          <input type="date" id="inp-payment-cheque-due" class="input">
+        <div class="form-grid-2" style="margin-top:8px">
+          <div class="field">
+            <label class="label required">Fecha de vencimiento</label>
+            <input type="date" id="inp-payment-cheque-due" class="input">
+          </div>
+          <div class="field">
+            <label class="label">CUIT del librador</label>
+            <input type="text" id="inp-payment-cuit-librador" class="input" placeholder="20-12345678-9" maxlength="13">
+          </div>
         </div>
       </div>
       <!-- Otros: reference field -->
@@ -2115,9 +2892,22 @@
 </div>
 
 <div id="sup-payment-modal" class="modal-overlay hidden">
-  <div class="modal" style="max-width:420px">
+  <div class="modal" style="max-width:580px;width:95%">
     <div class="modal-header">Registrar pago a proveedor</div>
     <div class="modal-form-body">
+
+      <!-- Comprobantes pendientes (solo desde cuenta corriente) -->
+      <div id="sup-pay-alloc-section" class="hidden" style="margin-bottom:16px">
+        <div style="font-weight:600;font-size:.9rem;margin-bottom:6px">Comprobantes pendientes</div>
+        <div id="sup-pay-alloc-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          <!-- filas generadas dinámicamente -->
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:.82rem;color:var(--text-muted)">
+          <span>Dejá sin marcar para registrar pago a cuenta</span>
+          <span>Total asignado: <strong id="sup-pay-alloc-total">$ 0,00</strong></span>
+        </div>
+      </div>
+
       <div class="form-grid-2">
         <div class="field">
           <label class="label required">Monto ($)</label>
@@ -2350,6 +3140,501 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-note-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-note-save">Guardar nota</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== MODAL: IMPORTAR LISTA DE PRECIOS -->
+<div id="import-price-list-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:680px;width:95%">
+    <div class="modal-header">
+      <h3>Importar lista de precios</h3>
+      <button class="modal-close" id="btn-import-pl-cancel">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+        El Excel debe tener dos columnas: <strong>nombre</strong> (del producto) y <strong>precio</strong>. Solo se actualizan productos existentes.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="field">
+          <label class="label required">Nombre de la lista</label>
+          <input type="text" id="inp-ipl-nombre" class="input" placeholder="Ej: Lista Mayo 2026">
+        </div>
+        <div class="field">
+          <label class="label required">Fecha de vigencia</label>
+          <input type="date" id="inp-ipl-fecha" class="input">
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label class="label required">Archivo Excel (.xlsx / .csv)</label>
+        <input type="file" id="inp-ipl-file" accept=".xlsx,.csv" class="input" style="padding:6px">
+      </div>
+      <div id="ipl-preview" class="hidden">
+        <p id="ipl-summary" style="font-size:.85rem;margin-bottom:8px"></p>
+        <div style="max-height:260px;overflow-y:auto">
+          <table class="table">
+            <thead><tr><th>Producto</th><th class="text-right" style="width:130px">Precio nuevo</th><th style="width:90px">Estado</th></tr></thead>
+            <tbody id="ipl-tbody"></tbody>
+          </table>
+        </div>
+        <div id="ipl-not-found" class="hidden" style="margin-top:8px;padding:8px 12px;background:var(--warning-bg,#fffbeb);border-radius:6px;font-size:.83rem;color:var(--warning-txt,#92400e)">
+          <strong>No encontrados:</strong> <span id="ipl-not-found-list"></span>
+        </div>
+      </div>
+      <div id="ipl-error" class="hidden" style="color:var(--danger);font-size:.85rem;margin-top:8px"></div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
+      <button class="btn btn-ghost" id="btn-import-pl-cancel2">Cancelar</button>
+      <button class="btn btn-primary hidden" id="btn-import-pl-confirm">Guardar y activar lista</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== MODAL: NUEVA LISTA DE PRECIOS -->
+<div id="price-list-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:760px;width:95%">
+    <div class="modal-header">
+      <h3>Nueva lista de precios</h3>
+      <button class="modal-close" id="btn-price-list-cancel">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div class="field">
+          <label class="label required">Nombre</label>
+          <input type="text" id="inp-pl-nombre" class="input" placeholder="Ej: Lista Mayo 2026">
+        </div>
+        <div class="field">
+          <label class="label required">Fecha de vigencia</label>
+          <input type="date" id="inp-pl-fecha" class="input">
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <p style="font-size:.85rem;color:var(--text-muted);margin:0">Modificá los precios que necesites o importá desde Excel.</p>
+        <label class="btn btn-secondary btn-sm" style="cursor:pointer;margin:0" title="Importar precios desde Excel (.xlsx) o CSV">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Cargar desde Excel
+          <input type="file" id="inp-pl-import-file" accept=".xlsx,.xls,.csv" style="display:none">
+        </label>
+      </div>
+      <div style="max-height:400px;overflow-y:auto">
+        <table class="table">
+          <thead><tr><th>Producto</th><th style="width:160px" class="text-right">Precio</th></tr></thead>
+          <tbody id="pl-items-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
+      <button class="btn btn-ghost" id="btn-price-list-cancel2">Cancelar</button>
+      <button class="btn btn-primary" id="btn-price-list-save">Guardar y activar lista</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Factura recepción MP -->
+<div id="mp-receipt-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header"><h3>Registrar factura de recepción</h3></div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field" style="grid-column:1/-1">
+          <label class="label required">Sucursal que recibe</label>
+          <select id="inp-mpr-sucursal" class="input select" required>
+            <option value="">— Seleccioná —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label required">Tipo de comprobante</label>
+          <select id="inp-mpr-tipo" class="input select">
+            <option value="Factura A">Factura A</option>
+            <option value="Factura B">Factura B</option>
+            <option value="Factura C">Factura C</option>
+            <option value="Remito">Remito</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label">Número de comprobante</label>
+          <input type="text" id="inp-mpr-numero" class="input" placeholder="0001-00012345">
+        </div>
+        <div class="field">
+          <label class="label required">Fecha del comprobante</label>
+          <input type="date" id="inp-mpr-fecha" class="input" required>
+        </div>
+        <div class="field">
+          <label class="label required">Monto total</label>
+          <input type="number" id="inp-mpr-monto" class="input" min="0" step="0.01" placeholder="0.00" required>
+        </div>
+        <div class="field">
+          <label class="label">IVA</label>
+          <select id="inp-mpr-iva" class="input select">
+            <option value="21%">21%</option>
+            <option value="10.5%">10.5%</option>
+            <option value="Exento">Exento</option>
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-mpr-notas" class="input" placeholder="Observaciones opcionales">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-mpr-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-mpr-confirm">Registrar y marcar como entregado</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Ingresar kg de chapa -->
+<div id="prod-chapa-ing-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header"><h3>Ingresar kg de chapa</h3></div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="label required">Categoría</label>
+          <select id="inp-prod-cha-cat" class="input select"></select>
+        </div>
+        <div class="field">
+          <label class="label required">Kilos a ingresar</label>
+          <input type="number" id="inp-prod-cha-kg" class="input" min="0.01" step="any" placeholder="0.00">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Comprobante de compra (opcional)</label>
+          <select id="inp-prod-cha-purchase" class="input select"><option value="">— Sin vincular —</option></select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-cha-notas" class="input" placeholder="Ej: Pedido MP #12, remito...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-cha-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-cha-confirm">Registrar ingreso</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Ajuste kg de chapa -->
+<div id="prod-chapa-aj-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3>Ajuste de kg de chapa</h3></div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="label required">Categoría</label>
+          <select id="inp-prod-chaj-cat" class="input select"></select>
+        </div>
+        <div class="field">
+          <label class="label required">Delta (+/-)</label>
+          <input type="number" id="inp-prod-chaj-delta" class="input" step="any" placeholder="Ej: 10 ó -5">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-chaj-notas" class="input" placeholder="Razón del ajuste...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-chaj-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-chaj-confirm">Aplicar ajuste</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Procesar chapa → piezas pulidas -->
+<div id="prod-procesado-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header"><h3>Procesar chapa → piezas pulidas</h3></div>
+    <div class="modal-form-body">
+      <p id="prod-proc-chapa-info" style="font-size:.83rem;color:var(--text-muted);margin-bottom:14px"></p>
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="label required">Categoría de chapa</label>
+          <select id="inp-prod-prc-cat" class="input select"></select>
+        </div>
+        <div class="field">
+          <label class="label required">Kg usados</label>
+          <input type="number" id="inp-prod-prc-kg" class="input" min="0.01" step="any" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label class="label required">Artículo</label>
+          <select id="inp-prod-prc-product" class="input select"></select>
+        </div>
+        <div class="field">
+          <label class="label required">Pieza resultante</label>
+          <select id="inp-prod-prc-pieza" class="input select">
+            <option value="cajas">Cajas</option>
+            <option value="tapas">Tapas</option>
+            <option value="cremalleras">Cremalleras</option>
+            <option value="combinaciones">Combinaciones</option>
+            <option value="contrafrentes">Contrafrentes</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label required">Unidades resultantes</label>
+          <input type="number" id="inp-prod-prc-piezas" class="input" min="1" step="1" placeholder="0">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-prc-notas" class="input">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-prc-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-prc-confirm">Confirmar procesado</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Sincar piezas -->
+<div id="prod-sincar-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header"><h3>Sincar piezas (pulidas → sincadas)</h3></div>
+    <div class="modal-form-body">
+      <p id="prod-sincar-name" style="font-weight:600;font-size:1rem;margin-bottom:4px"></p>
+      <p id="prod-sincar-info" style="font-size:.83rem;color:var(--text-muted);margin-bottom:14px;line-height:1.6"></p>
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="label required">Pieza a sincar</label>
+          <select id="inp-prod-sin-pieza" class="input select">
+            <option value="cajas">Cajas</option>
+            <option value="tapas">Tapas</option>
+            <option value="cremalleras">Cremalleras</option>
+            <option value="combinaciones">Combinaciones</option>
+            <option value="contrafrentes">Contrafrentes</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label required">Cantidad</label>
+          <input type="number" id="inp-prod-sin-cantidad" class="input" min="1" step="1" placeholder="0">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-sin-notas" class="input">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-sin-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-sin-confirm">Confirmar sincado</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Armar cerraduras -->
+<div id="prod-armar-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header"><h3>Registrar armado de cerraduras</h3></div>
+    <div class="modal-form-body">
+      <p id="prod-armar-name" style="font-weight:600;font-size:1rem;margin-bottom:4px"></p>
+      <p id="prod-armar-info" style="font-size:.83rem;color:var(--text-muted);margin-bottom:14px;line-height:1.6"></p>
+      <div class="field" style="margin-bottom:14px">
+        <label class="label required">Cantidad de cerraduras</label>
+        <input type="number" id="inp-prod-arm-cantidad" class="input" min="1" step="1" placeholder="1" style="max-width:140px">
+      </div>
+      <p style="font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:8px">Consumo por cerradura (0 = no aplica)</p>
+      <div class="form-grid-2" style="gap:10px" id="prod-armar-consumo-grid">
+        <!-- Piezas sincadas -->
+        <div class="field"><label class="label">Cajas sincadas</label><input type="number" id="inp-arm-cajas"          class="input" min="0" step="1" value="0"></div>
+        <div class="field"><label class="label">Tapas sincadas</label><input type="number" id="inp-arm-tapas"          class="input" min="0" step="1" value="0"></div>
+        <div class="field"><label class="label">Cremalleras sinc.</label><input type="number" id="inp-arm-cremalleras" class="input" min="0" step="1" value="0"></div>
+        <div class="field"><label class="label">Comb. sincadas</label><input type="number" id="inp-arm-combinaciones"  class="input" min="0" step="1" value="0"></div>
+        <div class="field"><label class="label">C/Frnts sincados</label><input type="number" id="inp-arm-contrafrentes" class="input" min="0" step="1" value="0"></div>
+        <!-- Piezas directas -->
+        <div class="field"><label class="label">Llaves</label><input type="number" id="inp-arm-llaves"     class="input" min="0" step="1" value="0"></div>
+        <div class="field"><label class="label">Nueces</label><input type="number" id="inp-arm-nueces"     class="input" min="0" step="1" value="0"></div>
+        <div class="field"><label class="label">Pestillos</label><input type="number" id="inp-arm-pestillos" class="input" min="0" step="1" value="0"></div>
+        <div class="field" style="grid-column:1/-1"><label class="label">Notas</label><input type="text" id="inp-arm-notas" class="input"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-arm-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-arm-confirm">Confirmar armado</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Ingresar componentes -->
+<div id="prod-ingcomp-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header"><h3>Ingresar componentes</h3></div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field" style="grid-column:1/-1">
+          <label class="label required">Artículo</label>
+          <select id="inp-prod-ic-product" class="input select"></select>
+        </div>
+        <div class="field">
+          <label class="label required">Pieza</label>
+          <select id="inp-prod-ic-pieza" class="input select">
+            <optgroup label="Con circuito (entran como pulidas)">
+              <option value="cajas_pulidas">Cajas pulidas</option>
+              <option value="tapas_pulidas">Tapas pulidas</option>
+              <option value="cremalleras_pulidas">Cremalleras pulidas</option>
+              <option value="combinaciones_pulidas">Combinaciones pulidas</option>
+              <option value="contrafrentes_pulidos">Contrafrentes pulidos</option>
+            </optgroup>
+            <optgroup label="Directas (sin circuito)">
+              <option value="llaves">Llaves</option>
+              <option value="nueces">Nueces</option>
+              <option value="pestillos">Pestillos</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label required">Cantidad</label>
+          <input type="number" id="inp-prod-ic-cantidad" class="input" min="1" step="any" placeholder="0">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-ic-notas" class="input" placeholder="Origen, observaciones...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-ic-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-ic-confirm">Registrar ingreso</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Ajuste de producción -->
+<div id="prod-ajuste-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header"><h3>Ajuste manual — Potencial para armar</h3></div>
+    <div class="modal-form-body">
+      <div class="form-grid-2">
+        <div class="field" style="grid-column:1/-1">
+          <label class="label required">Artículo</label>
+          <select id="inp-prod-aj-product" class="input select"></select>
+        </div>
+        <div class="field">
+          <label class="label required">Etapa</label>
+          <select id="inp-prod-aj-etapa" class="input select">
+            <option value="proceso">MP En Proceso</option>
+            <option value="terminadas">Terminadas</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label required">Campo</label>
+          <select id="inp-prod-aj-campo" class="input select"></select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label required">Cantidad (+/-)</label>
+          <input type="number" id="inp-prod-aj-delta" class="input" step="any" placeholder="Ej: 5 ó -3">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Notas</label>
+          <input type="text" id="inp-prod-aj-notas" class="input" placeholder="Razón del ajuste...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-prod-aj-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-prod-aj-confirm">Aplicar ajuste</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Ingresar depósito -->
+<div id="dep-ingreso-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3>Registrar ingreso al depósito</h3></div>
+    <div class="modal-form-body">
+      <p id="dep-ing-name" style="font-weight:600;font-size:1rem;margin-bottom:14px"></p>
+      <div class="field">
+        <label class="label required">Cantidad a ingresar</label>
+        <input type="number" id="inp-dep-ing-cantidad" class="input" min="1" step="any" placeholder="0">
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label class="label">Observaciones</label>
+        <input type="text" id="inp-dep-ing-obs" class="input" placeholder="Proveedor, remito, etc.">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-dep-ing-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-dep-ing-confirm">Registrar ingreso</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Egresar depósito -->
+<div id="dep-egreso-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3>Registrar egreso del depósito</h3></div>
+    <div class="modal-form-body">
+      <p id="dep-egr-name" style="font-weight:600;font-size:1rem;margin-bottom:4px"></p>
+      <p id="dep-egr-stock" style="font-size:.83rem;color:var(--text-muted);margin-bottom:14px"></p>
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="label required">Cantidad</label>
+          <input type="number" id="inp-dep-egr-cantidad" class="input" min="1" step="any" placeholder="0">
+        </div>
+        <div class="field">
+          <label class="label required">Motivo</label>
+          <select id="inp-dep-egr-motivo" class="input select">
+            <option value="uso">Uso</option>
+            <option value="merma">Merma</option>
+            <option value="ajuste">Ajuste</option>
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label class="label">Observaciones</label>
+          <input type="text" id="inp-dep-egr-obs" class="input" placeholder="Detalle adicional...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-dep-egr-cancel">Cancelar</button>
+      <button class="btn btn-danger" id="btn-dep-egr-confirm">Registrar egreso</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== MODAL: Gestionar insumos -->
+<div id="dep-gestionar-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between">
+      <h3>Gestionar insumos del depósito</h3>
+      <button class="btn btn-ghost btn-sm" id="btn-dep-gest-close">✕</button>
+    </div>
+    <div class="modal-form-body" style="padding-bottom:0">
+      <!-- Formulario nuevo -->
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px;margin-bottom:16px">
+        <p style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:10px">Agregar insumo</p>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field" style="margin:0">
+            <label class="label required">Tipo</label>
+            <select id="inp-dep-new-tipo" class="input select" style="width:140px">
+              <option value="tornillo">Tornillo</option>
+              <option value="caja">Caja</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;flex:1;min-width:160px">
+            <label class="label required">Descripción</label>
+            <input type="text" id="inp-dep-new-desc" class="input" placeholder="Ej: Tornillo 3/8 zinc">
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-dep-new-add" style="margin-bottom:1px">+ Agregar</button>
+        </div>
+      </div>
+      <!-- Lista -->
+      <div style="max-height:340px;overflow-y:auto">
+        <table class="table" style="font-size:.87rem">
+          <thead><tr>
+            <th style="width:90px">Tipo</th>
+            <th>Descripción</th>
+            <th class="text-center" style="width:80px">Stock</th>
+            <th class="text-center" style="width:70px">Estado</th>
+            <th class="text-center" style="width:70px">Editar</th>
+          </tr></thead>
+          <tbody id="dep-gest-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-dep-gest-done">Cerrar</button>
     </div>
   </div>
 </div>

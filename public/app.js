@@ -31,6 +31,7 @@ function statusBadge(s) {
 function isAdmin()      { return state.user && state.user.role === 'admin'; }
 function isSubAdmin()   { return state.user && state.user.role === 'subadmin'; }
 function isAdminLike()  { return state.user && (state.user.role === 'admin' || state.user.role === 'subadmin'); }
+function isVendor()     { return state.user && state.user.role === 'vendedor'; }
 
 /* ================================================================ STATE */
 const state = {
@@ -46,7 +47,12 @@ const state = {
   productCatalog:    [],
   customerList:      [],
   allSucursales:     [],
-  charts:            {}
+  charts:            {},
+  discountOver:      false,
+  clientsViewMode:   'all',   // 'all' | 'vendor' | 'grouped'
+  clientsVendorId:   '',
+  clientsProduct:    '',
+  clientsDebtFilter: 'all'    // 'all' | 'debt' | 'nodebt' — sobre c.balance (total o por producto, según haya filtro de producto)
 };
 
 /* ================================================================ API */
@@ -115,12 +121,24 @@ async function showApp() {
 
   // Aplicar visibilidad según rol
   $('sidebar-username').textContent = state.user.username;
-  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor' };
+  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor', mp: 'MP / Fábrica' };
   $('sidebar-role').textContent = roleLabels[state.user.role] || 'Vendedor';
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.admin-only-col').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.admin-only-field').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.strict-admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
+  // MP nav visible para admin y fabrica; resto del nav oculto para fabrica
+  document.querySelectorAll('.mp-visible').forEach(el => el.classList.toggle('hidden', !canAccessMP()));
+  // prod-visible: visible para todos los roles excepto vendedor
+  document.querySelectorAll('.prod-visible').forEach(el => el.classList.toggle('hidden', !canAccessProd()));
+  if (isFabrica()) {
+    document.querySelectorAll('.nav-item:not(.mp-visible):not(.prod-visible)').forEach(el => el.classList.add('hidden'));
+  } else {
+    // Restaurar módulos base para roles no-mp (pueden haber quedado ocultos si antes
+    // había una sesión mp activa en la misma pestaña)
+    document.querySelectorAll('.nav-item:not(.mp-visible):not(.prod-visible):not(.admin-only):not(.strict-admin-only)')
+      .forEach(el => el.classList.remove('hidden'));
+  }
 
   // Renderizar selector de sucursal
   renderSucursalSelector();
@@ -136,7 +154,7 @@ async function showApp() {
   // Cargar catálogo de productos para el formulario
   await loadProductCatalog();
 
-  navigate('pedidos');
+  navigate(isFabrica() ? 'mp' : 'pedidos');
 }
 
 $('login-form').addEventListener('submit', async e => {
@@ -218,6 +236,14 @@ function navigate(section) {
     toast('Sin acceso a esta sección', 'error');
     return;
   }
+  if (isVendor() && section === 'produccion') {
+    toast('Sin acceso a esta sección', 'error');
+    return;
+  }
+  if (isFabrica() && section !== 'mp' && section !== 'produccion') {
+    toast('Sin acceso a esta sección', 'error');
+    return;
+  }
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.section === section)
   );
@@ -234,6 +260,8 @@ function navigate(section) {
   if (section === 'reportes')  loadReports();
   if (section === 'compras')   { showComprasTab('proveedores'); showProveedoresSubview('list'); loadSuppliers(); }
   if (section === 'contable')  { showContableTab('resumen'); loadFinanceSummary(); }
+  if (section === 'mp')        { showMpView('list'); loadMpOrders(); }
+  if (section === 'produccion') showProdTab('proceso');
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -259,9 +287,11 @@ async function loadOrders() {
     if (state.filterStatus !== 'Todos') params.set('status', state.filterStatus);
     const q = ($('inp-orders-search').value || '').trim();
     if (q) params.set('search', q);
+    const modelo = ($('inp-orders-modelo').value || '').trim();
+    if (modelo) params.set('modelo', modelo);
     const qs = params.toString() ? `?${params}` : '';
     const orders = await api('GET', `/orders${qs}`);
-    renderOrders(orders, q);
+    renderOrders(orders, q, modelo);
   } catch (err) { toast(err.message, 'error'); }
 }
 
@@ -270,14 +300,30 @@ function applyOrderSearch() {
   _ordersSearchTimer = setTimeout(loadOrders, 250);
 }
 
-function renderOrders(orders, searchQuery = '') {
+function applyOrderModeloFilter() {
+  $('btn-orders-modelo-clear').style.display = $('inp-orders-modelo').value ? '' : 'none';
+  clearTimeout(_ordersSearchTimer);
+  _ordersSearchTimer = setTimeout(loadOrders, 250);
+}
+
+function renderOrders(orders, searchQuery = '', modeloQuery = '') {
   const tbody = $('orders-tbody');
   const noEl  = $('no-orders');
+  const infoEl = $('orders-modelo-info');
   $('list-count').textContent = orders.length === 0 ? 'Sin pedidos' : `${orders.length} pedido${orders.length !== 1 ? 's' : ''}`;
+
+  if (modeloQuery) {
+    infoEl.style.display = '';
+    infoEl.textContent = `${orders.length} pedido${orders.length !== 1 ? 's' : ''} con el modelo "${modeloQuery}"`;
+  } else {
+    infoEl.style.display = 'none';
+  }
 
   if (orders.length === 0) {
     tbody.innerHTML = '';
-    $('no-orders-msg').textContent = searchQuery ? 'No se encontraron pedidos' : 'No hay pedidos';
+    $('no-orders-msg').textContent = modeloQuery
+      ? 'No se encontraron pedidos con ese modelo'
+      : (searchQuery ? 'No se encontraron pedidos' : 'No hay pedidos');
     noEl.classList.remove('hidden');
     return;
   }
@@ -286,17 +332,19 @@ function renderOrders(orders, searchQuery = '') {
   tbody.innerHTML = orders.map(o => `
     <tr data-id="${o.id}" style="cursor:pointer">
       <td><span class="order-num">#${esc(o.order_number)}</span></td>
-      <td>${esc(o.customer_name)}</td>
+      <td>${esc(o.customer_name)}${modeloQuery && o.modelo_qty ? `<br><span style="font-size:.76rem;color:var(--primary);font-weight:600">${o.modelo_qty % 1 === 0 ? o.modelo_qty : o.modelo_qty.toFixed(2)} × ${esc(modeloQuery)}</span>` : ''}</td>
       <td>${statusBadge(o.status)}
         ${o.has_rechazo ? `<span class="badge badge-return" title="Tiene devoluciones por rechazo" style="margin-left:4px">🔄</span>` : ''}
         ${o.has_repair_pending ? `<span class="badge badge-warning" title="Tiene ítems en reparación pendientes" style="margin-left:4px">🔧</span>` : ''}
       </td>
       ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(o.vendor_name||'—')}</td>` : ''}
-      <td class="text-center col-mobile-hide">${o.item_count}</td>
+      <td class="text-center col-mobile-hide">${o.total_units % 1 === 0 ? o.total_units : (o.total_units || 0).toFixed(2)}</td>
       <td class="text-right" style="font-weight:600">${fmtMoney(o.total)}</td>
+      <td class="text-center" onclick="event.stopPropagation()">${renderEntregaCell(o)}</td>
+      <td class="text-center" onclick="event.stopPropagation()">${renderCobroCell(o)}</td>
       <td class="col-mobile-hide">${fmtDate(o.delivery_date)}</td>
       <td class="col-mobile-hide" style="color:var(--text-muted);font-size:.82rem">${fmtDateTime(o.created_at)}</td>
-      <td class="text-center" style="white-space:nowrap">
+      <td class="text-center" style="white-space:nowrap;position:sticky;right:0;background:var(--white);box-shadow:-2px 0 4px rgba(0,0,0,0.06)">
         <button class="btn-icon btn-edit" data-id="${o.id}" onclick="event.stopPropagation()" title="Editar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
@@ -310,12 +358,59 @@ function renderOrders(orders, searchQuery = '') {
   tbody.querySelectorAll('tr[data-id]').forEach(row => row.addEventListener('click', () => openOrderForm(row.dataset.id)));
   tbody.querySelectorAll('.btn-edit').forEach(btn => btn.addEventListener('click', () => openOrderForm(btn.dataset.id)));
   tbody.querySelectorAll('.btn-delete').forEach(btn => btn.addEventListener('click', () => deleteOrder(btn.dataset.id, btn.dataset.num)));
+  tbody.querySelectorAll('.btn-cobro-total').forEach(btn => btn.addEventListener('click', () => openCobroModal(btn.dataset.id, 'total')));
+  tbody.querySelectorAll('.btn-cobro-parcial').forEach(btn => btn.addEventListener('click', () => openCobroModal(btn.dataset.id, 'parcial')));
+  tbody.querySelectorAll('.btn-entrega-total').forEach(btn => btn.addEventListener('click', () => quickDeliverTotal(btn.dataset.id, btn.dataset.num)));
+  tbody.querySelectorAll('.btn-entrega-parcial').forEach(btn => btn.addEventListener('click', () => openDeliveryModal(btn.dataset.id)));
+}
+
+// Celda "Entrega" de la lista de pedidos: acciones rápidas que reutilizan el
+// mismo endpoint/lógica de siempre (POST /orders/:id/deliveries) — no hay
+// estado paralelo, se lee directo de o.status (Pendiente/En preparación/
+// Entrega parcial/Entregado/Cancelado), igual que la columna "Estado".
+function renderEntregaCell(o) {
+  const canAct = isAdmin() && !['Entregado', 'Cancelado'].includes(o.status);
+  if (!canAct) return `<span style="color:var(--text-muted)">—</span>`;
+  return `
+    <div style="display:flex;gap:4px;justify-content:center">
+      <button type="button" class="btn-icon btn-entrega-total" data-id="${o.id}" data-num="${esc(o.order_number)}" title="Entrega total">✓</button>
+      <button type="button" class="btn-icon btn-entrega-parcial" data-id="${o.id}" title="Entrega parcial">½</button>
+    </div>`;
+}
+
+// Celda "Cobro" de la lista de pedidos: estado calculado a partir de los pagos
+// ya vinculados a los remitos del pedido (cobro_status viene armado en el backend
+// con lib/cobro.js) + acciones rápidas para admin.
+function renderCobroCell(o) {
+  const cls  = { pendiente:'warning', parcial:'partial', cobrado:'success' };
+  const label = o.cobro_status === 'parcial'
+    ? `Parcial ${fmtMoney(o.cobro_cobrado)} / ${fmtMoney(o.cobro_entregado)}`
+    : o.cobro_status === 'cobrado' ? 'Cobrado'
+    : o.cobro_status === 'pendiente' ? 'Pendiente'
+    : '—';
+  const badge = o.cobro_status
+    ? `<span class="badge badge-${cls[o.cobro_status]}" style="white-space:normal">${esc(label)}</span>`
+    : `<span style="color:var(--text-muted)">—</span>`;
+
+  const canAct = isAdmin() && o.cobro_status && o.cobro_status !== 'cobrado';
+  const actions = canAct ? `
+    <div style="display:flex;gap:4px;justify-content:center;margin-top:3px">
+      <button type="button" class="btn-icon btn-cobro-total" data-id="${o.id}" title="Cobrado total">✓</button>
+      <button type="button" class="btn-icon btn-cobro-parcial" data-id="${o.id}" title="Cobrado parcial">½</button>
+    </div>` : '';
+  return `<div>${badge}</div>${actions}`;
 }
 
 document.querySelectorAll('.filter-btn').forEach(btn => {
   btn.addEventListener('click', () => { state.filterStatus = btn.dataset.status; loadOrders(); });
 });
 $('inp-orders-search').addEventListener('input', applyOrderSearch);
+$('inp-orders-modelo').addEventListener('input', applyOrderModeloFilter);
+$('btn-orders-modelo-clear').addEventListener('click', () => {
+  $('inp-orders-modelo').value = '';
+  $('btn-orders-modelo-clear').style.display = 'none';
+  loadOrders();
+});
 $('btn-new-order').addEventListener('click', () => openOrderForm(null));
 
 function showOrdersSubview(view) {
@@ -337,6 +432,9 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   state.editingOrderId = orderId || null;
   state.currentOrderStatus = null;
   state.items = [];
+  state.discountOver = false;
+  $('disc-limit-error').classList.add('hidden');
+  $('btn-save').disabled = false;
 
   $('form-title').textContent = orderId ? 'Editar Pedido' : 'Nuevo Pedido';
   $('inp-order-number').value = '';
@@ -352,7 +450,27 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('form-status-badge').innerHTML = '';
   $('btn-export-pdf').classList.add('hidden');
   $('btn-export-pdf-deposito').classList.add('hidden');
-  if ($('inp-vendor-display')) $('inp-vendor-display').value = '';
+  if ($('inp-sucursal-id'))    $('inp-sucursal-id').value    = '';
+  if ($('inp-price-list-id')) $('inp-price-list-id').value  = '';
+
+  // Vendedores solo pueden seleccionar Cancelado
+  const statusSel = $('inp-status');
+  Array.from(statusSel.options).forEach(opt => { opt.disabled = isVendor() && opt.value !== 'Cancelado'; });
+
+  // Cargar listas de precios para selector (solo admin)
+  if (isAdmin()) await loadPriceLists();
+
+  // Cargar lista de usuarios para selector de vendedor (solo admin)
+  if (isAdmin() && $('inp-vendor-id')) {
+    try {
+      const users = await api('GET', '/users');
+      const sel = $('inp-vendor-id');
+      sel.innerHTML = '<option value="">— Sin asignar —</option>' +
+        users.filter(u => u.active)
+             .map(u => `<option value="${u.id}">${esc(u.full_name || u.username)}</option>`)
+             .join('');
+    } catch {}
+  }
 
   if (orderId) {
     try {
@@ -373,7 +491,9 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('form-status-badge').innerHTML = statusBadge(o.status);
       $('btn-export-pdf').classList.remove('hidden');
       $('btn-export-pdf-deposito').classList.remove('hidden');
-      if ($('inp-vendor-display') && isAdmin()) $('inp-vendor-display').value = o.vendor_name || '—';
+      if ($('inp-vendor-id') && isAdmin())     $('inp-vendor-id').value     = o.vendor_id || '';
+      if ($('inp-sucursal-id'))                 $('inp-sucursal-id').value    = o.sucursal_id || '';
+      if ($('inp-price-list-id') && isAdmin()) $('inp-price-list-id').value  = o.price_list_id || '';
       state.items = (o.items || []).map(i => ({ ...i }));
     } catch (err) { toast(err.message, 'error'); return; }
   }
@@ -481,12 +601,30 @@ function renderItems() {
     inp.addEventListener('input', () => {
       const i = inp.dataset.i;
       state.items[i].product_name = inp.value;
-      // Auto-fill price from catalog when exact match
+      // Auto-fill price from selected price list (or active list / base_price fallback)
       const match = state.productCatalog.find(p => p.name.toLowerCase() === inp.value.toLowerCase());
       if (match) {
         const priceInp = inp.closest('tr').querySelector('.item-inp-price');
-        state.items[i].unit_price = match.base_price;
-        priceInp.value = match.base_price;
+        const selListId = $('inp-price-list-id') ? Number($('inp-price-list-id').value) || null : null;
+        getPriceForList(selListId).then(priceMap => {
+          const price = (priceMap && priceMap[match.id] !== undefined) ? priceMap[match.id] : match.base_price;
+          state.items[i].unit_price = price;
+          priceInp.value = price;
+          refreshItem(i);
+        });
+      }
+    });
+    inp.addEventListener('blur', () => {
+      const i = inp.dataset.i;
+      const val = inp.value.trim();
+      if (!val) return;
+      const match = state.productCatalog.find(p => p.name.toLowerCase() === val.toLowerCase());
+      if (!match) {
+        state.items[i].product_name = '';
+        state.items[i].unit_price   = 0;
+        inp.value = '';
+        const priceInp = inp.closest('tr').querySelector('.item-inp-price');
+        if (priceInp) priceInp.value = 0;
         refreshItem(i);
       }
     });
@@ -498,7 +636,11 @@ function renderItems() {
     inp.addEventListener('input', () => { state.items[inp.dataset.i].unit_price = parseFloat(inp.value) || 0; refreshItem(inp.dataset.i); });
   });
   tbody.querySelectorAll('.item-inp-disc').forEach(inp => {
-    inp.addEventListener('input', () => { state.items[inp.dataset.i].discount = parseFloat(inp.value) || 0; refreshItem(inp.dataset.i); });
+    inp.addEventListener('input', () => {
+      state.items[inp.dataset.i].discount = parseFloat(inp.value) || 0;
+      refreshItem(inp.dataset.i);
+      checkDiscountLimit({ type: 'item', index: parseInt(inp.dataset.i) });
+    });
   });
   tbody.querySelectorAll('.item-remove').forEach(btn => {
     btn.addEventListener('click', () => { state.items.splice(parseInt(btn.dataset.i), 1); renderItems(); calcTotals(); });
@@ -549,8 +691,72 @@ function calcTotals() {
   $('calc-iva').textContent        = ivaExempt ? '—' : fmtMoney(iva);
   $('calc-total').textContent      = fmtMoney(finalTotal);
 }
+// ── Validación de límite de descuento ─────────────────────────────────────────
+const DISC_LIMIT = 0.278; // 1 − 0.80 × 0.95 × 0.95
+
+function effDiscount(itemPct, d1, d2, d3, d4) {
+  return 1 - (1 - itemPct/100) * (1 - d1/100) * (1 - d2/100) * (1 - d3/100) * (1 - d4/100);
+}
+
+function maxItemDisc() {
+  return state.items.reduce((m, it) => Math.max(m, parseFloat(it.discount) || 0), 0);
+}
+
+// changedSpec: { type: 'general', id: 'inp-disc1' } | { type: 'item', index: N } | null
+function checkDiscountLimit(changedSpec) {
+  if (isAdmin()) {
+    $('disc-limit-error').classList.add('hidden');
+    state.discountOver = false;
+    return;
+  }
+
+  const d1 = parseFloat($('inp-disc1').value) || 0;
+  const d2 = parseFloat($('inp-disc2').value) || 0;
+  const d3 = parseFloat($('inp-disc3').value) || 0;
+  const d4 = parseFloat($('inp-disc4').value) || 0;
+  const maxI = maxItemDisc();
+  let eff = effDiscount(maxI, d1, d2, d3, d4);
+
+  if (eff > DISC_LIMIT + 1e-9 && changedSpec) {
+    const KEEP = 1 - DISC_LIMIT;
+    const d1f = 1 - d1/100, d2f = 1 - d2/100, d3f = 1 - d3/100, d4f = 1 - d4/100;
+    const itemF = 1 - maxI/100;
+
+    if (changedSpec.type === 'general') {
+      const cid = changedSpec.id;
+      let others;
+      if      (cid === 'inp-disc1') others = itemF * d2f * d3f * d4f;
+      else if (cid === 'inp-disc2') others = itemF * d1f * d3f * d4f;
+      else if (cid === 'inp-disc3') others = itemF * d1f * d2f * d4f;
+      else                          others = itemF * d1f * d2f * d3f;
+      const maxVal = others > 0 ? Math.max(0, 100 * (1 - KEEP / others)) : 0;
+      $(cid).value = maxVal.toFixed(2);
+      calcTotals();
+      const newD = parseFloat(maxVal.toFixed(2));
+      if      (cid === 'inp-disc1') eff = effDiscount(maxI, newD, d2, d3, d4);
+      else if (cid === 'inp-disc2') eff = effDiscount(maxI, d1, newD, d3, d4);
+      else if (cid === 'inp-disc3') eff = effDiscount(maxI, d1, d2, newD, d4);
+      else                          eff = effDiscount(maxI, d1, d2, d3, newD);
+    } else if (changedSpec.type === 'item') {
+      const idx = changedSpec.index;
+      const genF = d1f * d2f * d3f * d4f;
+      const maxItemVal = genF > 0 ? Math.max(0, 100 * (1 - KEEP / genF)) : 0;
+      state.items[idx].discount = parseFloat(maxItemVal.toFixed(2));
+      const inp = document.querySelector(`.item-inp-disc[data-i="${idx}"]`);
+      if (inp) inp.value = state.items[idx].discount;
+      refreshItem(idx);
+      eff = effDiscount(maxItemDisc(), d1, d2, d3, d4);
+    }
+  }
+
+  const exceeded = eff > DISC_LIMIT + 1e-9;
+  state.discountOver = exceeded;
+  $('disc-limit-error').classList.toggle('hidden', !exceeded);
+  $('btn-save').disabled = exceeded;
+}
+
 ['inp-disc1','inp-disc2','inp-disc3','inp-disc4'].forEach(id =>
-  $(id).addEventListener('input', calcTotals)
+  $(id).addEventListener('input', () => { calcTotals(); checkDiscountLimit({ type: 'general', id }); })
 );
 $('inp-iva-exempt').addEventListener('change', calcTotals);
 $('inp-payment-efectivo').addEventListener('change', () => {
@@ -563,9 +769,19 @@ $('inp-payment-cheque').addEventListener('change', () => {
 /* ================================================================ SAVE ORDER */
 $('order-form').addEventListener('submit', async e => {
   e.preventDefault();
+  if (state.discountOver) { toast('El descuento máximo permitido es 20+5+5 (27.8%)', 'error'); return; }
+  const invalidItem = state.items.find(it => {
+    const name = (it.product_name || '').trim();
+    return name && !state.productCatalog.find(p => p.name.toLowerCase() === name.toLowerCase());
+  });
+  if (invalidItem) { toast('Todos los ítems deben tener un producto seleccionado de la lista', 'error'); return; }
   const customer = $('inp-customer').value.trim();
   if (!customer) { toast('El nombre del cliente es requerido', 'error'); $('inp-customer').focus(); return; }
   if (!findCustomerByName(customer)) { toast('El cliente debe estar registrado en el módulo Clientes', 'error'); $('inp-customer').focus(); return; }
+
+  if ($('inp-sucursal-id') && !$('inp-sucursal-id').value) {
+    toast('La sucursal es obligatoria', 'error'); $('inp-sucursal-id').focus(); return;
+  }
 
   const data = {
     customer_name: customer,
@@ -581,6 +797,18 @@ $('order-form').addEventListener('submit', async e => {
     payment_cheque:    $('inp-payment-cheque').checked   ? 1 : 0,
     items:             state.items.filter(i => i.product_name.trim())
   };
+  if ($('inp-sucursal-id')) {
+    const sid = $('inp-sucursal-id').value;
+    data.sucursal_id = sid ? Number(sid) : null;
+  }
+  if (isAdmin() && $('inp-vendor-id')) {
+    const vid = $('inp-vendor-id').value;
+    data.vendor_id = vid ? Number(vid) : null;
+  }
+  if (isAdmin() && $('inp-price-list-id')) {
+    const plid = $('inp-price-list-id').value;
+    data.price_list_id = plid ? Number(plid) : null;
+  }
 
   const btn = $('btn-save');
   btn.disabled = true;
@@ -629,10 +857,279 @@ async function loadCustomerList() {
 /* ================================================================ CATALOG SECTION */
 async function loadCatalog() {
   try {
-    const products = await api('GET', '/products?all=1');
+    const showInactive = $('chk-catalog-show-inactive') && $('chk-catalog-show-inactive').checked;
+    const [products, activeList] = await Promise.all([
+      api('GET', showInactive ? '/products?all=1' : '/products'),
+      api('GET', '/price-lists/active').catch(() => null)
+    ]);
     renderCatalog(products);
+    const infoEl = $('active-price-list-info');
+    if (infoEl) {
+      if (activeList) {
+        infoEl.textContent = `Lista vigente: ${activeList.nombre} (desde ${fmtDate(activeList.fecha_vigencia)})`;
+      } else {
+        infoEl.textContent = 'Sin lista de precios activa — se usan los precios base de cada producto';
+      }
+    }
   } catch (err) { toast(err.message, 'error'); }
 }
+
+if ($('chk-catalog-show-inactive')) {
+  $('chk-catalog-show-inactive').addEventListener('change', loadCatalog);
+}
+
+/* ================================================================ LISTAS DE PRECIO */
+
+if ($('btn-new-price-list')) {
+  $('btn-new-price-list').addEventListener('click', openPriceListModal);
+}
+['btn-price-list-cancel','btn-price-list-cancel2'].forEach(id => {
+  if ($(id)) $(id).addEventListener('click', () => $('price-list-modal').classList.add('hidden'));
+});
+$('price-list-modal').addEventListener('click', e => {
+  if (e.target === $('price-list-modal')) $('price-list-modal').classList.add('hidden');
+});
+
+async function openPriceListModal() {
+  $('inp-pl-nombre').value  = '';
+  $('inp-pl-fecha').value   = new Date().toISOString().slice(0,10);
+  $('price-list-modal').classList.remove('hidden');
+
+  // Cargar productos con precios actuales
+  try {
+    const [products, activeList] = await Promise.all([
+      api('GET', '/products?all=1'),
+      api('GET', '/price-lists/active').catch(() => null)
+    ]);
+    const priceMap = {};
+    if (activeList && activeList.items) {
+      for (const it of activeList.items) priceMap[it.product_id] = it.precio;
+    }
+    const activeProducts = products.filter(p => p.active);
+    $('pl-items-tbody').innerHTML = activeProducts.map(p => {
+      const precio = priceMap[p.id] !== undefined ? priceMap[p.id] : p.base_price;
+      return `<tr>
+        <td>${esc(p.name)}</td>
+        <td class="text-right"><input type="number" class="input pl-price-inp" data-pid="${p.id}" value="${precio}" min="0" step="0.01" style="width:120px;text-align:right"></td>
+      </tr>`;
+    }).join('');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+if ($('btn-price-list-save')) {
+  $('btn-price-list-save').addEventListener('click', async () => {
+    const nombre = $('inp-pl-nombre').value.trim();
+    const fecha  = $('inp-pl-fecha').value;
+    if (!nombre) { toast('El nombre es requerido', 'error'); $('inp-pl-nombre').focus(); return; }
+    if (!fecha)  { toast('La fecha de vigencia es requerida', 'error'); $('inp-pl-fecha').focus(); return; }
+
+    const items = Array.from($('pl-items-tbody').querySelectorAll('.pl-price-inp')).map(inp => ({
+      product_id: Number(inp.dataset.pid),
+      precio:     parseFloat(inp.value) || 0
+    }));
+    if (!items.length) { toast('No hay productos para guardar', 'error'); return; }
+
+    const btn = $('btn-price-list-save');
+    btn.disabled = true;
+    try {
+      await api('POST', '/price-lists', { nombre, fecha_vigencia: fecha, items });
+      toast('Lista de precios guardada y activada', 'success');
+      $('price-list-modal').classList.add('hidden');
+      loadCatalog();
+      // Recargar catálogo de productos y listas en el formulario de pedido
+      await loadProductCatalog();
+      await loadPriceLists();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { btn.disabled = false; }
+  });
+}
+
+// ── Importar Excel en lista de precios ──
+if ($('inp-pl-import-file')) {
+  $('inp-pl-import-file').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const rows = await parseFileRows(file);
+      const data = rows.map(r => ({
+        nombre: normalizeKey(r, ['nombre','name','producto','product','descripcion','description']),
+        precio: normalizeKey(r, ['precio','price','base_price','precio_base','valor','value','importe'])
+      })).filter(r => r.nombre);
+
+      if (!data.length) { toast('No se encontraron filas con nombre de producto', 'error'); return; }
+
+      // Mapear por nombre a los inputs de la tabla
+      const inputs = Array.from($('pl-items-tbody').querySelectorAll('.pl-price-inp'));
+      let matched = 0;
+      for (const d of data) {
+        const normD = d.nombre.toLowerCase().trim();
+        const inp = inputs.find(i => {
+          const row = i.closest('tr');
+          const tdName = row ? row.querySelector('td:first-child') : null;
+          return tdName && tdName.textContent.toLowerCase().trim() === normD;
+        });
+        if (inp) {
+          const precio = parseFloat(String(d.precio).replace(',', '.')) || 0;
+          inp.value = precio;
+          matched++;
+        }
+      }
+      toast(`${matched} precio${matched !== 1 ? 's' : ''} actualizado${matched !== 1 ? 's' : ''} desde el archivo`, matched > 0 ? 'success' : 'error');
+    } catch (err) { toast('Error al leer el archivo: ' + err.message, 'error'); }
+  });
+}
+
+let _priceLists   = [];
+let _activePriceListItems = {};
+
+async function loadPriceLists() {
+  try {
+    _priceLists = await api('GET', '/price-lists');
+    const sel = $('inp-price-list-id');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— Vigente —</option>' +
+      _priceLists.map(l => `<option value="${l.id}">${esc(l.nombre)} (${fmtDate(l.fecha_vigencia)})${l.active ? ' ✓' : ''}</option>`).join('');
+  } catch {}
+}
+
+async function getPriceForList(listId) {
+  if (!listId) {
+    // Usar lista activa
+    try {
+      const active = await api('GET', '/price-lists/active');
+      if (active && active.items) {
+        const map = {};
+        for (const it of active.items) map[it.product_id] = it.precio;
+        return map;
+      }
+    } catch {}
+    return null;
+  }
+  try {
+    const list = await api('GET', `/price-lists/${listId}`);
+    if (list && list.items) {
+      const map = {};
+      for (const it of list.items) map[it.product_id] = it.precio;
+      return map;
+    }
+  } catch {}
+  return null;
+}
+
+/* ================================================================ IMPORTAR LISTA DE PRECIOS */
+
+let _iplData = [];  // filas parseadas del Excel
+
+$('btn-import-price-list').addEventListener('click', () => {
+  _iplData = [];
+  $('inp-ipl-nombre').value = '';
+  $('inp-ipl-fecha').value  = new Date().toISOString().slice(0,10);
+  $('inp-ipl-file').value   = '';
+  $('ipl-preview').classList.add('hidden');
+  $('ipl-error').classList.add('hidden');
+  $('btn-import-pl-confirm').classList.add('hidden');
+  $('import-price-list-modal').classList.remove('hidden');
+});
+
+['btn-import-pl-cancel','btn-import-pl-cancel2'].forEach(id =>
+  $(id).addEventListener('click', () => $('import-price-list-modal').classList.add('hidden'))
+);
+$('import-price-list-modal').addEventListener('click', e => {
+  if (e.target === $('import-price-list-modal')) $('import-price-list-modal').classList.add('hidden');
+});
+
+$('inp-ipl-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('ipl-preview').classList.add('hidden');
+  $('ipl-error').classList.add('hidden');
+  $('btn-import-pl-confirm').classList.add('hidden');
+  _iplData = [];
+
+  try {
+    const buf = await file.arrayBuffer();
+    const ext = file.name.split('.').pop().toLowerCase();
+    let rows = [];
+    if (ext === 'csv') {
+      const text = new TextDecoder('utf-8').decode(buf);
+      rows = text.trim().split('\n').map(l => l.split(/[,;]/).map(c => c.trim().replace(/^"|"$/g, '')));
+    } else {
+      const wb = XLSX.read(buf, { type: 'array' });
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+    }
+    if (!rows.length) { $('ipl-error').textContent = 'Archivo vacío'; $('ipl-error').classList.remove('hidden'); return; }
+
+    // Detectar columnas
+    const header = rows[0].map(h => String(h).toLowerCase().trim());
+    const nameIdx  = header.findIndex(h => ['nombre','name','producto','product'].includes(h));
+    const priceIdx = header.findIndex(h => ['precio','price','base_price','valor','value','importe'].includes(h));
+    if (nameIdx < 0 || priceIdx < 0) {
+      $('ipl-error').textContent = 'No se encontraron columnas "nombre" y "precio". Revisá los encabezados del archivo.';
+      $('ipl-error').classList.remove('hidden'); return;
+    }
+
+    // Cargar catálogo para hacer el match
+    const catalog = await api('GET', '/products?all=1');
+    const catalogMap = {};
+    catalog.forEach(p => { catalogMap[p.name.toLowerCase().trim()] = p; });
+
+    const found = [], notFound = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const name  = String(row[nameIdx]  || '').trim();
+      const rawPrice = String(row[priceIdx] || '').replace(/[^\d.,]/g,'').replace(',','.');
+      const precio = parseFloat(rawPrice) || 0;
+      if (!name) continue;
+      const match = catalogMap[name.toLowerCase()];
+      if (match) {
+        found.push({ product_id: match.id, name: match.name, precio });
+      } else {
+        notFound.push(name);
+      }
+    }
+
+    _iplData = found;
+
+    // Mostrar preview
+    $('ipl-tbody').innerHTML = found.map(r =>
+      `<tr><td>${esc(r.name)}</td><td class="text-right">${fmtMoney(r.precio)}</td><td><span class="badge badge-success">OK</span></td></tr>`
+    ).join('');
+    $('ipl-summary').textContent = `${found.length} producto${found.length !== 1 ? 's' : ''} encontrado${found.length !== 1 ? 's' : ''} para actualizar.`;
+
+    const nfEl = $('ipl-not-found');
+    if (notFound.length) {
+      $('ipl-not-found-list').textContent = notFound.join(', ');
+      nfEl.classList.remove('hidden');
+    } else { nfEl.classList.add('hidden'); }
+
+    $('ipl-preview').classList.remove('hidden');
+    if (found.length) $('btn-import-pl-confirm').classList.remove('hidden');
+  } catch (err) {
+    $('ipl-error').textContent = 'No se pudo leer el archivo: ' + err.message;
+    $('ipl-error').classList.remove('hidden');
+  }
+});
+
+$('btn-import-pl-confirm').addEventListener('click', async () => {
+  const nombre = $('inp-ipl-nombre').value.trim();
+  const fecha  = $('inp-ipl-fecha').value;
+  if (!nombre) { toast('El nombre de la lista es requerido', 'error'); $('inp-ipl-nombre').focus(); return; }
+  if (!fecha)  { toast('La fecha de vigencia es requerida', 'error'); $('inp-ipl-fecha').focus(); return; }
+  if (!_iplData.length) return;
+
+  const btn = $('btn-import-pl-confirm');
+  btn.disabled = true;
+  try {
+    const result = await api('POST', '/price-lists', { nombre, fecha_vigencia: fecha, items: _iplData });
+    toast(`Lista "${result.nombre}" guardada con ${_iplData.length} precios`, 'success');
+    $('import-price-list-modal').classList.add('hidden');
+    loadCatalog();
+    await loadProductCatalog();
+    await loadPriceLists();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
 
 function stockBadge(stock, stock_min) {
   if (stock === 0)
@@ -767,7 +1264,9 @@ function renderUsers(users) {
         ? '<span class="badge badge-admin">Admin</span>'
         : u.role === 'subadmin'
           ? '<span class="badge badge-info">Subadmin</span>'
-          : '<span class="badge badge-vendor">Vendedor</span>'}</td>
+          : u.role === 'mp'
+            ? '<span class="badge" style="background:#7c3aed;color:#fff">MP / Fábrica</span>'
+            : '<span class="badge badge-vendor">Vendedor</span>'}</td>
       <td style="font-size:.82rem;color:var(--text-muted)">${(u.sucursales||[]).map(s=>esc(s.name)).join(', ') || '—'}</td>
       <td class="text-center">
         ${u.active
@@ -801,6 +1300,15 @@ window.toggleUser = async function(id, active) {
 $('btn-new-user').addEventListener('click', () => openUserForm(null));
 $('btn-users-back').addEventListener('click', () => { showUsersSubview('list'); loadUsers(); });
 $('btn-user-cancel').addEventListener('click', () => { showUsersSubview('list'); loadUsers(); });
+$('inp-user-role').addEventListener('change', function() {
+  const sec = $('user-mp-suppliers-section');
+  if (this.value === 'mp') {
+    renderUserMpSupplierCheckboxes(_mpFormSuppliers, new Set());
+    sec.classList.remove('hidden');
+  } else {
+    sec.classList.add('hidden');
+  }
+});
 
 function renderUserSucursalCheckboxes(assignedIds) {
   const container = $('user-sucursal-checkboxes');
@@ -817,7 +1325,20 @@ function getSelectedSucursalIds() {
     .map(cb => Number(cb.value));
 }
 
-window.openUserForm = function(id) {
+let _mpFormSuppliers = [];
+
+function renderUserMpSupplierCheckboxes(suppliers, assignedIds) {
+  const container = $('user-mp-supplier-checkboxes');
+  container.innerHTML = suppliers.length === 0
+    ? '<span style="color:var(--text-muted);font-size:.88rem">No hay proveedores registrados</span>'
+    : suppliers.map(s => `
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:.9rem">
+          <input type="checkbox" class="user-mp-sup-cb" value="${s.id}" ${assignedIds.has(s.id) ? 'checked' : ''}>
+          ${esc(s.name)}
+        </label>`).join('');
+}
+
+window.openUserForm = async function(id) {
   state.editingUserId = id || null;
   $('user-form-title').textContent = id ? 'Editar Usuario' : 'Nuevo Usuario';
   $('inp-user-fullname').value  = '';
@@ -826,36 +1347,49 @@ window.openUserForm = function(id) {
   $('inp-user-role').value      = 'vendedor';
   $('inp-user-username').disabled = false;
   $('pwd-label').textContent = id ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña *';
-
-  // Load sucursales list then render checkboxes
-  api('GET', '/users/sucursales').then(subs => {
+  $('user-mp-suppliers-section').classList.add('hidden');
+  $('user-mp-supplier-checkboxes').innerHTML = '<span style="color:var(--text-muted);font-size:.88rem">Cargando...</span>';
+  showUsersSubview('form');
+  setTimeout(() => $('inp-user-fullname').focus(), 50);
+  try {
+    const [subs, allUsers, allSuppliers] = await Promise.all([
+      api('GET', '/users/sucursales'),
+      api('GET', '/users'),
+      api('GET', '/suppliers')
+    ]);
     state.allSucursales = subs;
+    _mpFormSuppliers = allSuppliers.filter(s => s.active);
+    let assignedMpIds = new Set();
     if (id) {
-      api('GET', '/users').then(list => {
-        const u = list.find(x => x.id === id);
-        if (u) {
-          $('inp-user-fullname').value  = u.full_name;
-          $('inp-user-username').value  = u.username;
-          $('inp-user-role').value      = u.role;
-          $('inp-user-username').disabled = true;
-          renderUserSucursalCheckboxes((u.sucursales || []).map(s => s.id));
-        }
-      });
+      const u = allUsers.find(x => x.id === id);
+      if (u) {
+        $('inp-user-fullname').value  = u.full_name;
+        $('inp-user-username').value  = u.username;
+        $('inp-user-role').value      = u.role;
+        $('inp-user-username').disabled = true;
+        renderUserSucursalCheckboxes((u.sucursales || []).map(s => s.id));
+        assignedMpIds = new Set(u.mp_supplier_ids || []);
+      }
     } else {
       renderUserSucursalCheckboxes([]);
     }
-  });
-
-  showUsersSubview('form');
-  setTimeout(() => $('inp-user-fullname').focus(), 50);
+    if ($('inp-user-role').value === 'mp') {
+      renderUserMpSupplierCheckboxes(_mpFormSuppliers, assignedMpIds);
+      $('user-mp-suppliers-section').classList.remove('hidden');
+    }
+  } catch (err) { toast(err.message, 'error'); }
 };
 
 $('user-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const fullname = $('inp-user-fullname').value.trim();
-  const username = $('inp-user-username').value.trim();
-  const password = $('inp-user-password').value;
-  const role     = $('inp-user-role').value;
+  const fullname     = $('inp-user-fullname').value.trim();
+  const username     = $('inp-user-username').value.trim();
+  const password     = $('inp-user-password').value;
+  const role         = $('inp-user-role').value;
+  const sucursal_ids = getSelectedSucursalIds();
+  const mp_supplier_ids = role === 'mp'
+    ? [...document.querySelectorAll('.user-mp-sup-cb:checked')].map(cb => Number(cb.value))
+    : [];
 
   if (!fullname) { toast('El nombre completo es requerido', 'error'); return; }
   if (!state.editingUserId && !username) { toast('El nombre de usuario es requerido', 'error'); return; }
@@ -864,15 +1398,14 @@ $('user-form').addEventListener('submit', async e => {
 
   const btn = $('btn-user-save');
   btn.disabled = true;
-  const sucursal_ids = getSelectedSucursalIds();
   try {
     if (state.editingUserId) {
-      const body = { full_name: fullname, role, sucursal_ids };
+      const body = { full_name: fullname, role, sucursal_ids, mp_supplier_ids };
       if (password) body.password = password;
       await api('PUT', `/users/${state.editingUserId}`, body);
       toast('Usuario actualizado', 'success');
     } else {
-      await api('POST', '/users', { username, password, full_name: fullname, role, sucursal_ids });
+      await api('POST', '/users', { username, password, full_name: fullname, role, sucursal_ids, mp_supplier_ids });
       toast('Usuario creado', 'success');
     }
     showUsersSubview('list');
@@ -889,24 +1422,61 @@ const rankingState = {
   expanded: { customers: false, vendors: false, delivered: false, stocked: false, discounts: false }
 };
 
+const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
 async function loadReports() {
-  const months = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-  const now = new Date();
-  $('reports-period').textContent = `${months[now.getMonth()]} ${now.getFullYear()}`;
+  const now    = new Date();
+  const picker = $('rpt-month-picker');
+
+  // Initialize picker to current month if empty
+  if (picker && !picker.value) {
+    picker.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  }
+
+  const [yr, mo] = (picker ? picker.value : '').split('-').map(Number);
+  const year  = yr || now.getFullYear();
+  const month = mo || (now.getMonth() + 1);
+
+  const from = `${year}-${String(month).padStart(2,'0')}-01`;
+  const to   = new Date(year, month, 0).toISOString().slice(0,10);
+
+  const periodLabel = `${MONTHS_ES[month-1]} ${year}`;
+  $('reports-period').textContent = periodLabel;
+
+  // Update dynamic stat card labels
+  const labelMap = {
+    'stat-month-orders':          'Pedidos',
+    'stat-month-sales':           'Ventas',
+    'stat-avg':                   'Ticket promedio',
+    'stat-month-units':           'Unidades pedidas',
+    'stat-month-units-delivered': 'Unidades entregadas'
+  };
+  Object.entries(labelMap).forEach(([id, base]) => {
+    const card = $(id)?.closest?.('.stat-card');
+    if (card) card.querySelector('.stat-label').textContent = `${base} — ${periodLabel}`;
+  });
 
   try {
-    const [stats, weekly, topProds] = await Promise.all([
-      api('GET', '/reports/stats'),
-      api('GET', '/reports/weekly'),
-      api('GET', '/reports/top-products')
+    const [stats, dailyUnits, topProds] = await Promise.all([
+      api('GET', `/reports/stats?from=${from}&to=${to}`),
+      api('GET', '/reports/daily-units'),
+      api('GET', `/reports/top-products?from=${from}&to=${to}`)
     ]);
     renderStats(stats);
-    renderWeeklyChart(weekly);
+    renderDailyUnitsChart(dailyUnits);
     renderStatusChart(stats.by_status);
     renderTopProducts(topProds);
   } catch (err) { toast(err.message, 'error'); }
 
   loadRankings();
+  initQtyReport('sold');
+  initQtyReport('delivered');
+  loadPurchasesReport(from, to);
+  if ($('pl-product-input')) loadProductLedger();
+}
+
+if ($('rpt-month-picker')) {
+  $('rpt-month-picker').addEventListener('change', loadReports);
 }
 
 function rankingQS(key) {
@@ -932,6 +1502,48 @@ async function loadRankings() {
       .catch(() => {})
     )
   );
+}
+
+/* ── Ficha de Producto ── */
+async function loadProductLedger() {
+  const product = ($('pl-product-input').value || '').trim();
+  if (!product) { toast('Ingresá un producto', 'error'); return; }
+  try {
+    const data = await api('GET', `/reports/product-ledger?product=${encodeURIComponent(product)}`);
+    $('pl-total-entregado').textContent = fmtMoney(data.total_entregado);
+    $('pl-total-cobrado').textContent   = fmtMoney(data.total_cobrado);
+    $('pl-saldo-pendiente').textContent = fmtMoney(data.saldo_pendiente);
+    $('pl-product-label').textContent   = `— "${data.product}"`;
+
+    const tbody = $('pl-tbody');
+    const emptyEl = $('pl-empty');
+    if (!data.remitos.length) {
+      tbody.innerHTML = '';
+      emptyEl.classList.remove('hidden');
+    } else {
+      emptyEl.classList.add('hidden');
+      const cls = { pendiente:'warning', parcial:'partial', cobrado:'success' };
+      tbody.innerHTML = data.remitos.map(r => {
+        const label = r.status === 'parcial'
+          ? `Parcial ${fmtMoney(r.paid)} / ${fmtMoney(r.total)}`
+          : r.status === 'cobrado' ? 'Cobrado' : 'Pendiente';
+        return `<tr>
+          <td style="font-weight:600">${esc(r.remito_number)}</td>
+          <td>${esc(r.customer_name)}</td>
+          <td>${esc(r.order_number)}</td>
+          <td>${fmtDate(r.created_at)}</td>
+          <td class="text-right">${fmtMoney(r.total)}</td>
+          <td class="text-center"><span class="badge badge-${cls[r.status]||'default'}" style="white-space:normal">${esc(label)}</span></td>
+        </tr>`;
+      }).join('');
+    }
+  } catch (err) { toast(err.message, 'error'); }
+}
+if ($('btn-product-ledger-search')) {
+  $('btn-product-ledger-search').addEventListener('click', loadProductLedger);
+  $('pl-product-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); loadProductLedger(); }
+  });
 }
 
 let _discountsPieChart = null;
@@ -1052,26 +1664,31 @@ document.querySelectorAll('.ranking-more-btn').forEach(btn => {
   });
 });
 
+function fmtUnits(v) { const n = v || 0; return n % 1 === 0 ? n : n.toFixed(2); }
+
 function renderStats(stats) {
-  $('stat-total-orders').textContent  = stats.total_orders;
-  $('stat-month-orders').textContent  = stats.month_orders;
-  $('stat-month-sales').textContent   = fmtMoney(stats.month_sales);
-  $('stat-avg').textContent           = fmtMoney(stats.avg_order);
+  $('stat-total-orders').textContent           = stats.total_orders;
+  $('stat-month-orders').textContent           = stats.month_orders;
+  $('stat-month-sales').textContent            = fmtMoney(stats.month_sales);
+  $('stat-avg').textContent                    = fmtMoney(stats.avg_order);
+  $('stat-total-units').textContent            = fmtUnits(stats.total_units);
+  $('stat-month-units').textContent            = fmtUnits(stats.month_units);
+  $('stat-month-units-delivered').textContent  = fmtUnits(stats.month_units_delivered);
 }
 
-function renderWeeklyChart(weeks) {
+function renderDailyUnitsChart(days) {
   const canvas = $('chart-weekly');
   if (!canvas || typeof Chart === 'undefined') return;
   if (state.charts.weekly) state.charts.weekly.destroy();
   state.charts.weekly = new Chart(canvas, {
     type: 'bar',
     data: {
-      labels: weeks.map(w => w.label),
+      labels: days.map(d => d.label),
       datasets: [{
-        label: 'Pedidos',
-        data: weeks.map(w => w.count),
-        backgroundColor: 'rgba(37,99,235,0.75)',
-        borderRadius: 5,
+        label: 'Unidades',
+        data: days.map(d => d.units),
+        backgroundColor: 'rgba(16,185,129,0.75)',
+        borderRadius: 4,
         borderSkipped: false
       }]
     },
@@ -1079,8 +1696,8 @@ function renderWeeklyChart(weeks) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
-        y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 }, grid: { color: '#f1f5f9' } },
-        x: { grid: { display: false } }
+        y: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 14, maxRotation: 45 } }
       }
     }
   });
@@ -1115,7 +1732,7 @@ function renderTopProducts(products) {
     <tr>
       <td style="color:var(--text-muted);font-weight:600">${i + 1}</td>
       <td>${esc(p.product_name)}</td>
-      <td class="text-right">${p.total_qty}</td>
+      <td class="text-right" style="font-weight:600">${p.total_qty % 1 === 0 ? p.total_qty : p.total_qty.toFixed(2)}</td>
       <td class="text-center">${p.order_count}</td>
       <td class="text-right" style="font-weight:600;color:var(--primary)">${fmtMoney(p.revenue)}</td>
     </tr>
@@ -1125,6 +1742,229 @@ function renderTopProducts(products) {
 $('btn-report-pdf').addEventListener('click', () => window.open('/api/reports/print', '_blank'));
 $('btn-report-excel').addEventListener('click', () => { window.location.href = '/api/reports/excel'; });
 
+// ── Unidades vendidas por período ─────────────────────────────────────────────
+// ── Helpers de fecha para botones rápidos ────────────────────────────────────
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function qtyRangeDates(range) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  if (range === 'today') {
+    const t = fmt(now); return { from: t, to: t };
+  }
+  if (range === 'week') {
+    const mon = new Date(now);
+    const dow = now.getDay() === 0 ? 6 : now.getDay() - 1;
+    mon.setDate(now.getDate() - dow);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    return { from: fmt(mon), to: fmt(sun) };
+  }
+  if (range === 'month') {
+    return { from: `${now.getFullYear()}-${pad(now.getMonth()+1)}-01`, to: fmt(now) };
+  }
+  if (range === 'prevmonth') {
+    const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const last  = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { from: fmt(first), to: fmt(last) };
+  }
+  if (range === 'year') {
+    return { from: `${now.getFullYear()}-01-01`, to: fmt(now) };
+  }
+  return { from: null, to: null };
+}
+
+// ── Reporte de cantidades (vendidas / entregadas) ─────────────────────────────
+const QTY_CFG = {
+  sold:      { fromId: 'sold-from',  toId: 'sold-to',  tbodyId: 'sold-tbody',  tfootId: 'sold-tfoot',  emptyId: 'no-sold'  },
+  delivered: { fromId: 'deliv-from', toId: 'deliv-to', tbodyId: 'deliv-tbody', tfootId: 'deliv-tfoot', emptyId: 'no-deliv' }
+};
+
+async function loadQtyReport(mode, from, to) {
+  const cfg = QTY_CFG[mode];
+  if (!cfg) return;
+  const resolvedFrom = from !== undefined ? from : $(`${cfg.fromId}`).value || null;
+  const resolvedTo   = to   !== undefined ? to   : $(`${cfg.toId}`).value   || null;
+  try {
+    const params = new URLSearchParams({ mode });
+    if (resolvedFrom) params.set('from', resolvedFrom);
+    if (resolvedTo)   params.set('to',   resolvedTo);
+    const d = await api('GET', '/reports/units?' + params.toString());
+    const tbody = $(cfg.tbodyId);
+    const tfoot = $(cfg.tfootId);
+    if (!d.products.length) {
+      tbody.innerHTML = '';
+      tfoot.innerHTML = '';
+      $(cfg.emptyId).classList.remove('hidden');
+      return;
+    }
+    $(cfg.emptyId).classList.add('hidden');
+    tbody.innerHTML = d.products.map((p, i) => `
+      <tr>
+        <td style="color:var(--text-muted);font-weight:600">${i + 1}</td>
+        <td>${esc(p.product_name)}</td>
+        <td class="text-right" style="font-weight:600">${fmtUnits(p.total_qty)}</td>
+        <td class="text-right" style="color:var(--text-muted)">${p.pct.toFixed(1)}%</td>
+        <td class="text-right">${p.order_count}</td>
+      </tr>`).join('');
+    const tot = d.total_units;
+    tfoot.innerHTML = `<tr style="font-weight:700;border-top:2px solid var(--border)">
+      <td colspan="2" class="text-right" style="padding:8px 10px">Total</td>
+      <td class="text-right" style="padding:8px 10px">${fmtUnits(tot)}</td>
+      <td class="text-right" style="padding:8px 10px">100%</td>
+      <td class="text-right" style="padding:8px 10px">${d.products.reduce((s,p)=>s+p.order_count,0)}</td>
+    </tr>`;
+  } catch (err) { console.error('Error cantidades:', err.message); }
+}
+
+function initQtyReport(mode) {
+  const cfg = QTY_CFG[mode];
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const monthFrom = `${now.getFullYear()}-${pad(now.getMonth()+1)}-01`;
+  const today     = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  $(cfg.fromId).value = monthFrom;
+  $(cfg.toId).value   = today;
+  loadQtyReport(mode, monthFrom, today);
+}
+
+// Quick-range buttons (both sections, data-mode + data-range attrs)
+document.querySelectorAll('.qty-quick').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const mode  = btn.dataset.mode;
+    const range = btn.dataset.range;
+    const cfg   = QTY_CFG[mode];
+    const { from, to } = qtyRangeDates(range);
+    if (from) $(cfg.fromId).value = from;
+    if (to)   $(cfg.toId).value   = to;
+    loadQtyReport(mode, from, to);
+    // highlight active quick button within this section
+    btn.closest('div').querySelectorAll('.qty-quick').forEach(b => b.classList.remove('btn-primary'));
+    btn.classList.add('btn-primary');
+  });
+});
+
+$('btn-sold-apply').addEventListener('click', () => loadQtyReport('sold'));
+$('btn-deliv-apply').addEventListener('click', () => loadQtyReport('delivered'));
+
+$('btn-sold-excel').addEventListener('click', () => {
+  const p = new URLSearchParams({ mode: 'sold' });
+  if ($('sold-from').value) p.set('from', $('sold-from').value);
+  if ($('sold-to').value)   p.set('to',   $('sold-to').value);
+  window.location.href = '/api/reports/units/excel?' + p.toString();
+});
+$('btn-sold-pdf').addEventListener('click', () => {
+  const p = new URLSearchParams({ mode: 'sold' });
+  if ($('sold-from').value) p.set('from', $('sold-from').value);
+  if ($('sold-to').value)   p.set('to',   $('sold-to').value);
+  window.open('/api/reports/units/print?' + p.toString(), '_blank');
+});
+$('btn-deliv-excel').addEventListener('click', () => {
+  const p = new URLSearchParams({ mode: 'delivered' });
+  if ($('deliv-from').value) p.set('from', $('deliv-from').value);
+  if ($('deliv-to').value)   p.set('to',   $('deliv-to').value);
+  window.location.href = '/api/reports/units/excel?' + p.toString();
+});
+$('btn-deliv-pdf').addEventListener('click', () => {
+  const p = new URLSearchParams({ mode: 'delivered' });
+  if ($('deliv-from').value) p.set('from', $('deliv-from').value);
+  if ($('deliv-to').value)   p.set('to',   $('deliv-to').value);
+  window.open('/api/reports/units/print?' + p.toString(), '_blank');
+});
+
+// ── Reportes de Compras de Materia Prima ──────────────────────────────────────
+async function loadPurchasesReport(from, to) {
+  try {
+    let url = '/reports/purchases';
+    const params = [];
+    if (from) params.push(`from=${from}`);
+    if (to)   params.push(`to=${to}`);
+    if (params.length) url += '?' + params.join('&');
+
+    const d = await api('GET', url);
+
+    // Cards
+    $('rpt-pur-count').textContent     = d.count;
+    $('rpt-pur-total').textContent     = fmtMoney(d.total);
+    $('rpt-pur-suppliers').textContent = d.supplierCount;
+    $('rpt-pur-products').textContent  = d.productCount;
+
+    // Tabla comprobantes
+    if (d.purchases.length) {
+      $('rpt-pur-tbody').innerHTML = d.purchases.map(p => `
+        <tr>
+          <td><a href="#" onclick="openPurchaseDetail(${p.id});showComprasTab('comprobantes');return false;" style="font-weight:600">${esc(p.purchase_number)}</a></td>
+          <td>${esc(p.supplier_name)}</td>
+          <td>${esc(p.doc_type)}</td>
+          <td>${esc(p.doc_number || '—')}</td>
+          <td>${fmtDate(p.doc_date || p.created_at)}</td>
+          <td class="text-right">${fmtMoney(p.total)}</td>
+        </tr>`).join('');
+      $('rpt-pur-empty').classList.add('hidden');
+    } else {
+      $('rpt-pur-tbody').innerHTML = '';
+      $('rpt-pur-empty').classList.remove('hidden');
+    }
+
+    // Por proveedor
+    if (d.bySupplier.length) {
+      $('rpt-pur-by-supplier-tbody').innerHTML = d.bySupplier.map((s, i) => `
+        <tr>
+          <td>${esc(s.supplier_name)}</td>
+          <td class="text-right">${s.qty}</td>
+          <td class="text-right">${fmtMoney(s.total)}</td>
+        </tr>`).join('');
+      $('rpt-pur-by-supplier-empty').classList.add('hidden');
+    } else {
+      $('rpt-pur-by-supplier-tbody').innerHTML = '';
+      $('rpt-pur-by-supplier-empty').classList.remove('hidden');
+    }
+
+    // Por producto
+    if (d.byProduct.length) {
+      $('rpt-pur-by-product-tbody').innerHTML = d.byProduct.map(p => `
+        <tr>
+          <td>${esc(p.product_name)}</td>
+          <td class="text-right">${p.total_qty % 1 === 0 ? p.total_qty : p.total_qty.toFixed(2)}</td>
+          <td class="text-right">${fmtMoney(p.total_amount)}</td>
+        </tr>`).join('');
+      $('rpt-pur-by-product-empty').classList.add('hidden');
+    } else {
+      $('rpt-pur-by-product-tbody').innerHTML = '';
+      $('rpt-pur-by-product-empty').classList.remove('hidden');
+    }
+  } catch (err) { console.error('Error reporte compras:', err.message); }
+}
+
+// Inicializar fechas del reporte de compras (mes actual)
+{
+  const now = new Date();
+  const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
+  const from = `${y}-${m}-01`;
+  const to   = new Date(y, now.getMonth()+1, 0).toISOString().slice(0,10);
+  if ($('rpt-pur-from')) $('rpt-pur-from').value = from;
+  if ($('rpt-pur-to'))   $('rpt-pur-to').value   = to;
+}
+
+$('btn-rpt-pur-filter').addEventListener('click', () => {
+  loadPurchasesReport($('rpt-pur-from').value, $('rpt-pur-to').value);
+});
+$('btn-rpt-pur-reset').addEventListener('click', () => {
+  $('rpt-pur-from').value = '';
+  $('rpt-pur-to').value = '';
+  loadPurchasesReport();
+});
+$('btn-rpt-pur-excel').addEventListener('click', () => {
+  const from = $('rpt-pur-from').value;
+  const to   = $('rpt-pur-to').value;
+  const params = [];
+  if (from) params.push(`from=${from}`);
+  if (to)   params.push(`to=${to}`);
+  window.location.href = '/api/reports/purchases/excel' + (params.length ? '?' + params.join('&') : '');
+});
+
 /* ================================================================ CUSTOMERS */
 function showClientsSubview(view) {
   $('clients-list-view').classList.toggle('hidden', view !== 'list');
@@ -1132,37 +1972,55 @@ function showClientsSubview(view) {
   $('clients-account-view').classList.toggle('hidden', view !== 'account');
 }
 
+let _allClients = [];
+
 async function loadClients() {
   try {
-    const clients = await api('GET', '/customers');
-    renderClients(clients);
+    const qs = state.clientsProduct ? `?product=${encodeURIComponent(state.clientsProduct)}` : '';
+    _allClients = await api('GET', `/customers${qs}`);
+    const q = ($('client-search') || {}).value || '';
+    renderClients(_allClients, q);
   } catch (err) { toast(err.message, 'error'); }
 }
 
-function renderClients(clients) {
-  const tbody = $('clients-tbody');
-  const noEl  = $('no-clients');
-  $('clients-count').textContent = `${clients.length} cliente${clients.length !== 1 ? 's' : ''}`;
+let _clientsProductTimer = null;
+function applyClientsProductFilter() {
+  $('btn-clients-product-clear').style.display = $('clients-product-filter').value ? '' : 'none';
+  state.clientsProduct = $('clients-product-filter').value.trim();
+  clearTimeout(_clientsProductTimer);
+  _clientsProductTimer = setTimeout(loadClients, 250);
+}
+if ($('clients-product-filter')) {
+  $('clients-product-filter').addEventListener('input', applyClientsProductFilter);
+  $('btn-clients-product-clear').addEventListener('click', () => {
+    $('clients-product-filter').value = '';
+    $('btn-clients-product-clear').style.display = 'none';
+    state.clientsProduct = '';
+    loadClients();
+  });
+}
 
-  if (!clients.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
-  noEl.classList.add('hidden');
+// Saldo deudor: mismo campo `balance` que ya devuelve GET /api/customers
+// (Total Facturado - Total Pagado + notas), la misma fuente que usa la ficha
+// individual (openAccountView) — no se recalcula acá.
+function balanceBadge(bal) {
+  const b = bal || 0;
+  if (b > 0.005)  return `<span style="color:var(--danger);font-weight:600">${fmtMoney(b)}</span>`;
+  if (b < -0.005) return `<span style="color:var(--success-txt);font-weight:600">A favor ${fmtMoney(-b)}</span>`;
+  return `<span style="color:var(--text-muted)">Sin deuda</span>`;
+}
 
-  tbody.innerHTML = clients.map(c => {
-    const bal = c.balance || 0;
-    const balFmt = bal > 0.005
-      ? `<span style="color:var(--danger);font-weight:600">${fmtMoney(bal)}</span>`
-      : bal < -0.005
-        ? `<span style="color:var(--success-txt);font-weight:600">A favor ${fmtMoney(-bal)}</span>`
-        : `<span style="color:var(--text-muted)">Sin deuda</span>`;
-    return `<tr>
-      <td style="font-weight:500">${esc(c.name)}</td>
-      <td style="color:var(--text-muted);font-size:.85rem;font-family:monospace">${esc(formatCuit(c.cuit) || '—')}</td>
-      <td style="color:var(--text-muted)">${esc(c.phone || '—')}</td>
-      <td style="color:var(--text-muted);font-size:.85rem">${esc(c.email || '—')}</td>
-      ${isAdmin() ? `<td style="color:var(--text-muted);font-size:.83rem">${esc(c.vendor_name || '—')}</td>` : ''}
-      <td style="color:var(--text-muted);font-size:.85rem">${esc(c.address || '—')}</td>
-      <td style="color:var(--text-muted);font-size:.85rem">${esc([c.localidad, c.provincia].filter(Boolean).join(', ') || '—')}</td>
-      <td class="text-right">${balFmt}</td>
+function clientRowHtml(c) {
+  const localidadProv = [c.localidad, c.provincia].filter(Boolean).join(', ');
+  return `<tr data-client-id="${c.id}">
+      <td style="font-weight:500" title="${esc(c.name)}">${esc(c.name)}</td>
+      <td style="color:var(--text-muted);font-size:.85rem;font-family:monospace" title="${esc(formatCuit(c.cuit) || '')}">${esc(formatCuit(c.cuit) || '—')}</td>
+      <td style="color:var(--text-muted)" title="${esc(c.phone || '')}">${esc(c.phone || '—')}</td>
+      <td style="color:var(--text-muted);font-size:.85rem" title="${esc(c.email || '')}">${esc(c.email || '—')}</td>
+      ${isAdminLike() ? `<td style="color:var(--text-muted);font-size:.83rem" title="${esc(c.vendor_name || '')}">${esc(c.vendor_name || '—')}</td>` : ''}
+      <td style="color:var(--text-muted);font-size:.85rem" title="${esc(c.address || '')}">${esc(c.address || '—')}</td>
+      <td style="color:var(--text-muted);font-size:.85rem" title="${esc(localidadProv)}">${esc(localidadProv || '—')}</td>
+      <td class="text-right">${balanceBadge(c.balance)}</td>
       <td class="text-center" style="white-space:nowrap;position:sticky;right:0;background:var(--white);box-shadow:-2px 0 4px rgba(0,0,0,0.06)">
         <button class="btn-icon" onclick="openAccountView(${c.id})" title="Cuenta corriente">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
@@ -1178,49 +2036,272 @@ function renderClients(clients) {
         </button>
       </td>
     </tr>`;
-  }).join('');
 }
+
+function clientGroupHeaderRow(label, count) {
+  const colspan = isAdminLike() ? 9 : 8;
+  return `<tr class="client-group-header">
+    <td colspan="${colspan}" style="background:var(--bg-secondary);font-weight:700;padding:8px 14px">
+      ${esc(label)} <span style="font-weight:400;color:var(--text-muted);font-size:.82rem">(${count} cliente${count !== 1 ? 's' : ''})</span>
+    </td>
+  </tr>`;
+}
+
+function clientGroupSubtotalRow(subtotal) {
+  const colspanLeft = (isAdminLike() ? 7 : 6);
+  return `<tr class="client-group-subtotal" style="background:var(--bg-secondary)">
+    <td colspan="${colspanLeft}" style="text-align:right;color:var(--text-muted);font-size:.82rem;font-weight:600">Subtotal</td>
+    <td class="text-right" style="font-weight:700">${balanceBadge(subtotal)}</td>
+    <td style="position:sticky;right:0;background:var(--bg-secondary)"></td>
+  </tr>`;
+}
+
+function populateClientsVendorFilter(clients) {
+  const sel = $('clients-vendor-filter');
+  const current = sel.value;
+  const vendors = [];
+  const seen = new Set();
+  clients.forEach(c => {
+    if (c.vendor_id && !seen.has(c.vendor_id)) { seen.add(c.vendor_id); vendors.push({ id: c.vendor_id, name: c.vendor_name || `Vendedor #${c.vendor_id}` }); }
+  });
+  vendors.sort((a, b) => a.name.localeCompare(b.name));
+  sel.innerHTML = '<option value="">— Elegí un vendedor —</option>'
+    + vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+  if (vendors.some(v => String(v.id) === String(current))) sel.value = current;
+}
+
+// Filtro de búsqueda + modo (Todos / Vendedor específico / Agrupado) — ÚNICA
+// fuente de verdad para qué clientes están "en pantalla" ahora mismo. La
+// reusan tanto renderClients() como la exportación a PDF, para que el PDF
+// nunca pueda quedar desincronizado de lo que el usuario está viendo.
+function getClientsViewState(clients, searchQuery) {
+  const q = (searchQuery || '').toLowerCase().trim();
+  let filtered = q
+    ? clients.filter(c => [c.name, c.cuit, c.localidad, c.provincia, c.email, c.phone]
+        .some(v => v && v.toLowerCase().includes(q)))
+    : clients;
+
+  const mode = isAdminLike() ? state.clientsViewMode : 'all';
+  const vendorModeNeedsPick = mode === 'vendor' && !state.clientsVendorId;
+  if (mode === 'vendor' && state.clientsVendorId) {
+    filtered = filtered.filter(c => String(c.vendor_id) === String(state.clientsVendorId));
+  } else if (vendorModeNeedsPick) {
+    filtered = [];
+  }
+
+  // Con deuda / Sin deuda — sobre c.balance, que ya viene calculado por el
+  // backend (deuda total del cliente, o saldo pendiente de un producto
+  // puntual si hay filtro de producto activo). Se aplica último, sobre lo
+  // que ya quedó filtrado por búsqueda/vendedor.
+  if (state.clientsDebtFilter === 'debt')        filtered = filtered.filter(c => (c.balance || 0) > 0.005);
+  else if (state.clientsDebtFilter === 'nodebt') filtered = filtered.filter(c => (c.balance || 0) <= 0.005);
+
+  return { filtered, mode, vendorModeNeedsPick, q };
+}
+
+// Agrupa por vendedor (mismo criterio que el modo "grouped" en pantalla) —
+// también reutilizado por la exportación a PDF.
+function groupClientsByVendor(filtered) {
+  const groups = new Map(); // vendor_id (or '' for sin asignar) -> { name, clients }
+  filtered.forEach(c => {
+    const key = c.vendor_id || '';
+    if (!groups.has(key)) groups.set(key, { name: c.vendor_name || 'Sin vendedor asignado', clients: [] });
+    groups.get(key).clients.push(c);
+  });
+  return [...groups.entries()]
+    .sort((a, b) => {
+      if (a[0] === '') return 1;
+      if (b[0] === '') return -1;
+      return a[1].name.localeCompare(b[1].name);
+    })
+    .map(([, g]) => g);
+}
+
+function renderClients(clients, searchQuery) {
+  const tbody = $('clients-tbody');
+  const noEl  = $('no-clients');
+  const noMsg = $('no-clients-msg');
+
+  populateClientsVendorFilter(clients);
+
+  const { filtered, mode, vendorModeNeedsPick, q } = getClientsViewState(clients, searchQuery);
+
+  $('clients-count').textContent = vendorModeNeedsPick ? '' : `${filtered.length} cliente${filtered.length !== 1 ? 's' : ''}`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = '';
+    const debtSuffix = state.clientsDebtFilter === 'debt' ? ' con deuda' : state.clientsDebtFilter === 'nodebt' ? ' sin deuda' : '';
+    if (noMsg) noMsg.textContent = vendorModeNeedsPick
+      ? 'Elegí un vendedor para ver sus clientes'
+      : (q ? 'No se encontraron clientes'
+           : (mode === 'vendor' ? `Este vendedor no tiene clientes${debtSuffix}`
+             : (debtSuffix ? `No hay clientes${debtSuffix}` : 'No hay clientes cargados todavía')));
+    noEl.classList.remove('hidden');
+    return;
+  }
+  noEl.classList.add('hidden');
+
+  if (mode === 'grouped') {
+    tbody.innerHTML = groupClientsByVendor(filtered).map(g => {
+      const subtotal = g.clients.reduce((s, c) => s + (c.balance || 0), 0);
+      return clientGroupHeaderRow(g.name, g.clients.length)
+        + g.clients.map(clientRowHtml).join('')
+        + clientGroupSubtotalRow(subtotal);
+    }).join('');
+  } else {
+    tbody.innerHTML = filtered.map(clientRowHtml).join('');
+  }
+}
+
+$('clients-view-mode').addEventListener('change', () => {
+  state.clientsViewMode = $('clients-view-mode').value;
+  $('clients-vendor-filter').classList.toggle('hidden', state.clientsViewMode !== 'vendor');
+  renderClients(_allClients, ($('client-search') || {}).value || '');
+});
+$('clients-vendor-filter').addEventListener('change', () => {
+  state.clientsVendorId = $('clients-vendor-filter').value;
+  renderClients(_allClients, ($('client-search') || {}).value || '');
+});
+$('clients-debt-filter').addEventListener('change', () => {
+  state.clientsDebtFilter = $('clients-debt-filter').value;
+  renderClients(_allClients, ($('client-search') || {}).value || '');
+});
+
+// Exporta EXACTAMENTE lo que el usuario está viendo: reusa getClientsViewState()/
+// groupClientsByVendor() (misma lógica que renderClients()) para decidir QUÉ
+// exportar, y le pasa ese resultado ya armado a POST /api/customers/export-pdf,
+// que lo dibuja con PDFKit en el servidor (no HTML + window.print()). El
+// diálogo de impresión del navegador puede "recordar" Portrait de una
+// impresión anterior e ignorar el @page CSS — PDFKit no depende de eso, así
+// que el PDF sale siempre horizontal sin importar qué filtro esté activo.
+$('btn-clients-export-pdf').addEventListener('click', async () => {
+  if (!_allClients.length) { toast('No hay clientes para exportar', 'error'); return; }
+
+  const searchQuery = ($('client-search') || {}).value || '';
+  const { filtered, mode, vendorModeNeedsPick, q } = getClientsViewState(_allClients, searchQuery);
+
+  if (vendorModeNeedsPick) { toast('Elegí un vendedor para exportar', 'error'); return; }
+  if (!filtered.length) { toast('No hay clientes para exportar con este filtro', 'error'); return; }
+
+  const groups = mode === 'grouped'
+    ? groupClientsByVendor(filtered)
+    : [{ name: null, clients: filtered }];
+
+  const filterParts = [];
+  if (q) filterParts.push(`Búsqueda: "${searchQuery.trim()}"`);
+  if (state.clientsProduct) filterParts.push(`Producto: ${state.clientsProduct}`);
+  if (mode === 'vendor' && state.clientsVendorId) filterParts.push(`Vendedor: ${filtered[0].vendor_name || '—'}`);
+  else if (mode === 'grouped') filterParts.push('Agrupado por vendedor');
+  if (state.clientsDebtFilter === 'debt') filterParts.push('Con deuda');
+  else if (state.clientsDebtFilter === 'nodebt') filterParts.push('Sin deuda');
+  const subtitle = filterParts.join(' · ');
+
+  const btn = $('btn-clients-export-pdf');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/customers/export-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subtitle, groups }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'No se pudo generar el PDF');
+    }
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+$('btn-clients-export-excel').addEventListener('click', () => {
+  if (!_allClients.length) { toast('No hay clientes para exportar', 'error'); return; }
+  const headers = ['Nombre','CUIT','Teléfono','Email','Dirección','Localidad','Provincia','Vendedor'];
+  const data = [headers, ..._allClients.map(c => [
+    c.name, formatCuit(c.cuit)||'', c.phone||'', c.email||'', c.address||'', c.localidad||'', c.provincia||'', c.vendor_name||''
+  ])];
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [30,16,14,28,30,20,16,18].map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+  const fecha = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  XLSX.writeFile(wb, `clientes_${fecha}.xlsx`);
+});
 
 $('btn-new-client').addEventListener('click', () => openClientForm(null));
 $('btn-clients-back').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
 $('btn-client-cancel').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
 
+if ($('client-search')) {
+  $('client-search').addEventListener('input', e => renderClients(_allClients, e.target.value));
+}
+
 window.openClientForm = function(id) {
   state.editingClientId = id || null;
   $('client-form-title').textContent = id ? 'Editar Cliente' : 'Nuevo Cliente';
-  $('inp-client-name').value    = '';
+  $('inp-client-name').value       = '';
   $('inp-client-cuit').value       = '';
   $('inp-client-phone').value      = '';
   $('inp-client-email').value      = '';
   $('inp-client-address').value    = '';
   $('inp-client-localidad').value  = '';
   $('inp-client-provincia').value  = '';
-  $('inp-client-notes').value   = '';
-  $('inp-client-iva').value     = 'Consumidor Final';
-  $('lbl-client-cuit').className = id ? 'label' : 'label required';
+  $('inp-client-notes').value      = '';
+  $('inp-client-iva').value        = 'Consumidor Final';
+  if ($('inp-client-vendor')) $('inp-client-vendor').value = '';
 
-  if (id) {
+  if (isAdmin()) {
+    api('GET', '/users').then(users => {
+      const sel = $('inp-client-vendor');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">— Seleccioná un vendedor —</option>' +
+        users.filter(u => u.active)
+             .map(u => `<option value="${u.id}">${esc(u.full_name || u.username)}</option>`)
+             .join('');
+      if (id) {
+        api('GET', '/customers').then(list => {
+          const c = list.find(x => x.id === id);
+          if (c) {
+            $('inp-client-name').value      = c.name;
+            $('inp-client-cuit').value      = formatCuit(c.cuit);
+            $('inp-client-phone').value     = c.phone || '';
+            $('inp-client-email').value     = c.email || '';
+            $('inp-client-address').value   = c.address || '';
+            $('inp-client-localidad').value = c.localidad || '';
+            $('inp-client-provincia').value = c.provincia || '';
+            $('inp-client-notes').value     = c.notes || '';
+            $('inp-client-iva').value       = c.iva_condition || 'Consumidor Final';
+            sel.value = c.vendor_id || '';
+          }
+        });
+      }
+    });
+  } else if (id) {
     api('GET', '/customers').then(list => {
       const c = list.find(x => x.id === id);
       if (c) {
-        $('inp-client-name').value    = c.name;
-        $('inp-client-cuit').value    = formatCuit(c.cuit);
-        $('inp-client-phone').value      = c.phone || '';
-        $('inp-client-email').value      = c.email || '';
-        $('inp-client-address').value    = c.address || '';
-        $('inp-client-localidad').value  = c.localidad || '';
-        $('inp-client-provincia').value  = c.provincia || '';
-        $('inp-client-notes').value   = c.notes || '';
-        $('inp-client-iva').value     = c.iva_condition || 'Consumidor Final';
+        $('inp-client-name').value      = c.name;
+        $('inp-client-cuit').value      = formatCuit(c.cuit);
+        $('inp-client-phone').value     = c.phone || '';
+        $('inp-client-email').value     = c.email || '';
+        $('inp-client-address').value   = c.address || '';
+        $('inp-client-localidad').value = c.localidad || '';
+        $('inp-client-provincia').value = c.provincia || '';
+        $('inp-client-notes').value     = c.notes || '';
+        $('inp-client-iva').value       = c.iva_condition || 'Consumidor Final';
       }
     });
   }
+
   showClientsSubview('form');
   setTimeout(() => $('inp-client-name').focus(), 50);
 };
 
 /* ================================================================ CUENTA CORRIENTE */
 let _accountCustomerId = null;
+let _cobroOrderId  = null; // seteado cuando el modal de pago se abre desde el "Cobro" de un pedido puntual
+let _cobroRemitos  = null; // remitos con saldo pendiente de ese pedido, para armar las allocations
+let _cobroPendiente = 0;
 
 window.openAccountView = async function(customerId) {
   _accountCustomerId = customerId;
@@ -1229,6 +2310,16 @@ window.openAccountView = async function(customerId) {
 };
 
 $('btn-account-back').addEventListener('click', () => { showClientsSubview('list'); loadClients(); });
+
+$('btn-composicion-saldos').addEventListener('click', () => {
+  if (!_accountCustomerId) return;
+  const a = document.createElement('a');
+  a.href = `/api/customers/${_accountCustomerId}/composicion-saldos`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+});
 
 async function loadAccount() {
   if (!_accountCustomerId) return;
@@ -1283,6 +2374,11 @@ async function loadAccount() {
           <td><span class="badge badge-info">${methodLabel[p.method] || p.method}</span></td>
           <td style="color:var(--text-muted);font-size:.85rem">${esc(detail || '—')}</td>
           <td class="text-right" style="font-weight:600;color:var(--success-txt)">${fmtMoney(p.amount)}</td>
+          <td class="text-center">
+            <a href="/api/payments/${p.id}/recibo" target="_blank" class="btn-icon" title="Recibo PDF">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </a>
+          </td>
           <td class="text-center admin-only">
             <button class="btn-icon btn-delete" onclick="deletePayment(${p.id})" title="Eliminar pago">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
@@ -1344,51 +2440,225 @@ function updatePaymentFields() {
 }
 $('inp-payment-method').addEventListener('change', updatePaymentFields);
 
-$('btn-new-payment').addEventListener('click', () => {
+function paymentAllocTotal() {
+  let t = 0;
+  document.querySelectorAll('.payment-alloc-row').forEach(row => {
+    if (row.querySelector('.payment-alloc-chk').checked)
+      t += parseFloat(row.querySelector('.payment-alloc-amt').value) || 0;
+  });
+  return Math.round(t * 100) / 100;
+}
+function updatePaymentAllocTotal() {
+  const t = paymentAllocTotal();
+  $('payment-alloc-total').textContent = fmtMoney(t);
+  if (t > 0 && !$('inp-payment-amount').dataset.manual)
+    $('inp-payment-amount').value = t.toFixed(2);
+}
+
+$('inp-payment-amount').addEventListener('input', () => {
+  $('inp-payment-amount').dataset.manual = '1';
+});
+
+async function openPaymentModal() {
   $('inp-payment-method').value    = 'efectivo';
   $('inp-payment-amount').value    = '';
-  $('inp-payment-date').value      = '';
+  $('inp-payment-amount').readOnly = false;
+  $('inp-payment-amount').removeAttribute('max');
+  $('inp-payment-amount').placeholder = '0.00';
+  delete $('inp-payment-amount').dataset.manual;
+  $('inp-payment-date').value      = new Date().toISOString().slice(0,10);
   $('inp-payment-reference').value = '';
   $('inp-payment-notes').value     = '';
-  $('inp-payment-cheque-bank').value   = '';
-  $('inp-payment-cheque-number').value = '';
-  $('inp-payment-cheque-due').value    = '';
+  $('inp-payment-cheque-bank').value    = '';
+  $('inp-payment-cheque-number').value  = '';
+  $('inp-payment-cheque-due').value     = '';
+  $('inp-payment-cuit-librador').value  = '';
   updatePaymentFields();
-  populateBankSelect($('inp-payment-bank-account'));
+  await populateBankSelect($('inp-payment-bank-account'));
+
+  // Cargar remitos pendientes (no aplica cuando se cobra puntualmente un pedido,
+  // ahí las allocations se arman automáticamente contra los remitos de ESE pedido)
+  const remitosSection = $('payment-remitos-section');
+  if (_accountCustomerId && !_cobroOrderId) {
+    try {
+      const pending = await api('GET', `/customers/${_accountCustomerId}/pending-remitos`);
+      if (pending.length) {
+        $('payment-remitos-list').innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+            <thead>
+              <tr style="background:var(--bg-secondary);position:sticky;top:0">
+                <th style="padding:6px 8px;text-align:center;width:32px"></th>
+                <th style="padding:6px 8px;text-align:left">Remito</th>
+                <th style="padding:6px 8px;text-align:left">Pedido / Fecha</th>
+                <th style="padding:6px 8px;text-align:right">Saldo</th>
+                <th style="padding:6px 8px;text-align:right;width:120px">Asignar ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pending.map(r => `
+                <tr class="payment-alloc-row" data-id="${r.id}" data-balance="${r.balance}">
+                  <td style="padding:5px 8px;text-align:center">
+                    <input type="checkbox" class="payment-alloc-chk">
+                  </td>
+                  <td style="padding:5px 8px;font-weight:600">${esc(r.remito_number)}</td>
+                  <td style="padding:5px 8px;color:var(--text-muted)">${esc(r.order_number)}<br><small>${fmtDate(r.created_at)}</small></td>
+                  <td style="padding:5px 8px;text-align:right">${fmtMoney(r.balance)}</td>
+                  <td style="padding:5px 8px">
+                    <input type="number" class="input payment-alloc-amt" value="${r.balance.toFixed(2)}"
+                      min="0.01" max="${r.balance.toFixed(2)}" step="0.01"
+                      style="width:100%;padding:3px 6px;font-size:.82rem" disabled>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+        $('payment-alloc-total').textContent = fmtMoney(0);
+        $('payment-remitos-list').querySelectorAll('.payment-alloc-row').forEach(row => {
+          const chk = row.querySelector('.payment-alloc-chk');
+          const amt = row.querySelector('.payment-alloc-amt');
+          chk.addEventListener('change', () => { amt.disabled = !chk.checked; updatePaymentAllocTotal(); });
+          amt.addEventListener('input', () => { delete $('inp-payment-amount').dataset.manual; updatePaymentAllocTotal(); });
+        });
+        remitosSection.classList.remove('hidden');
+      } else {
+        remitosSection.classList.add('hidden');
+      }
+    } catch(e) { remitosSection.classList.add('hidden'); }
+  } else {
+    remitosSection.classList.add('hidden');
+  }
+
   $('payment-modal').classList.remove('hidden');
-});
-$('btn-payment-cancel').addEventListener('click', () => $('payment-modal').classList.add('hidden'));
-$('payment-modal').addEventListener('click', e => { if (e.target === $('payment-modal')) $('payment-modal').classList.add('hidden'); });
+}
+$('btn-new-payment').addEventListener('click', openPaymentModal);
+
+function closePaymentModal() {
+  $('payment-modal').classList.add('hidden');
+  if (_cobroOrderId) { _cobroOrderId = null; _cobroRemitos = null; loadOrders(); }
+}
+$('btn-payment-cancel').addEventListener('click', closePaymentModal);
+$('payment-modal').addEventListener('click', e => { if (e.target === $('payment-modal')) closePaymentModal(); });
+
+// ── "Cobro" de un pedido puntual (lista de pedidos) ───────────────────────────
+// Reutiliza el modal de "Registrar pago" de siempre: precarga el monto y, al
+// confirmar, arma las allocations contra los remitos de ESE pedido para que
+// POST /api/payments las vincule y genere el asiento — misma lógica de siempre,
+// sólo que apuntada a un pedido específico en vez de a la cuenta corriente general.
+async function openCobroModal(orderId, mode) {
+  try {
+    const info = await api('GET', `/orders/${orderId}/cobro-info`);
+    const pendientes = (info.remitos || []).filter(r => r.balance > 0.005);
+    if (!pendientes.length) { toast('Este pedido no tiene remitos con saldo pendiente', 'error'); return; }
+
+    _accountCustomerId = info.customer_id;
+    _cobroOrderId   = orderId;
+    _cobroRemitos   = pendientes;
+    _cobroPendiente = info.pendiente;
+
+    await openPaymentModal();
+    const amtInp = $('inp-payment-amount');
+    if (mode === 'total') {
+      amtInp.value = info.pendiente.toFixed(2);
+      amtInp.readOnly = true;
+      amtInp.dataset.manual = '1';
+    } else {
+      amtInp.value = '';
+      amtInp.max = info.pendiente.toFixed(2);
+      amtInp.placeholder = `Máx. ${fmtMoney(info.pendiente)}`;
+    }
+    $('inp-payment-reference').value = `Pedido #${info.order_number}`;
+    $('inp-payment-notes').value = mode === 'total'
+      ? `Cobro total pedido #${info.order_number}`
+      : `Cobro parcial pedido #${info.order_number}`;
+  } catch (err) { toast(err.message, 'error'); }
+}
 
 $('btn-payment-confirm').addEventListener('click', async () => {
-  const btn  = $('btn-payment-confirm');
+  const btn    = $('btn-payment-confirm');
   const method = $('inp-payment-method').value;
   btn.disabled = true;
   try {
+    // Recoger asignaciones a remitos
+    const allocations = [];
+    document.querySelectorAll('.payment-alloc-row').forEach(row => {
+      if (row.querySelector('.payment-alloc-chk').checked) {
+        const amt = parseFloat(row.querySelector('.payment-alloc-amt').value);
+        if (amt > 0) allocations.push({ remito_id: Number(row.dataset.id), amount: amt });
+      }
+    });
+
+    const amount = parseFloat($('inp-payment-amount').value);
+    if (!amount || amount <= 0) { toast('Ingresá un monto válido', 'error'); btn.disabled = false; return; }
+
+    const payDate = $('inp-payment-date').value;
+    if (!payDate) { toast('La fecha de cobro es obligatoria', 'error'); btn.disabled = false; return; }
+
+    // Validar total asignado vs monto del pago
+    if (allocations.length) {
+      const allocTotal = allocations.reduce((s, a) => s + a.amount, 0);
+      if (Math.abs(allocTotal - amount) > 0.02) {
+        toast(`El total asignado (${fmtMoney(allocTotal)}) no coincide con el monto del pago (${fmtMoney(amount)})`, 'error');
+        btn.disabled = false; return;
+      }
+    }
+
+    // Cobro de un pedido puntual: armar las allocations automáticamente contra
+    // los remitos con saldo de ESE pedido (los más viejos primero).
+    let cobroAllocations = null;
+    if (_cobroOrderId) {
+      let remaining = Math.round(amount * 100) / 100;
+      cobroAllocations = [];
+      for (const r of _cobroRemitos) {
+        if (remaining <= 0.004) break;
+        const take = Math.min(r.balance, remaining);
+        cobroAllocations.push({ remito_id: r.id, amount: Math.round(take * 100) / 100 });
+        remaining = Math.round((remaining - take) * 100) / 100;
+      }
+      if (remaining > 0.02) {
+        toast(`El monto ingresado (${fmtMoney(amount)}) supera el saldo pendiente del pedido (${fmtMoney(_cobroPendiente)})`, 'error');
+        btn.disabled = false; return;
+      }
+    }
+
     const payload = {
       customer_id:  _accountCustomerId,
-      amount:       parseFloat($('inp-payment-amount').value),
+      amount,
       method,
-      payment_date: $('inp-payment-date').value || null,
+      payment_date: payDate,
       notes:        $('inp-payment-notes').value.trim(),
       reference:    $('inp-payment-reference').value.trim(),
+      allocations:  cobroAllocations || (allocations.length ? allocations : undefined),
     };
     if (['transferencia','tarjeta'].includes(method)) {
       payload.bank_account_id = $('inp-payment-bank-account').value;
       if (!payload.bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); btn.disabled = false; return; }
     }
     if (method === 'cheque') {
-      payload.cheque_bank    = $('inp-payment-cheque-bank').value.trim();
-      payload.cheque_number  = $('inp-payment-cheque-number').value.trim();
-      payload.cheque_due_date= $('inp-payment-cheque-due').value;
+      payload.cheque_bank     = $('inp-payment-cheque-bank').value.trim();
+      payload.cheque_number   = $('inp-payment-cheque-number').value.trim();
+      payload.cheque_due_date = $('inp-payment-cheque-due').value;
       if (!payload.cheque_bank || !payload.cheque_number || !payload.cheque_due_date) {
         toast('Completá los datos del cheque', 'error'); btn.disabled = false; return;
       }
+      const cuit = $('inp-payment-cuit-librador').value.trim();
+      if (cuit) {
+        const cuitClean = cuit.replace(/-/g, '');
+        if (!/^\d{11}$/.test(cuitClean)) {
+          toast('CUIT inválido — usá el formato XX-XXXXXXXX-X o 11 dígitos', 'error'); btn.disabled = false; return;
+        }
+        payload.cuit_librador = cuit;
+      }
     }
-    await api('POST', '/payments', payload);
+    const created = await api('POST', '/payments', payload);
     $('payment-modal').classList.add('hidden');
-    toast('Pago registrado', 'success');
-    loadAccount();
+    if (_cobroOrderId) {
+      _cobroOrderId = null;
+      _cobroRemitos = null;
+      toast('Cobro registrado', 'success');
+      loadOrders();
+    } else {
+      toast('Pago registrado', 'success');
+      loadAccount();
+    }
   } catch (err) { toast(err.message, 'error'); }
   finally { btn.disabled = false; }
 });
@@ -1409,27 +2679,44 @@ window.newOrderForClient = function(clientName) {
 
 $('client-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const name = $('inp-client-name').value.trim();
-  if (!name) { toast('El nombre es requerido', 'error'); $('inp-client-name').focus(); return; }
+  const isNew = !state.editingClientId;
+  const name     = $('inp-client-name').value.trim();
+  const phone    = $('inp-client-phone').value.trim();
+  const email    = $('inp-client-email').value.trim();
+  const address  = $('inp-client-address').value.trim();
+  const localidad = $('inp-client-localidad').value.trim();
+  const provincia = $('inp-client-provincia').value;
+  const vendorVal = $('inp-client-vendor') ? $('inp-client-vendor').value : '';
+
+  if (!name)     { toast('El nombre es requerido', 'error');     $('inp-client-name').focus();     return; }
+
   const rawCuit = $('inp-client-cuit').value.trim();
   const normalizedCuit = rawCuit.replace(/\D/g, '');
-  if (!state.editingClientId) {
-    if (!normalizedCuit) { toast('El CUIT es requerido', 'error'); $('inp-client-cuit').focus(); return; }
-    if (normalizedCuit.length !== 11) { toast('El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)', 'error'); $('inp-client-cuit').focus(); return; }
+  if (isNew) {
+    if (!normalizedCuit)            { toast('El CUIT es requerido', 'error');                                          $('inp-client-cuit').focus();     return; }
+    if (normalizedCuit.length !== 11) { toast('El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)', 'error');     $('inp-client-cuit').focus();     return; }
+    if (!phone)    { toast('El teléfono es requerido', 'error');    $('inp-client-phone').focus();    return; }
+    if (!email)    { toast('El email es requerido', 'error');        $('inp-client-email').focus();    return; }
+    if (!address)  { toast('La dirección es requerida', 'error');    $('inp-client-address').focus();  return; }
+    if (!localidad){ toast('La localidad es requerida', 'error');    $('inp-client-localidad').focus();return; }
+    if (!provincia){ toast('La provincia es requerida', 'error');    $('inp-client-provincia').focus();return; }
+    if (isAdmin() && !vendorVal) { toast('El vendedor es requerido', 'error'); $('inp-client-vendor').focus(); return; }
   } else if (rawCuit && normalizedCuit.length !== 11) {
     toast('El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)', 'error'); $('inp-client-cuit').focus(); return;
   }
+
   const data = {
     name,
     cuit:          normalizedCuit || '',
-    phone:         $('inp-client-phone').value.trim(),
-    email:         $('inp-client-email').value.trim(),
-    address:       $('inp-client-address').value.trim(),
-    localidad:     $('inp-client-localidad').value.trim(),
-    provincia:     $('inp-client-provincia').value,
+    phone,
+    email,
+    address,
+    localidad,
+    provincia,
     notes:         $('inp-client-notes').value.trim(),
     iva_condition: $('inp-client-iva').value
   };
+  if (isAdmin() && $('inp-client-vendor')) data.vendor_id = vendorVal ? Number(vendorVal) : null;
   const btn = $('btn-client-save');
   btn.disabled = true;
   try {
@@ -1501,13 +2788,19 @@ function renderDeliveries(deliveries) {
   `).join('');
 }
 
-$('btn-register-delivery').addEventListener('click', openDeliveryModal);
+$('btn-register-delivery').addEventListener('click', () => openDeliveryModal());
 $('btn-delivery-cancel').addEventListener('click',  () => $('delivery-modal').classList.add('hidden'));
 $('delivery-modal').addEventListener('click', e => { if (e.target === $('delivery-modal')) $('delivery-modal').classList.add('hidden'); });
 
-async function openDeliveryModal() {
-  const orderId = state.editingOrderId;
+// orderId explícito → se puede abrir desde la Lista de Pedidos (acción "½ Entrega
+// parcial") sin necesidad de entrar al formulario de edición. Si no se pasa, usa
+// el pedido que está abierto en el formulario (comportamiento de siempre).
+let _deliveryModalOrderId = null;
+
+async function openDeliveryModal(orderId) {
+  orderId = orderId || state.editingOrderId;
   if (!orderId) return;
+  _deliveryModalOrderId = orderId;
 
   try {
     const [order, deliveries] = await Promise.all([
@@ -1564,7 +2857,7 @@ $('chk-delivery-complete').addEventListener('change', function () {
 });
 
 $('btn-delivery-confirm').addEventListener('click', async () => {
-  const orderId = state.editingOrderId;
+  const orderId = _deliveryModalOrderId || state.editingOrderId;
   if (!orderId) return;
 
   const items = [];
@@ -1584,17 +2877,56 @@ $('btn-delivery-confirm').addEventListener('click', async () => {
     });
     $('delivery-modal').classList.add('hidden');
     toast('Entrega registrada', 'success');
+    await afterDeliveryChange(orderId);
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
 
-    // Refrescar estado del pedido en el form
+// Refresca todo lo que puede haber cambiado tras registrar/cancelar una entrega:
+// la lista de pedidos (estado, Entrega, Cobro) y, si el formulario de edición de
+// ESE pedido está abierto, también su badge de estado y el historial de entregas.
+async function afterDeliveryChange(orderId) {
+  if (String(state.editingOrderId) === String(orderId)) {
     const updated = await api('GET', `/orders/${orderId}`);
     $('inp-status').value = updated.status;
     state.currentOrderStatus = updated.status;
     $('form-status-badge').innerHTML = statusBadge(updated.status);
     updateReturnButtonVisibility();
     loadDeliveries(orderId);
+  }
+  if (!$('list-view').classList.contains('hidden')) loadOrders();
+}
+
+// ── "✓ Entrega total" desde la Lista de Pedidos ───────────────────────────────
+// Sin modal: entrega automáticamente todo lo que falta (total del pedido menos
+// lo ya entregado en entregas previas) reutilizando el mismo POST /deliveries.
+async function quickDeliverTotal(orderId, orderNumber) {
+  try {
+    const [order, deliveries] = await Promise.all([
+      api('GET', `/orders/${orderId}`),
+      api('GET', `/orders/${orderId}/deliveries`)
+    ]);
+
+    const deliveredMap = {};
+    for (const d of deliveries) {
+      for (const di of d.items) {
+        deliveredMap[di.order_item_id] = (deliveredMap[di.order_item_id] || 0) + di.quantity_delivered;
+      }
+    }
+    const items = order.items
+      .map(it => ({ order_item_id: it.id, quantity_delivered: Math.max(0, it.quantity - (deliveredMap[it.id] || 0)) }))
+      .filter(it => it.quantity_delivered > 0.0000001);
+
+    if (!items.length) { toast('Este pedido ya está completamente entregado', 'error'); return; }
+
+    const ok = await confirm(`¿Confirmar la entrega total de lo que falta del pedido #${orderNumber}?`);
+    if (!ok) return;
+
+    await api('POST', `/orders/${orderId}/deliveries`, { notes: 'Entrega total', items });
+    toast('Entrega registrada', 'success');
+    await afterDeliveryChange(orderId);
   } catch (err) { toast(err.message, 'error'); }
-  finally { btn.disabled = false; }
-});
+}
 
 /* ================================================================ DEVOLUCIONES */
 function updateReturnButtonVisibility() {
@@ -1893,8 +3225,65 @@ $('btn-import-products-confirm').addEventListener('click', async () => {
       }))
     });
     $('import-products-modal').classList.add('hidden');
-    toast(`${result.imported} producto${result.imported !== 1 ? 's' : ''} importado${result.imported !== 1 ? 's' : ''} correctamente`, 'success');
+    const nuevos = result.imported || 0;
+    const actualizados = result.updated || 0;
+    const partes = [];
+    if (nuevos > 0) partes.push(`${nuevos} nuevo${nuevos !== 1 ? 's' : ''}`);
+    if (actualizados > 0) partes.push(`${actualizados} actualizado${actualizados !== 1 ? 's' : ''}`);
+    toast(partes.length ? partes.join(', ') + ' correctamente' : 'Sin cambios', 'success');
     if (result.errors && result.errors.length) console.warn('Errores de importación:', result.errors);
+    await loadProductCatalog();
+    loadCatalog();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+// ── Limpiar duplicados ──
+
+$('btn-dedup-products').addEventListener('click', async () => {
+  $('dedup-loading').classList.remove('hidden');
+  $('dedup-none').classList.add('hidden');
+  $('dedup-found').classList.add('hidden');
+  $('btn-dedup-confirm').classList.add('hidden');
+  $('dedup-products-modal').classList.remove('hidden');
+  try {
+    const groups = await api('GET', '/products/duplicates');
+    $('dedup-loading').classList.add('hidden');
+    if (!groups.length) {
+      $('dedup-none').classList.remove('hidden');
+    } else {
+      const totalRemove = groups.reduce((s, g) => s + g.qty - 1, 0);
+      $('dedup-tbody').innerHTML = groups.map(g => `
+        <tr>
+          <td>${esc(g.name)}</td>
+          <td class="text-right" style="color:var(--success)">${fmtMoney(g.min_price)}</td>
+          <td class="text-right" style="color:var(--danger)">${fmtMoney(g.max_price)}</td>
+          <td class="text-center">${g.qty}</td>
+        </tr>
+      `).join('');
+      $('dedup-summary').textContent = `Se eliminarán ${totalRemove} producto${totalRemove !== 1 ? 's' : ''} duplicado${totalRemove !== 1 ? 's' : ''} (en ${groups.length} grupo${groups.length !== 1 ? 's' : ''}).`;
+      $('dedup-found').classList.remove('hidden');
+      $('btn-dedup-confirm').classList.remove('hidden');
+    }
+  } catch (err) {
+    $('dedup-loading').classList.add('hidden');
+    toast(err.message, 'error');
+    $('dedup-products-modal').classList.add('hidden');
+  }
+});
+
+$('btn-dedup-cancel').addEventListener('click', () => $('dedup-products-modal').classList.add('hidden'));
+$('dedup-products-modal').addEventListener('click', e => {
+  if (e.target === $('dedup-products-modal')) $('dedup-products-modal').classList.add('hidden');
+});
+
+$('btn-dedup-confirm').addEventListener('click', async () => {
+  const btn = $('btn-dedup-confirm');
+  btn.disabled = true;
+  try {
+    const result = await api('POST', '/products/deduplicate');
+    $('dedup-products-modal').classList.add('hidden');
+    toast(`${result.removed} duplicado${result.removed !== 1 ? 's' : ''} eliminado${result.removed !== 1 ? 's' : ''} correctamente`, 'success');
     await loadProductCatalog();
     loadCatalog();
   } catch (err) { toast(err.message, 'error'); }
@@ -1919,12 +3308,10 @@ $('btn-import-clients-cancel').addEventListener('click', () => $('import-clients
 $('btn-clients-template').addEventListener('click', () => {
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([
-    ['nombre', 'telefono', 'email', 'direccion'],
-    ['Juan García', '11 1234-5678', 'juan@ejemplo.com', 'Av. Corrientes 1234, CABA'],
-    ['María López', '351 555-6789', 'maria@empresa.com', 'San Martín 567, Córdoba'],
-    ['Empresa ABC S.A.', '11 9876-5432', 'compras@abc.com', 'Callao 890, CABA']
+    ['nombre', 'cuit', 'telefono', 'email', 'direccion', 'localidad', 'provincia', 'vendedor'],
+    ['Juan García', '20-12345678-9', '11 1234-5678', 'juan@ejemplo.com', 'Av. Corrientes 1234', 'Buenos Aires', 'Buenos Aires', 'María Vendedora']
   ]);
-  ws['!cols'] = [{ wch: 32 }, { wch: 18 }, { wch: 30 }, { wch: 38 }];
+  ws['!cols'] = [{ wch: 32 }, { wch: 16 }, { wch: 16 }, { wch: 28 }, { wch: 28 }, { wch: 18 }, { wch: 16 }, { wch: 22 }];
   XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
   XLSX.writeFile(wb, 'plantilla-clientes.xlsx');
 });
@@ -2139,7 +3526,11 @@ function renderStock(products) {
   if (!products.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
   noEl.classList.add('hidden');
 
+  let totalStock = 0, totalPending = 0, totalDiff = 0;
   tbody.innerHTML = products.map(p => {
+    totalStock   += p.stock;
+    totalPending += p.pending_orders;
+    totalDiff    += p.difference;
     const diff    = p.difference;
     const diffFmt = diff < 0
       ? `<span style="color:var(--error);font-weight:700">${diff}</span>`
@@ -2155,12 +3546,24 @@ function renderStock(products) {
       <td class="text-center">${diffFmt}</td>
       <td>${lastUpd}</td>
       <td class="text-center">
-        <button class="btn-icon" onclick="openStockEditModal(${p.id},'${esc(p.name)}',${p.stock})" title="Ajustar stock">
+        <button class="btn-icon" onclick="openStockEditModal(${p.id},'${esc(p.name)}',${p.stock},${p.pending_extra||0})" title="Editar artículo">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
       </td>
     </tr>`;
   }).join('');
+
+  const tfoot = $('stock-tfoot');
+  if (tfoot) {
+    const diffColor = totalDiff < 0 ? 'var(--error)' : 'var(--success)';
+    tfoot.innerHTML = `<tr style="border-top:2px solid var(--border);font-weight:700;background:var(--surface)">
+      <td style="padding:10px 12px">TOTAL</td>
+      <td class="text-center">${totalStock}</td>
+      <td class="text-center">${totalPending}</td>
+      <td class="text-center" style="color:${diffColor}">${totalDiff >= 0 ? '+' : ''}${totalDiff}</td>
+      <td colspan="2"></td>
+    </tr>`;
+  }
 }
 
 // ── Ingreso modal (kept as-is) ────────────────────────────────────────────────
@@ -2201,17 +3604,43 @@ $('btn-ingreso-confirm').addEventListener('click', async () => {
   finally { btn.disabled = false; }
 });
 
-// ── Edit (ajuste manual) modal ────────────────────────────────────────────────
+// ── Edit modal (tabs: ajuste / ingreso / pedidos extra) ───────────────────────
 let _stockEditId = null;
+let _stockEditTab = 'ajuste';
 
-window.openStockEditModal = function(id, name, currentStock) {
+function stockEditSwitchTab(tab) {
+  _stockEditTab = tab;
+  ['ajuste','ingreso','pedidos'].forEach(t => {
+    $(`stock-edit-tab-${t}`).classList.toggle('hidden', t !== tab);
+  });
+  document.querySelectorAll('.stock-edit-tab').forEach(btn => {
+    const active = btn.dataset.tab === tab;
+    btn.style.borderBottomColor = active ? 'var(--primary)' : 'transparent';
+    btn.style.color = active ? 'var(--primary)' : 'var(--text-muted)';
+    btn.style.fontWeight = active ? '600' : '500';
+  });
+  setTimeout(() => {
+    if (tab === 'ajuste')   { $('inp-stock-edit-qty').focus(); $('inp-stock-edit-qty').select(); }
+    if (tab === 'ingreso')  { $('inp-stock-edit-ingreso-qty').focus(); }
+    if (tab === 'pedidos')  { $('inp-stock-edit-pending-extra').focus(); $('inp-stock-edit-pending-extra').select(); }
+  }, 50);
+}
+
+document.querySelectorAll('.stock-edit-tab').forEach(btn => {
+  btn.addEventListener('click', () => stockEditSwitchTab(btn.dataset.tab));
+});
+
+window.openStockEditModal = function(id, name, currentStock, pendingExtra) {
   _stockEditId = id;
   $('stock-edit-product-name').textContent = name;
   $('stock-edit-prev').textContent = `Stock actual: ${currentStock}`;
   $('inp-stock-edit-qty').value  = currentStock;
   $('inp-stock-edit-note').value = '';
+  $('inp-stock-edit-ingreso-qty').value  = '';
+  $('inp-stock-edit-ingreso-note').value = '';
+  $('inp-stock-edit-pending-extra').value = pendingExtra ?? 0;
   $('stock-edit-modal').classList.remove('hidden');
-  setTimeout(() => { $('inp-stock-edit-qty').focus(); $('inp-stock-edit-qty').select(); }, 50);
+  stockEditSwitchTab('ajuste');
 };
 
 $('btn-stock-edit-cancel').addEventListener('click', () => $('stock-edit-modal').classList.add('hidden'));
@@ -2219,15 +3648,28 @@ $('stock-edit-modal').addEventListener('click', e => { if (e.target === $('stock
 
 $('btn-stock-edit-save').addEventListener('click', async () => {
   if (!_stockEditId) return;
-  const quantity = parseFloat($('inp-stock-edit-qty').value);
-  const note     = $('inp-stock-edit-note').value.trim();
-  if (isNaN(quantity) || quantity < 0) { toast('Ingresá una cantidad válida (≥ 0)', 'error'); return; }
   const btn = $('btn-stock-edit-save');
   btn.disabled = true;
   try {
-    await api('PUT', `/stock/${_stockEditId}`, { quantity, note });
+    if (_stockEditTab === 'ajuste') {
+      const quantity = parseFloat($('inp-stock-edit-qty').value);
+      const note     = $('inp-stock-edit-note').value.trim();
+      if (isNaN(quantity)) { toast('Ingresá una cantidad válida', 'error'); return; }
+      await api('PUT', `/stock/${_stockEditId}`, { quantity, note });
+      toast('Stock actualizado', 'success');
+    } else if (_stockEditTab === 'ingreso') {
+      const quantity = parseFloat($('inp-stock-edit-ingreso-qty').value);
+      const notes    = $('inp-stock-edit-ingreso-note').value.trim();
+      if (!quantity || quantity <= 0) { toast('Ingresá una cantidad mayor a 0', 'error'); return; }
+      await api('POST', '/stock/ingresos', { product_id: _stockEditId, quantity, notes });
+      toast('Ingreso registrado', 'success');
+    } else if (_stockEditTab === 'pedidos') {
+      const pending_extra = parseInt($('inp-stock-edit-pending-extra').value, 10);
+      if (isNaN(pending_extra) || pending_extra < 0) { toast('Ingresá un valor válido (≥ 0)', 'error'); return; }
+      await api('PUT', `/stock/${_stockEditId}/pending-extra`, { pending_extra });
+      toast('Pedidos extra actualizados', 'success');
+    }
     $('stock-edit-modal').classList.add('hidden');
-    toast('Stock actualizado', 'success');
     loadStock();
     await loadProductCatalog();
   } catch (err) { toast(err.message, 'error'); }
@@ -2424,22 +3866,26 @@ function showProveedoresSubview(v) {
   $(`${v === 'list' ? 'proveedores-list-view' : v === 'form' ? 'supplier-form-view' : 'supplier-account-view'}`)?.classList.remove('hidden');
 }
 
+let _suppliersData = [];
+
 async function loadSuppliers() {
   try {
     const rows = await api('GET', '/suppliers');
+    _suppliersData = rows;
     $('suppliers-tbody').innerHTML = rows.length ? rows.map(s => `
       <tr>
         <td>${esc(s.name)}</td>
         <td>${esc(s.cuit || '—')}</td>
         <td>${esc(s.iva_condition)}</td>
         <td>${esc(s.phone || '—')}</td>
+        <td>${esc(s.celular || '—')}</td>
         <td class="text-right" style="font-weight:600;color:${s.balance > 0 ? 'var(--error)' : 'var(--success)'}">${fmtMoney(s.balance)}</td>
         <td class="text-center">
           <button class="btn btn-ghost btn-sm" onclick="openSupplierAccount(${s.id})">Cuenta</button>
           <button class="btn btn-ghost btn-sm" onclick="openSupplierForm(${s.id})">Editar</button>
           <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteSupplier(${s.id},'${esc(s.name)}')">Eliminar</button>
         </td>
-      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin proveedores</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin proveedores</td></tr>';
   } catch (err) { toast(err.message, 'error'); }
 }
 
@@ -2447,22 +3893,38 @@ $('btn-new-supplier').addEventListener('click', () => openSupplierForm(null));
 $('btn-back-suppliers').addEventListener('click', () => { showProveedoresSubview('list'); loadSuppliers(); });
 $('btn-sup-form-cancel').addEventListener('click', () => showProveedoresSubview('list'));
 
-window.openSupplierForm = function(id) {
+window.openSupplierForm = async function(id) {
   editingSupplierId = id;
   $('supplier-form-title').textContent = id ? 'Editar Proveedor' : 'Nuevo Proveedor';
   $('supplier-form').reset();
-  if (id) {
-    api('GET', `/suppliers/${id}`).then(s => {
-      $('inp-sup-name').value    = s.name;
-      $('inp-sup-cuit').value    = s.cuit || '';
-      $('inp-sup-iva').value     = s.iva_condition;
-      $('inp-sup-phone').value   = s.phone || '';
-      $('inp-sup-email').value   = s.email || '';
-      $('inp-sup-address').value = s.address || '';
-      $('inp-sup-notes').value   = s.notes || '';
-    }).catch(err => toast(err.message, 'error'));
-  }
   showProveedoresSubview('form');
+  const mpCbs = $('sup-mp-users-checkboxes');
+  mpCbs.innerHTML = '<span style="color:var(--text-muted);font-size:.88rem">Cargando...</span>';
+  try {
+    const [allUsers, supplier] = await Promise.all([
+      api('GET', '/users'),
+      id ? api('GET', `/suppliers/${id}`) : Promise.resolve({ mp_user_ids: [] })
+    ]);
+    if (id && supplier) {
+      $('inp-sup-name').value    = supplier.name;
+      $('inp-sup-cuit').value    = supplier.cuit || '';
+      $('inp-sup-iva').value     = supplier.iva_condition;
+      $('inp-sup-phone').value   = supplier.phone || '';
+      $('inp-sup-celular').value = supplier.celular || '';
+      $('inp-sup-email').value   = supplier.email || '';
+      $('inp-sup-address').value = supplier.address || '';
+      $('inp-sup-notes').value   = supplier.notes || '';
+    }
+    const mpUsers = allUsers.filter(u => u.role === 'mp' && u.active);
+    const assigned = new Set(supplier.mp_user_ids || []);
+    mpCbs.innerHTML = mpUsers.length === 0
+      ? '<span style="color:var(--text-muted);font-size:.88rem">No hay usuarios con rol MP registrados</span>'
+      : mpUsers.map(u => `
+          <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:.9rem">
+            <input type="checkbox" class="sup-mp-user-cb" value="${u.id}" ${assigned.has(u.id) ? 'checked' : ''}>
+            ${esc(u.full_name || u.username)}
+          </label>`).join('');
+  } catch (err) { toast(err.message, 'error'); }
 };
 
 $('supplier-form').addEventListener('submit', async e => {
@@ -2470,14 +3932,17 @@ $('supplier-form').addEventListener('submit', async e => {
   const btn = $('btn-sup-form-save');
   btn.disabled = true;
   try {
+    const mp_user_ids = [...document.querySelectorAll('.sup-mp-user-cb:checked')].map(cb => Number(cb.value));
     const data = {
       name: $('inp-sup-name').value.trim(),
       cuit: $('inp-sup-cuit').value.trim(),
       iva_condition: $('inp-sup-iva').value,
-      phone: $('inp-sup-phone').value.trim(),
-      email: $('inp-sup-email').value.trim(),
+      phone:   $('inp-sup-phone').value.trim(),
+      celular: $('inp-sup-celular').value.trim(),
+      email:   $('inp-sup-email').value.trim(),
       address: $('inp-sup-address').value.trim(),
-      notes: $('inp-sup-notes').value.trim()
+      notes: $('inp-sup-notes').value.trim(),
+      mp_user_ids
     };
     if (editingSupplierId) await api('PUT', `/suppliers/${editingSupplierId}`, data);
     else await api('POST', '/suppliers', data);
@@ -2496,6 +3961,59 @@ window.deleteSupplier = async function(id, name) {
     loadSuppliers();
   } catch (err) { toast(err.message, 'error'); }
 };
+
+$('btn-sup-export-pdf').addEventListener('click', () => {
+  if (!_suppliersData.length) { toast('No hay proveedores para exportar', 'error'); return; }
+  const fecha = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  const rows = _suppliersData.map(s => `
+    <tr>
+      <td>${esc(s.name)}</td>
+      <td>${esc(s.cuit||'')}</td>
+      <td>${esc(s.phone||'')}</td>
+      <td>${esc(s.celular||'')}</td>
+      <td>${esc(s.email||'')}</td>
+      <td>${esc(s.address||'')}</td>
+      <td>${esc(s.notes||'')}</td>
+    </tr>`).join('');
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+    <title>Proveedores</title>
+    <style>
+      body{font-family:Arial,sans-serif;font-size:11px;margin:20px}
+      h1{font-size:16px;margin:0 0 4px}
+      .sub{font-size:11px;color:#666;margin-bottom:14px}
+      table{width:100%;border-collapse:collapse}
+      th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
+      td{padding:5px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top}
+      tr:nth-child(even) td{background:#f8fafc}
+      @media print{body{margin:10mm}}
+    </style>
+  </head><body>
+    <h1>Lista de Proveedores</h1>
+    <div class="sub">Exportado el ${fecha} &mdash; ${_suppliersData.length} proveedor${_suppliersData.length!==1?'es':''}</div>
+    <table>
+      <thead><tr><th>Nombre</th><th>CUIT</th><th>Teléfono</th><th>Celular</th><th>Email</th><th>Dirección</th><th>Notas</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+});
+
+$('btn-sup-export-excel').addEventListener('click', () => {
+  if (!_suppliersData.length) { toast('No hay proveedores para exportar', 'error'); return; }
+  const headers = ['Nombre','CUIT','Cond. IVA','Teléfono','Celular','Email','Dirección','Notas'];
+  const data = [headers, ..._suppliersData.map(s => [
+    s.name, s.cuit||'', s.iva_condition||'', s.phone||'', s.celular||'', s.email||'', s.address||'', s.notes||''
+  ])];
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [40,18,22,16,16,28,32,30].map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Proveedores');
+  const fecha = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  XLSX.writeFile(wb, `proveedores_${fecha}.xlsx`);
+});
 
 window.openSupplierAccount = async function(id) {
   currentSupplierId = id;
@@ -2521,8 +4039,9 @@ window.openSupplierAccount = async function(id) {
         <td>${esc(p.method)}</td>
         <td class="text-right">${fmtMoney(p.amount)}</td>
         <td>${esc(p.notes || '—')}</td>
+        <td class="text-center"><a href="/api/supplier-payments/${p.id}/orden-pago" target="_blank" class="btn btn-ghost btn-sm">PDF</a></td>
         <td class="text-center"><button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deleteSupplierPayment(${p.id})">Eliminar</button></td>
-      </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">Sin pagos</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--text-muted)">Sin pagos</td></tr>';
     $('sup-notes-tbody').innerHTML = d.notes && d.notes.length ? d.notes.map(n => `
       <tr>
         <td>${fmtDate(n.date)}</td>
@@ -2536,10 +4055,30 @@ window.openSupplierAccount = async function(id) {
 
 $('btn-back-sup-account').addEventListener('click', () => { showProveedoresSubview('list'); loadSuppliers(); });
 
-// Supplier payment modal
-$('btn-new-sup-payment').addEventListener('click', () => {
+// ── Supplier payment modal ────────────────────────────────────────────────────
+let supPayFromAccount = false; // true cuando se abre desde cuenta corriente
+
+function supPayAllocTotal() {
+  let t = 0;
+  document.querySelectorAll('.sup-pay-alloc-row').forEach(row => {
+    if (row.querySelector('.sup-pay-chk').checked)
+      t += parseFloat(row.querySelector('.sup-pay-alloc-amt').value) || 0;
+  });
+  return Math.round(t * 100) / 100;
+}
+function updateSupPayAllocTotal() {
+  const t = supPayAllocTotal();
+  $('sup-pay-alloc-total').textContent = fmtMoney(t);
+  // Si hay asignaciones, auto-completar el monto total
+  if (t > 0 && !$('inp-sup-pay-amount').dataset.manual)
+    $('inp-sup-pay-amount').value = t.toFixed(2);
+}
+
+async function openSupPayModal(fromAccount) {
+  supPayFromAccount = fromAccount;
   $('inp-sup-pay-amount').value = '';
-  $('inp-sup-pay-date').value   = '';
+  delete $('inp-sup-pay-amount').dataset.manual;
+  $('inp-sup-pay-date').value   = new Date().toISOString().slice(0,10);
   $('inp-sup-pay-method').value = 'efectivo';
   $('inp-sup-pay-reference').value = '';
   $('inp-sup-pay-notes').value  = '';
@@ -2547,9 +4086,70 @@ $('btn-new-sup-payment').addEventListener('click', () => {
   $('inp-sup-pay-cheque-number').value = '';
   $('inp-sup-pay-cheque-due').value    = '';
   updateSupPayFields();
-  populateBankSelect($('inp-sup-pay-bank-account'));
+  await populateBankSelect($('inp-sup-pay-bank-account'));
+
+  const allocSection = $('sup-pay-alloc-section');
+  if (fromAccount && currentSupplierId) {
+    try {
+      const pending = await api('GET', `/suppliers/${currentSupplierId}/pending-purchases`);
+      if (pending.length) {
+        $('sup-pay-alloc-list').innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+            <thead>
+              <tr style="background:var(--bg-secondary);position:sticky;top:0">
+                <th style="padding:6px 8px;text-align:center;width:32px"></th>
+                <th style="padding:6px 8px;text-align:left">Comprobante</th>
+                <th style="padding:6px 8px;text-align:left">Tipo / Nº Doc</th>
+                <th style="padding:6px 8px;text-align:right">Saldo</th>
+                <th style="padding:6px 8px;text-align:right;width:120px">Asignar ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pending.map(p => `
+                <tr class="sup-pay-alloc-row" data-id="${p.id}" data-balance="${p.balance}">
+                  <td style="padding:5px 8px;text-align:center">
+                    <input type="checkbox" class="sup-pay-chk">
+                  </td>
+                  <td style="padding:5px 8px;font-weight:600">${esc(p.purchase_number)}</td>
+                  <td style="padding:5px 8px;color:var(--text-muted)">${esc(p.doc_type)}${p.doc_number ? ' ' + esc(p.doc_number) : ''}<br><small>${fmtDate(p.doc_date)}</small></td>
+                  <td style="padding:5px 8px;text-align:right">${fmtMoney(p.balance)}</td>
+                  <td style="padding:5px 8px">
+                    <input type="number" class="input sup-pay-alloc-amt" value="${p.balance.toFixed(2)}" min="0.01" max="${p.balance.toFixed(2)}" step="0.01" style="width:100%;padding:3px 6px;font-size:.82rem" disabled>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+        // Eventos de checkbox y monto
+        $('sup-pay-alloc-list').querySelectorAll('.sup-pay-alloc-row').forEach(row => {
+          const chk = row.querySelector('.sup-pay-chk');
+          const amt = row.querySelector('.sup-pay-alloc-amt');
+          chk.addEventListener('change', () => {
+            amt.disabled = !chk.checked;
+            updateSupPayAllocTotal();
+          });
+          amt.addEventListener('input', () => {
+            delete $('inp-sup-pay-amount').dataset.manual;
+            updateSupPayAllocTotal();
+          });
+        });
+        $('sup-pay-alloc-total').textContent = fmtMoney(0);
+        allocSection.classList.remove('hidden');
+      } else {
+        allocSection.classList.add('hidden');
+      }
+    } catch(e) { allocSection.classList.add('hidden'); }
+  } else {
+    allocSection.classList.add('hidden');
+  }
+
   $('sup-payment-modal').classList.remove('hidden');
+}
+
+$('inp-sup-pay-amount').addEventListener('input', () => {
+  $('inp-sup-pay-amount').dataset.manual = '1';
 });
+
+$('btn-new-sup-payment').addEventListener('click', () => openSupPayModal(true));
 $('btn-sup-pay-cancel').addEventListener('click', () => $('sup-payment-modal').classList.add('hidden'));
 $('sup-payment-modal').addEventListener('click', e => { if (e.target === $('sup-payment-modal')) $('sup-payment-modal').classList.add('hidden'); });
 
@@ -2566,31 +4166,62 @@ $('btn-sup-pay-confirm').addEventListener('click', async () => {
   btn.disabled = true;
   const method = $('inp-sup-pay-method').value;
   try {
-    const payload = {
+    // Recoger asignaciones a comprobantes (si las hay)
+    const allocations = [];
+    if (supPayFromAccount) {
+      document.querySelectorAll('.sup-pay-alloc-row').forEach(row => {
+        if (row.querySelector('.sup-pay-chk').checked) {
+          const amt = parseFloat(row.querySelector('.sup-pay-alloc-amt').value);
+          if (amt > 0) allocations.push({ purchase_id: Number(row.dataset.id), amount: amt });
+        }
+      });
+    }
+
+    const amount = parseFloat($('inp-sup-pay-amount').value);
+    if (!amount || amount <= 0) { toast('Ingresá un monto válido', 'error'); btn.disabled = false; return; }
+
+    // Validar que el total asignado no supere el monto
+    if (allocations.length) {
+      const allocTotal = allocations.reduce((s, a) => s + a.amount, 0);
+      if (Math.abs(allocTotal - amount) > 0.02) {
+        toast(`El total asignado (${fmtMoney(allocTotal)}) no coincide con el monto del pago (${fmtMoney(amount)})`, 'error');
+        btn.disabled = false; return;
+      }
+    }
+
+    const basePayload = {
       supplier_id:  currentSupplierId,
-      purchase_id:  currentPurchaseId || null,
-      amount:       parseFloat($('inp-sup-pay-amount').value),
       method,
+      amount,
       payment_date: $('inp-sup-pay-date').value || null,
       notes:        $('inp-sup-pay-notes').value.trim(),
       reference:    $('inp-sup-pay-reference').value.trim(),
     };
     if (method === 'transferencia') {
-      payload.bank_account_id = $('inp-sup-pay-bank-account').value;
-      if (!payload.bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); btn.disabled = false; return; }
+      basePayload.bank_account_id = $('inp-sup-pay-bank-account').value;
+      if (!basePayload.bank_account_id) { toast('Seleccioná una cuenta bancaria', 'error'); btn.disabled = false; return; }
     }
     if (method === 'cheque') {
-      payload.cheque_bank    = $('inp-sup-pay-cheque-bank').value.trim();
-      payload.cheque_number  = $('inp-sup-pay-cheque-number').value.trim();
-      payload.cheque_due_date= $('inp-sup-pay-cheque-due').value;
-      if (!payload.cheque_bank || !payload.cheque_number || !payload.cheque_due_date) {
+      basePayload.cheque_bank     = $('inp-sup-pay-cheque-bank').value.trim();
+      basePayload.cheque_number   = $('inp-sup-pay-cheque-number').value.trim();
+      basePayload.cheque_due_date = $('inp-sup-pay-cheque-due').value;
+      if (!basePayload.cheque_bank || !basePayload.cheque_number || !basePayload.cheque_due_date) {
         toast('Completá los datos del cheque', 'error'); btn.disabled = false; return;
       }
     }
-    await api('POST', '/supplier-payments', payload);
+
+    if (allocations.length > 1) {
+      // Batch: un pago por comprobante, un asiento total
+      await api('POST', '/supplier-payments/batch', { ...basePayload, allocations });
+    } else {
+      // Pago único (con o sin comprobante)
+      const payload = { ...basePayload, purchase_id: allocations[0]?.purchase_id || (currentPurchaseId || null) };
+      await api('POST', '/supplier-payments', payload);
+    }
+
     toast('Pago registrado', 'success');
     $('sup-payment-modal').classList.add('hidden');
-    if (currentPurchaseId) {
+    if (currentPurchaseId && !supPayFromAccount) {
       openPurchaseDetail(currentPurchaseId);
     } else {
       openSupplierAccount(currentSupplierId);
@@ -2622,10 +4253,13 @@ function showComprobantesSubview(v) {
 async function loadPurchases() {
   try {
     const rows = await api('GET', '/purchases');
-    $('purchases-tbody').innerHTML = rows.length ? rows.map(p => `
-      <tr>
+    $('purchases-tbody').innerHTML = rows.length ? rows.map(p => {
+      const mpBadge = p.origin === 'pedido_mp'
+        ? `<span style="font-size:.68rem;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 6px;font-weight:700;vertical-align:middle;white-space:nowrap">MP #${p.origin_id}</span>`
+        : '';
+      return `<tr>
         <td><a href="#" onclick="openPurchaseDetail(${p.id});return false;" style="font-weight:600">${esc(p.purchase_number)}</a></td>
-        <td>${esc(p.supplier_name)}</td>
+        <td>${esc(p.supplier_name)} ${mpBadge}</td>
         <td>${esc(p.doc_type)}</td>
         <td>${esc(p.doc_number || '—')}</td>
         <td>${fmtDate(p.doc_date || p.created_at)}</td>
@@ -2635,7 +4269,8 @@ async function loadPurchases() {
           <a href="/api/purchases/${p.id}/print" target="_blank" class="btn btn-ghost btn-sm">PDF</a>
           <button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="deletePurchase(${p.id},'${esc(p.purchase_number)}')">Eliminar</button>
         </td>
-      </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin comprobantes</td></tr>';
+      </tr>`;
+    }).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">Sin comprobantes</td></tr>';
   } catch (err) { toast(err.message, 'error'); }
 }
 
@@ -2644,7 +4279,7 @@ window.openPurchaseDetail = async function(id) {
   try {
     const p = await api('GET', `/purchases/${id}`);
     $('pur-detail-title').textContent = p.purchase_number;
-    $('pur-detail-subtitle').textContent = `${p.supplier_name} — ${p.doc_type}${p.doc_number ? ' ' + p.doc_number : ''} ${p.doc_date ? '| ' + fmtDate(p.doc_date) : ''}`;
+    $('pur-detail-subtitle').textContent = `${p.supplier_name} — ${p.doc_type}${p.doc_number ? ' ' + p.doc_number : ''} ${p.doc_date ? '| ' + fmtDate(p.doc_date) : ''}${p.iva_condition ? ' | ' + p.iva_condition : ''}`;
     $('pur-detail-print-link').href = `/api/purchases/${id}/print`;
     $('pur-detail-total').textContent = fmtMoney(p.total);
 
@@ -2679,6 +4314,15 @@ function renderPurchaseDetailPayments(p) {
   const balEl = $('pur-detail-balance');
   balEl.textContent  = fmtMoney(balance);
   balEl.style.color  = balance <= 0 ? 'var(--success)' : 'var(--error)';
+
+  // Botón Orden de pago PDF: visible solo cuando hay pagos
+  const opBtn = $('btn-orden-pago-pdf');
+  if (payments.length) {
+    opBtn.href = `/api/purchases/${p.id}/orden-pago`;
+    opBtn.classList.remove('hidden');
+  } else {
+    opBtn.classList.add('hidden');
+  }
 }
 
 window.deletePurchasePayment = async function(id) {
@@ -2695,35 +4339,51 @@ $('btn-new-purchase').addEventListener('click', async () => {
   purchaseItems = [];
   renderPurchaseItems();
   addPurchaseItemRow();
-  // populate supplier select
+  // Limpiar campos nuevos
+  $('inp-pur-docprefix').value      = '';
+  $('inp-pur-docseq').value         = '';
+  $('inp-pur-iva-condition').value  = '';
+  $('inp-pur-iva-pct').value        = '21';
+  // populate supplier select con datos de condición IVA
   try {
     const suppliers = await api('GET', '/suppliers');
     $('inp-pur-supplier').innerHTML = '<option value="">— Seleccioná —</option>' +
-      suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      suppliers.map(s => `<option value="${s.id}" data-iva="${esc(s.iva_condition||'')}">${esc(s.name)}</option>`).join('');
   } catch(e) {}
   $('inp-pur-docdate').value = new Date().toISOString().slice(0,10);
   showComprobantesSubview('form');
 });
+
+// Auto-completar condición IVA al seleccionar proveedor
+$('inp-pur-supplier').addEventListener('change', () => {
+  const opt = $('inp-pur-supplier').selectedOptions[0];
+  const iva = opt?.dataset?.iva || '';
+  if (iva) $('inp-pur-iva-condition').value = iva;
+});
 $('btn-back-purchases').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
 $('btn-pur-form-cancel').addEventListener('click', () => { showComprobantesSubview('list'); loadPurchases(); });
 $('btn-back-purchase-detail').addEventListener('click', () => { currentPurchaseId = null; showComprobantesSubview('list'); loadPurchases(); });
+
+// Eliminar desde el detalle del comprobante
+$('btn-delete-purchase-detail').addEventListener('click', async () => {
+  if (!currentPurchaseId) return;
+  const title = $('pur-detail-title').textContent;
+  if (!await confirm(`¿Eliminar comprobante ${title}? El stock ingresado se va a descontar.`)) return;
+  try {
+    await api('DELETE', `/purchases/${currentPurchaseId}`);
+    toast('Comprobante eliminado', 'success');
+    currentPurchaseId = null;
+    showComprobantesSubview('list');
+    loadPurchases();
+  } catch (err) { toast(err.message, 'error'); }
+});
 
 $('btn-new-purchase-payment').addEventListener('click', async () => {
   if (!currentPurchaseId) return;
   try {
     const pur = await api('GET', `/purchases/${currentPurchaseId}`);
     currentSupplierId = pur.supplier_id;
-    $('inp-sup-pay-amount').value       = '';
-    $('inp-sup-pay-date').value         = new Date().toISOString().slice(0,10);
-    $('inp-sup-pay-method').value       = 'efectivo';
-    $('inp-sup-pay-reference').value    = '';
-    $('inp-sup-pay-notes').value        = '';
-    $('inp-sup-pay-cheque-bank').value  = '';
-    $('inp-sup-pay-cheque-number').value= '';
-    $('inp-sup-pay-cheque-due').value   = '';
-    updateSupPayFields();
-    await populateBankSelect($('inp-sup-pay-bank-account'));
-    $('sup-payment-modal').classList.remove('hidden');
+    await openSupPayModal(false); // desde detalle de comprobante: sin selector
   } catch (err) { toast(err.message, 'error'); }
 });
 
@@ -2733,15 +4393,31 @@ function renderPurchaseItems() {
   c.innerHTML = purchaseItems.map((it, i) => `
     <div class="purchase-item-row" data-i="${i}">
       <input type="text"   class="input pi-name"  value="${esc(it.name)}"  placeholder="Producto" style="flex:2">
-      <input type="number" class="input pi-qty"   value="${it.qty}"   min="0.001" step="any" placeholder="Cant." style="width:90px">
-      <input type="number" class="input pi-price" value="${it.price}" min="0"     step="any" placeholder="Precio unit." style="width:120px">
-      <span style="width:90px;text-align:right;font-size:.9rem;color:var(--text-muted)">$${((it.qty||0)*(it.price||0)).toFixed(2)}</span>
+      <input type="number" class="input pi-qty"   value="${it.qty === '' ? '' : it.qty}"   min="0.001" step="any" placeholder="Cant." style="width:90px">
+      <input type="number" class="input pi-price" value="${it.price === '' ? '' : it.price}" min="0"     step="any" placeholder="Precio unit." style="width:120px">
+      <span class="pi-subtotal" style="width:90px;text-align:right;font-size:.9rem;color:var(--text-muted)">$${((parseFloat(it.qty)||0)*(parseFloat(it.price)||0)).toFixed(2)}</span>
       <button type="button" class="btn btn-ghost btn-sm pi-remove" style="color:var(--error);padding:4px 8px">✕</button>
     </div>`).join('');
   // events
   c.querySelectorAll('.pi-name').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].name = el.value; updatePurchaseTotal(); }));
-  c.querySelectorAll('.pi-qty').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].qty = parseFloat(el.value)||0; renderPurchaseItems(); }));
-  c.querySelectorAll('.pi-price').forEach((el, i) => el.addEventListener('input', () => { purchaseItems[i].price = parseFloat(el.value)||0; renderPurchaseItems(); }));
+  c.querySelectorAll('.pi-qty').forEach((el, i) => {
+    el.addEventListener('focus', () => el.select());
+    el.addEventListener('input', () => {
+      purchaseItems[i].qty = el.value;
+      el.closest('.purchase-item-row').querySelector('.pi-subtotal').textContent =
+        '$' + ((parseFloat(el.value)||0) * (parseFloat(purchaseItems[i].price)||0)).toFixed(2);
+      updatePurchaseTotal();
+    });
+  });
+  c.querySelectorAll('.pi-price').forEach((el, i) => {
+    el.addEventListener('focus', () => el.select());
+    el.addEventListener('input', () => {
+      purchaseItems[i].price = el.value;
+      el.closest('.purchase-item-row').querySelector('.pi-subtotal').textContent =
+        '$' + ((parseFloat(purchaseItems[i].qty)||0) * (parseFloat(el.value)||0)).toFixed(2);
+      updatePurchaseTotal();
+    });
+  });
   c.querySelectorAll('.pi-remove').forEach((el, i) => el.addEventListener('click', () => { purchaseItems.splice(i,1); renderPurchaseItems(); }));
   updatePurchaseTotal();
 }
@@ -2752,11 +4428,18 @@ function addPurchaseItemRow() {
 }
 
 function updatePurchaseTotal() {
-  const total = purchaseItems.reduce((s, it) => s + (it.qty||0)*(it.price||0), 0);
-  $('purchase-total-display').textContent = total.toFixed(2);
+  const sub    = purchaseItems.reduce((s, it) => s + (parseFloat(it.qty)||0)*(parseFloat(it.price)||0), 0);
+  const ivaPct = parseFloat($('inp-pur-iva-pct')?.value) || 0;
+  const ivaAmt = Math.round(sub * ivaPct / 100 * 100) / 100;
+  const total  = Math.round((sub + ivaAmt) * 100) / 100;
+  const fmt    = v => '$ ' + v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  $('pur-display-subtotal').textContent = fmt(sub);
+  $('pur-display-iva').textContent      = fmt(ivaAmt);
+  $('pur-display-total').textContent    = fmt(total);
 }
 
 $('btn-add-purchase-item').addEventListener('click', addPurchaseItemRow);
+$('inp-pur-iva-pct').addEventListener('change', updatePurchaseTotal);
 
 $('purchase-form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -2766,16 +4449,23 @@ $('purchase-form').addEventListener('submit', async e => {
   const btn = e.submitter;
   btn.disabled = true;
   try {
+    // Construir doc_number desde prefijo + número
+    const prefix = $('inp-pur-docprefix').value.trim();
+    const seq    = $('inp-pur-docseq').value.trim();
+    const doc_number = prefix && seq ? `${prefix}-${seq}` : (prefix || seq || '');
+
     await api('POST', '/purchases', {
       supplier_id,
-      doc_type:   $('inp-pur-doctype').value,
-      doc_number: $('inp-pur-docnum').value.trim(),
-      doc_date:   $('inp-pur-docdate').value || null,
-      notes:      $('inp-pur-notes').value.trim(),
+      doc_type:      $('inp-pur-doctype').value,
+      doc_number,
+      doc_date:      $('inp-pur-docdate').value || null,
+      notes:         $('inp-pur-notes').value.trim(),
+      iva_condition: $('inp-pur-iva-condition').value || '',
+      iva_percent:   parseFloat($('inp-pur-iva-pct').value) || 0,
       items: purchaseItems.filter(it => it.name.trim()).map(it => ({
         product_name: it.name.trim(),
-        quantity:     it.qty,
-        unit_price:   it.price
+        quantity:     parseFloat(it.qty)  || 0,
+        unit_price:   parseFloat(it.price) || 0
       }))
     });
     toast('Comprobante registrado y stock actualizado', 'success');
@@ -3165,7 +4855,7 @@ async function loadJournal(page = 1) {
         <td class="text-center">${!e.is_reversed ? `<button class="btn btn-ghost btn-sm" style="color:var(--error)" onclick="reverseEntry(${e.id})">Anular</button>` : ''}</td>
       </tr>
       <tr id="jrn-detail-${e.id}" class="hidden" style="background:var(--surface-2,#f9f9f9)">
-        <td colspan="6" style="padding:0 12px 10px 36px"><div id="jrn-detail-inner-${e.id}">Cargando...</div></td>
+        <td colspan="6" style="padding:10px 16px 14px 52px"><div id="jrn-detail-inner-${e.id}">Cargando…</div></td>
       </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Sin asientos en el período</td></tr>';
 
     // Pagination
@@ -3177,27 +4867,65 @@ async function loadJournal(page = 1) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+window.closeJournalDetail = function(id) {
+  const row = $(`jrn-detail-${id}`);
+  row.classList.add('hidden');
+  const prev = row.previousElementSibling;
+  if (prev) { const b = prev.querySelector('button[title="Ver líneas"]'); if (b) b.textContent = '▸'; }
+};
+
 window.toggleJournalDetail = async function(id, btn) {
   const row = $(`jrn-detail-${id}`);
-  const isHidden = row.classList.contains('hidden');
-  row.classList.toggle('hidden', !isHidden);
-  btn.textContent = isHidden ? '▾' : '▸';
-  if (isHidden) {
-    try {
-      const entry = await api('GET', `/accounting/journal/${id}`);
-      $(`jrn-detail-inner-${id}`).innerHTML = `
-        <table class="table" style="margin:4px 0">
-          <thead><tr><th>Cuenta</th><th class="text-right">Debe</th><th class="text-right">Haber</th></tr></thead>
-          <tbody>${entry.lines.map(l => `
-            <tr>
-              <td><span style="font-family:monospace;font-size:.82rem;color:var(--text-muted)">${esc(l.account_code)}</span> ${esc(l.account_name)}</td>
-              <td class="text-right">${l.debit  > 0 ? fmtMoney(l.debit)  : ''}</td>
-              <td class="text-right">${l.credit > 0 ? fmtMoney(l.credit) : ''}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>`;
-    } catch(e) { $(`jrn-detail-inner-${id}`).textContent = 'Error al cargar'; }
-  }
+  const wasHidden = row.classList.contains('hidden');
+  row.classList.toggle('hidden', !wasHidden);
+  btn.textContent = wasHidden ? '▾' : '▸';
+  if (!wasHidden) return;
+  const inner = $(`jrn-detail-inner-${id}`);
+  inner.textContent = 'Cargando…';
+  try {
+    const e = await api('GET', `/accounting/journal/${id}`);
+    const refLabels = {
+      manual: 'Manual', venta: 'Venta', cobro: 'Cobro', compra: 'Compra',
+      pago: 'Pago', caja: 'Caja', banco: 'Banco', cheque: 'Cheque',
+      reversal: 'Anulación', note_customer: 'Nota cliente', note_supplier: 'Nota proveedor'
+    };
+    const lines = e.lines || [];
+    inner.innerHTML =
+      `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:.83rem">
+          <span><b>Fecha:</b> ${fmtDate(e.date)}</span>
+          <span><b>Descripción:</b> ${esc(e.description)}</span>
+          <span><b>Tipo:</b> ${esc(refLabels[e.ref_type] || e.ref_type || '—')}</span>
+          ${e.reference ? `<span><b>Ref.:</b> ${esc(e.reference)}</span>` : ''}
+          <span><b>Estado:</b> ${e.is_reversed
+            ? '<span class="badge badge-default">Anulado</span>'
+            : '<span class="badge badge-success">Vigente</span>'}</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="closeJournalDetail(${id})">✕ Cerrar</button>
+      </div>
+      <table class="table" style="max-width:700px;margin:0">
+        <thead><tr>
+          <th style="width:110px">Código</th><th>Cuenta</th>
+          <th>Descripción línea</th>
+          <th class="text-right" style="width:120px">Debe</th>
+          <th class="text-right" style="width:120px">Haber</th>
+        </tr></thead>
+        <tbody>${lines.map(l => `
+          <tr>
+            <td style="font-family:monospace;font-size:.82rem">${esc(l.account_code)}</td>
+            <td>${esc(l.account_name)}</td>
+            <td style="font-size:.83rem;color:var(--text-muted)">${esc(l.line_description || '')}</td>
+            <td class="text-right">${l.debit  > 0 ? fmtMoney(l.debit)  : ''}</td>
+            <td class="text-right">${l.credit > 0 ? fmtMoney(l.credit) : ''}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr style="font-weight:700">
+          <td colspan="3" class="text-right">Totales</td>
+          <td class="text-right">${fmtMoney(lines.reduce((s,l)=>s+(l.debit||0),0))}</td>
+          <td class="text-right">${fmtMoney(lines.reduce((s,l)=>s+(l.credit||0),0))}</td>
+        </tr></tfoot>
+      </table>`;
+  } catch(err) { $(`jrn-detail-inner-${id}`).textContent = 'Error al cargar detalle'; }
 };
 
 window.reverseEntry = async function(id) {
@@ -3440,10 +5168,8 @@ $('am-filter-clear').addEventListener('click', () => {
 
 // ── Form ──────────────────────────────────────────────────────────────────────
 async function amOpenForm() {
-  if (!amAccountsList.length) {
-    try { amAccountsList = (await api('GET', '/accounting/accounts')).filter(a => a.accepts_movements); }
-    catch(e) { toast('Error al cargar cuentas', 'error'); return; }
-  }
+  try { amAccountsList = (await api('GET', '/accounting/accounts')).filter(a => a.accepts_movements); }
+  catch(e) { toast('Error al cargar cuentas', 'error'); return; }
   amLines = [
     { account_id: '', description: '', debit: 0, credit: 0 },
     { account_id: '', description: '', debit: 0, credit: 0 }
@@ -3554,7 +5280,6 @@ $('am-save').addEventListener('click', async () => {
     await api('POST', '/accounting/journal', { date, description: desc, reference: ref, lines });
     toast('Asiento guardado correctamente', 'success');
     $('am-form-section').classList.add('hidden');
-    amAccountsList = []; // Force refresh next open
     loadManualEntries(1);
   } catch (err) {
     toast(err.message, 'error');
@@ -3957,6 +5682,1346 @@ window.deleteNote = async function(id, entityType, entityId) {
     else openSupplierAccount(entityId);
   } catch (err) { toast(err.message, 'error'); }
 };
+
+/* ================================================================ MÓDULO PEDIDOS MP */
+
+function isFabrica()   { return state.user && state.user.role === 'mp'; }
+function canAccessMP() { return isAdmin() || isFabrica(); }
+function canAccessProd(){ return state.user && !isVendor(); }
+
+const MP_SECTIONS = [
+  { num: 1, name: 'C/Frnts', unidad: 'kg', items: [
+    '28x1.5x2400 (108/104)',
+    '1.25x118.5 (109 p/c ó 109 p/L)',
+    '1.5x200x240 (100/111/120)',
+    '1.25x89 (112)',
+    '1.5x67x240 (113)',
+    '1.25x140x5x240 (115/116)',
+    '1.5x39x2400 (118/117/114)',
+    '1.25x79.5 (119 emb)',
+    '1.5x69 (119 corr/emb)',
+    '1.5x79.5 (119 c/arr)',
+    '1.25x25 (122/127/127 p/r /121 nuevo)',
+    '1.25x32.5x2400 (124/125/126/901/902)',
+    '1.57x27 (128)',
+    '1.5x40 (117/117p/r)',
+  ], campoLabel: 'CANTIDAD KG C/F' },
+  { num: 2, name: 'Frentes', unidad: 'kg', items: [
+    '(102/103/106/107) 3x28 Bronce',
+    '(112 Bronce/112 CIVE) 2x98',
+    '(100/104/108/111) 3x28x300=2',
+    '(109 P/L / 109 P/C) 3x100',
+    '(112) 2x110',
+    '(113) 2x71x240=2.8',
+    '(114) 2.5x25x3000=1.5',
+    '(115/124/due/901) 2x25x3000=1.2',
+    '(116/125/902) 2x20x3000=0.955',
+    '(117/117 p/r /122/2000mp) 2.25x25x3000=1.4',
+    '(118/128) 3x26.5x3000=1.895',
+    '(119emb/ 119C/emb) 1.5x95.5x2.4=2.73',
+    '(119 C/Arr) 1.5x51',
+    '(120/123 y C/F123) 2.5x23.5x3000=1.35',
+    '(121/127/127P) 2.5x20x3000=1.2',
+  ], campoLabel: 'CANTIDAD KG Frnts' },
+  { num: 3, name: 'Cremallera', unidad: 'kg', items: [
+    '(108/111/114/112/117p/r) 2.45x59x3000=3.5',
+    '(115/116/117/118/124/126/127p/R/100 2000mp) 2.45x55x3000=3.2',
+    '(119todas/110) 2.45x36x3000=2.1 crem 119',
+    '(120) 2.22x59x300=3.2',
+    '(121/127) 2.45x46x3000=2.8',
+    '(123) 2.50x133.5x3000',
+    '(901/902) 2.95x30x3000=2.1',
+    '(901/902 TRABA) 2.5x42x3000=2.72',
+    '(2000mp TRABA) 2.45x64',
+  ], campoLabel: 'CANTIDAD KG Cremallera' },
+  { num: 4, name: 'Sup. Cremallera', unidad: 'kg', items: [
+    '(120) 3x45x300=3.5',
+    '(115x116) 3x42x3000=3.1',
+    '(114) 1.89x53.5=2.45',
+    '(121/127) 3x80x3000=6.05',
+    '(DUE/126) 2.5x48x240=2.4',
+    '(110) 2x53x240=2.65 Y LEVA',
+    '(119) 1.25x41',
+    '(110 Falleva) 2x88x240',
+    '(124/125) 1.57x48',
+    '(110 sup/Falleva) 2.5x53',
+    '(2000mp GuíatornilloC) 2x22',
+    '(118/128 PortaPerno) 2.5x70x2.240=3.4',
+    '(111 porta perno) 2x62',
+    '(117) 3x45',
+  ], campoLabel: 'CANTIDAD KG Sup. Cremallera' },
+  { num: 5, name: 'Cajas', unidad: 'kg', items: [
+    '(100/102/103/111) 1.57x182',
+    '(108/104/105/109p/C p/L 106/128) 96.5x1.57',
+    '(110) 1.57x200',
+    '(112/113) 1.25x94.5x2.4=2.5',
+    '(114) 1.57x169.5=5.27',
+    '(115/116) 1.57x150x2400=6.608',
+    '(117/117p/R/2000mp) 1.57x167.5x240=5.1',
+    '(118) 1.57x107.5',
+    '(119 emb) 1.25x72.5',
+    '(119 Arr) 1.25x93',
+    '(119 1/2Emb) 1.25x71',
+    '(120) 1.57x173 120 tapa',
+    '(121) 1.25x54x2400',
+    '(122) 98.5x1.57',
+    '(124/125) 1.25x150',
+    '(126) 1.25x167.5',
+    '(127/127 p/R) 1.50x95',
+    '(DUE BASE Y TAPA) 1.25x155',
+    '(DUE CERROJO Base y Tapa) 98x1.25',
+    '(123) 1.57x54x2400=1.64',
+  ], campoLabel: 'CANTIDAD KG Cajas' },
+  { num: 6, name: 'Tapas', unidad: 'kg', items: [
+    '(104/108/109/128) 1.57x68x2400=2.25',
+    '(100/111) 1.57x146x2.4=4.5',
+    '(110) 1.57x158.5',
+    '(112/113) 1.25x67',
+    '(115/116) 1.57x131 3.9kgrs',
+    '(117/114/117 p/R) 1.57x140.5',
+    '(118) 1.57x145',
+    '(119emb-Arr/dr/iz Crrd-ArrCrrd-emb) 1.25x49x2400=1.2',
+    '(119-1/2emb) 1.25x73',
+    '(121) 1.25x45x2400',
+    '(122) 1.57x72x240=2.2',
+    '(124/125 T 901/902 BaseyTapa) 1.25x136x2400=3.25',
+    '(127/127 p/R) 1.50x78 2.25',
+    '(123) 1.57x45x2400 1.45',
+  ], campoLabel: 'CANTIDAD KG Tapas' },
+  { num: 7, name: 'Palanca', unidad: 'kg', items: [
+    '(115/116/124/125) 109.5x2x240=4.25',
+    '(117/117p/R / 111/100) 128x2x2460=4.95',
+    '(118) 2x133.5',
+    '(120) 1.25x124.5x2400=3.03',
+    '(121) 1.80x66=2.35',
+    '(2000mp) 1.57x115',
+    '(108/111/117/otros) 1.95x62',
+    '(112/113/114/115/124) 1.45x62',
+    '(119/123) 1.45x43.5',
+    '(120) 1.45x76',
+    '(121/127) 1.45x68',
+    '(100 110 varios) 1.95x62x2.5=2.55 Bronce',
+  ], campoLabel: 'CANTIDAD KG Palanca' },
+  { num: 8, name: 'Combinaciones', unidad: 'kg', items: [
+    '(115/120/123) 0.6x74.5',
+    '(111/117/114/2000mp) 0.6x84',
+    '(108/119/128/122) 0.6x59.5=83.25',
+    '(112/127/127 P/R) 113 .6x49.5=8.6grs',
+    '(121) 0.6x29',
+    'Disco Bocallaves 34x0.6',
+    '(118 Rollos Ac Inoxid) 0.6x93 23grs 43 kgrs',
+    'chapa inox 1x2 0.7',
+  ], campoLabel: 'CANTIDAD KG Combinaciones' },
+  { num: 9, name: 'Ac. Inox / Varios', unidad: 'kg', items: [
+    '(109 capuchón) 1.25x156x2.4=4',
+    '(113 capuchón) 1.25x124',
+    '(124/125/126 Bocallaves) 0.80x74.5',
+    '(109 dr/Izq Bocallaves) 1.25x133',
+    '(110 Bocallaves) 1.25x175',
+    '(120/123 Cuad Crema) 2.85x44.5x3000=3.5',
+    '(121/127/127p/R Cuad crema) 2.75x44x3000=3',
+    'HIERRO4mCad.Crem (108/11/114/112/118/128)',
+    'Cuad.crem4mBronce (111/108/114/112/118 otr)',
+    'Cuad crem 3x33x3000 (115/116/124/125/117/122/126)=2.4',
+    '(119) Cuadcrem 2.45x36 IDEM CREMALLERA 119',
+    'cuadcrem5m HIERRO p/resorte nuez',
+    'Bronce/discos/bocallaves (102/103/106/107)',
+  ], campoLabel: 'CANTIDAD KG Varios' },
+  { num: 10, name: 'Varios', unidad: 'u', items: [], campoLabel: 'CANTIDAD Varios', esLibre: true },
+  { num: 11, name: 'Bronce', esBronce: true, subsections: [
+    { num: 11, name: 'Nuez' },
+    { num: 12, name: 'Pestillo' },
+    { num: 13, name: 'Llaves' }
+  ]},
+];
+
+const MP_ESTADO_LABELS = { pendiente: 'Pendiente', realizado: 'Realizado', entregado: 'Entregado' };
+const MP_ESTADO_BADGE  = { pendiente: 'badge-warning', realizado: 'badge-info', entregado: 'badge-success' };
+
+let _mpEstadoFilter = 'todos';
+let _mpCurrentId    = null;
+let _mpSuppliers    = [];
+
+function mpBadge(estado) {
+  return `<span class="badge ${MP_ESTADO_BADGE[estado] || 'badge-default'}">${MP_ESTADO_LABELS[estado] || estado}</span>`;
+}
+
+function showMpView(view) {
+  ['mp-list-view','mp-form-view','mp-detail-view','mp-report-view'].forEach(id => {
+    const el = $(id); if (el) el.classList.toggle('hidden', id !== `mp-${view}-view`);
+  });
+}
+
+async function loadMpSuppliers() {
+  try {
+    _mpSuppliers = await api('GET', '/suppliers/for-mp');
+  } catch { _mpSuppliers = []; }
+}
+
+function populateMpSupplierSelect(selId, includeAll = false) {
+  const sel = $(selId); if (!sel) return;
+  if (!includeAll && isFabrica() && _mpSuppliers.length === 0) {
+    sel.innerHTML = '<option value="">No tenés proveedores asignados, contactá al administrador</option>';
+    return;
+  }
+  sel.innerHTML = (includeAll ? '<option value="">Todos</option>' : '<option value="">— Seleccioná —</option>') +
+    _mpSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+}
+
+async function loadMpOrders() {
+  try {
+    const params = _mpEstadoFilter !== 'todos' ? `?estado=${_mpEstadoFilter}` : '';
+    const orders = await api('GET', `/mp-orders${params}`);
+    renderMpOrders(orders);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderMpOrders(orders) {
+  const tbody = $('mp-tbody'), noEl = $('no-mp');
+  $('mp-count').textContent = `${orders.length} pedido${orders.length !== 1 ? 's' : ''}`;
+  if (!orders.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
+  noEl.classList.add('hidden');
+  tbody.innerHTML = orders.map(o => `
+    <tr style="cursor:pointer" onclick="openMpDetail(${o.id})">
+      <td style="font-family:monospace">#${o.id}</td>
+      <td>${fmtDate(o.fecha)}</td>
+      <td style="font-weight:500">${esc(o.supplier_name || o.proveedor || '—')}</td>
+      <td>${mpBadge(o.estado)}</td>
+      <td style="font-size:.83rem;color:var(--text-muted)">${esc(o.created_by_name || '—')}</td>
+      <td class="text-center" style="white-space:nowrap" onclick="event.stopPropagation()">
+        ${isAdmin() ? `<select class="input select" style="font-size:.8rem;padding:2px 4px;width:auto" onchange="changeMpEstado(${o.id},this.value)">
+          ${['pendiente','realizado','entregado'].map(e =>
+            `<option value="${e}" ${o.estado===e?'selected':''}>${MP_ESTADO_LABELS[e]}</option>`
+          ).join('')}
+        </select>` : ''}
+        <button class="btn-icon" onclick="openMpDetail(${o.id})" title="Ver detalle">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+let _mpReceiptOrderId = null;
+
+window.changeMpEstado = async function(id, estado) {
+  if (estado === 'entregado') {
+    _mpReceiptOrderId = id;
+    await openMpReceiptModal();
+    return;
+  }
+  try {
+    await api('PUT', `/mp-orders/${id}/estado`, { estado });
+    loadMpOrders();
+    toast('Estado actualizado', 'success');
+  } catch (err) { toast(err.message, 'error'); loadMpOrders(); }
+};
+
+async function openMpReceiptModal() {
+  $('inp-mpr-fecha').value = new Date().toISOString().slice(0, 10);
+  $('inp-mpr-numero').value = '';
+  $('inp-mpr-monto').value = '';
+  $('inp-mpr-notas').value = '';
+  $('inp-mpr-tipo').value = 'Factura A';
+  $('inp-mpr-iva').value = '21%';
+  // Load sucursales
+  try {
+    const subs = await api('GET', '/users/sucursales');
+    $('inp-mpr-sucursal').innerHTML = '<option value="">— Seleccioná —</option>' +
+      subs.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
+  } catch {
+    $('inp-mpr-sucursal').innerHTML = '<option value="">Error cargando sucursales</option>';
+  }
+  $('mp-receipt-modal').classList.remove('hidden');
+}
+
+$('btn-mpr-cancel').addEventListener('click', () => {
+  $('mp-receipt-modal').classList.add('hidden');
+  _mpReceiptOrderId = null;
+  loadMpOrders();
+});
+
+$('btn-mpr-confirm').addEventListener('click', async () => {
+  const sucursal = $('inp-mpr-sucursal').value;
+  const monto    = $('inp-mpr-monto').value;
+  const fecha    = $('inp-mpr-fecha').value;
+  if (!sucursal) { toast('Seleccioná la sucursal', 'error'); return; }
+  if (!monto || parseFloat(monto) <= 0) { toast('Ingresá el monto total', 'error'); return; }
+  if (!fecha) { toast('Ingresá la fecha del comprobante', 'error'); return; }
+  const btn = $('btn-mpr-confirm');
+  btn.disabled = true;
+  try {
+    await api('PUT', `/mp-orders/${_mpReceiptOrderId}/estado`, {
+      estado: 'entregado',
+      receipt: {
+        sucursal,
+        tipo_comprobante: $('inp-mpr-tipo').value,
+        numero_comprobante: $('inp-mpr-numero').value.trim(),
+        fecha_comprobante: fecha,
+        monto_total: parseFloat(monto),
+        iva: $('inp-mpr-iva').value,
+        notas: $('inp-mpr-notas').value.trim()
+      }
+    });
+    $('mp-receipt-modal').classList.add('hidden');
+    _mpReceiptOrderId = null;
+    toast('Pedido marcado como entregado y factura registrada', 'success');
+    loadMpOrders();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+window.openMpDetail = async function(id) {
+  _mpCurrentId = id;
+  try {
+    const o = await api('GET', `/mp-orders/${id}`);
+    const provName = o.supplier_name || o.proveedor || '—';
+    $('mp-detail-title').textContent = `Pedido MP #${id} — ${provName}`;
+
+    const bySection = {};
+    for (const it of (o.items || [])) {
+      if (!bySection[it.seccion]) bySection[it.seccion] = [];
+      bySection[it.seccion].push(it);
+    }
+
+    let html = `<div class="card" style="padding:16px;margin-bottom:12px">
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Fecha</label><p style="margin:0;font-weight:600">${fmtDate(o.fecha)}</p></div>
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Proveedor</label><p style="margin:0;font-weight:600">${esc(provName)}</p></div>
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Estado</label><p style="margin:0">${mpBadge(o.estado)}</p></div>
+        <div><label style="font-size:.8rem;color:var(--text-muted)">Creado por</label><p style="margin:0;font-size:.85rem">${esc(o.created_by_name || '—')}</p></div>
+      </div>
+      ${o.notas ? `<p style="margin:10px 0 0;font-size:.85rem;color:var(--text-muted)"><strong>Notas:</strong> ${esc(o.notas)}</p>` : ''}
+    </div>
+    ${o.receipt ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;background:#f0f7ff;border:1px solid #bbd4f0">
+      <div style="font-weight:700;font-size:.82rem;text-transform:uppercase;color:#2563eb;margin-bottom:8px">Comprobante de recepción</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:.85rem">
+        <div><label style="font-size:.75rem;color:var(--text-muted)">Sucursal</label><p style="margin:0;font-weight:600">${esc(o.receipt.sucursal)}</p></div>
+        <div><label style="font-size:.75rem;color:var(--text-muted)">Comprobante</label><p style="margin:0;font-weight:600">${esc(o.receipt.tipo_comprobante)} ${esc(o.receipt.numero_comprobante||'')}</p></div>
+        <div><label style="font-size:.75rem;color:var(--text-muted)">Fecha</label><p style="margin:0;font-weight:600">${fmtDate(o.receipt.fecha_comprobante)}</p></div>
+        <div><label style="font-size:.75rem;color:var(--text-muted)">Monto</label><p style="margin:0;font-weight:600">${fmtMoney(o.receipt.monto_total)}</p></div>
+        <div><label style="font-size:.75rem;color:var(--text-muted)">IVA</label><p style="margin:0;font-weight:600">${esc(o.receipt.iva)}</p></div>
+        ${o.receipt.notas ? `<div><label style="font-size:.75rem;color:var(--text-muted)">Notas</label><p style="margin:0">${esc(o.receipt.notas)}</p></div>` : ''}
+      </div>
+    </div>` : ''}`;
+
+    for (const sec of MP_SECTIONS) {
+      if (sec.esBronce) {
+        const hasAny = sec.subsections.some(sub => (bySection[sub.num] || []).length > 0);
+        if (!hasAny) continue;
+        html += `<div class="card" style="padding:12px 16px;margin-bottom:8px">
+          <div style="font-weight:700;margin-bottom:10px;font-size:.9rem">${sec.num}. ${esc(sec.name)}</div>
+          ${sec.subsections.map(sub => {
+            const subItems = bySection[sub.num] || [];
+            if (!subItems.length) return '';
+            return `<div style="margin-bottom:10px">
+              <div style="font-size:.8rem;font-weight:700;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase">${esc(sub.name)}</div>
+              <table class="table" style="font-size:.83rem">
+                <thead><tr><th>Modelo</th><th style="width:80px" class="text-right">Cantidad</th></tr></thead>
+                <tbody>${subItems.map(it => `<tr>
+                  <td>${esc(it.descripcion)}</td>
+                  <td class="text-right" style="font-weight:600">${it.cantidad != null ? it.cantidad : '—'}</td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </div>`;
+          }).join('')}
+        </div>`;
+        continue;
+      }
+      const items = bySection[sec.num] || [];
+      if (!items.length) continue;
+      html += `<div class="card" style="padding:12px 16px;margin-bottom:8px">
+        <div style="font-weight:700;margin-bottom:8px;font-size:.9rem">${sec.num}. ${esc(sec.name)}</div>
+        <table class="table" style="font-size:.83rem">
+          <thead><tr><th>Descripción</th><th style="width:80px" class="text-right">Cantidad</th><th style="width:60px" class="text-right">Unidad</th></tr></thead>
+          <tbody>${items.map(it => `<tr>
+            <td>${esc(it.descripcion)}</td>
+            <td class="text-right" style="font-weight:600">${it.cantidad != null ? it.cantidad : '—'}</td>
+            <td class="text-right" style="color:var(--text-muted)">${esc(it.unidad)}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+    }
+
+    $('mp-detail-content').innerHTML = html;
+    showMpView('detail');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+// Eliminar pedido MP (admin only)
+$('btn-mp-delete').addEventListener('click', async () => {
+  if (!_mpCurrentId) return;
+  if (!await confirm(`¿Eliminar el pedido MP #${_mpCurrentId}? Se eliminarán también todos sus ítems. Esta acción no se puede deshacer.`)) return;
+  try {
+    await api('DELETE', `/mp-orders/${_mpCurrentId}`);
+    toast('Pedido MP eliminado', 'success');
+    showMpView('list');
+    loadMpOrders();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// RENDER FORM SECTIONS
+function renderMpFormSections() {
+  const container = $('mp-sections-container');
+  container.innerHTML = MP_SECTIONS.map(sec => {
+    let itemRows;
+    if (sec.esBronce) {
+      itemRows = sec.subsections.map(sub => `
+        <div style="margin-bottom:14px">
+          <div style="font-size:.82rem;font-weight:700;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em">${esc(sub.name)}</div>
+          <div id="mp-bronce-${sub.num}">
+            <div class="mp-bronce-row" data-sub="${sub.num}" style="display:flex;gap:8px;margin-bottom:6px">
+              <input type="text" class="input mp-bronce-model" placeholder="Modelo" style="flex:1">
+              <input type="number" class="input mp-bronce-qty" placeholder="Cantidad" min="0" step="any" style="width:110px">
+            </div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:2px" onclick="addMpBronceRow(${sub.num})">+ Agregar</button>
+        </div>`).join('');
+    } else if (sec.esLibre) {
+      itemRows = `<div id="mp-sec-${sec.num}-libre">
+          <div class="mp-libre-row" style="display:flex;gap:8px;margin-bottom:6px">
+            <input type="text" class="input mp-libre-desc" placeholder="Descripción" style="flex:1">
+            <input type="number" class="input mp-libre-qty" placeholder="Cantidad" min="0" step="any" style="width:100px">
+            <input type="text" class="input mp-libre-unit" placeholder="Unid." style="width:70px" value="${sec.unidad}">
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="addMpLibreRow(${sec.num})">+ Agregar ítem</button>`;
+    } else {
+      itemRows = sec.items.map((item, idx) => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <label style="flex:1;font-size:.82rem;color:var(--text)">${esc(item)}</label>
+          <input type="number" class="input mp-item-qty" data-sec="${sec.num}" data-idx="${idx}" data-desc="${esc(item)}" data-unidad="${esc(sec.unidad)}"
+            placeholder="kg" min="0" step="any" style="width:100px;text-align:right">
+        </div>`).join('');
+    }
+
+    return `<details class="mp-section-card" style="margin-bottom:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <summary style="padding:10px 14px;font-weight:700;cursor:pointer;background:var(--bg);user-select:none;list-style:none;display:flex;justify-content:space-between;align-items:center">
+        <span>${sec.num}. ${esc(sec.name)}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </summary>
+      <div style="padding:12px 14px;background:var(--white)">${itemRows}</div>
+    </details>`;
+  }).join('');
+}
+
+window.addMpLibreRow = function(secNum) {
+  const container = $(`mp-sec-${secNum}-libre`);
+  const row = document.createElement('div');
+  row.className = 'mp-libre-row';
+  row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px';
+  row.innerHTML = `<input type="text" class="input mp-libre-desc" placeholder="Descripción" style="flex:1">
+    <input type="number" class="input mp-libre-qty" placeholder="Cantidad" min="0" step="any" style="width:100px">
+    <input type="text" class="input mp-libre-unit" placeholder="Unid." style="width:70px" value="u">`;
+  container.appendChild(row);
+};
+
+window.addMpBronceRow = function(subNum) {
+  const container = $(`mp-bronce-${subNum}`);
+  const row = document.createElement('div');
+  row.className = 'mp-bronce-row';
+  row.dataset.sub = subNum;
+  row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px';
+  row.innerHTML = `<input type="text" class="input mp-bronce-model" placeholder="Modelo" style="flex:1">
+    <input type="number" class="input mp-bronce-qty" placeholder="Cantidad" min="0" step="any" style="width:110px">`;
+  container.appendChild(row);
+};
+
+function collectMpItems() {
+  const items = [];
+  document.querySelectorAll('.mp-item-qty').forEach(inp => {
+    const val = inp.value.trim();
+    if (!val) return;
+    items.push({ seccion: Number(inp.dataset.sec), descripcion: inp.dataset.desc,
+      cantidad: parseFloat(val) || 0, unidad: inp.dataset.unidad || 'kg', notas: '' });
+  });
+  document.querySelectorAll('.mp-libre-row').forEach(row => {
+    const desc = row.querySelector('.mp-libre-desc').value.trim();
+    const qty  = row.querySelector('.mp-libre-qty').value.trim();
+    const unit = row.querySelector('.mp-libre-unit').value.trim() || 'u';
+    if (desc && qty) items.push({ seccion: 10, descripcion: desc, cantidad: parseFloat(qty)||0, unidad: unit, notas: '' });
+  });
+  document.querySelectorAll('.mp-bronce-row').forEach(row => {
+    const model = row.querySelector('.mp-bronce-model').value.trim();
+    const qty   = row.querySelector('.mp-bronce-qty').value.trim();
+    const subNum = Number(row.dataset.sub);
+    if (model && qty) items.push({ seccion: subNum, descripcion: model, cantidad: parseFloat(qty)||0, unidad: 'u', notas: '' });
+  });
+  return items;
+}
+
+// EVENT LISTENERS
+$('btn-new-mp').addEventListener('click', async () => {
+  $('mp-form-title').textContent = 'Nuevo Pedido MP';
+  $('inp-mp-fecha').value  = new Date().toISOString().slice(0,10);
+  $('inp-mp-notas').value  = '';
+  await loadMpSuppliers();
+  populateMpSupplierSelect('inp-mp-supplier');
+  renderMpFormSections();
+  showMpView('form');
+});
+
+['btn-mp-cancel','btn-mp-cancel2'].forEach(id => {
+  if ($(id)) $(id).addEventListener('click', () => { showMpView('list'); loadMpOrders(); });
+});
+
+$('btn-mp-back').addEventListener('click', () => { showMpView('list'); loadMpOrders(); });
+
+$('btn-mp-print').addEventListener('click', () => {
+  if (_mpCurrentId) window.open(`/api/mp-orders/${_mpCurrentId}/print`, '_blank');
+});
+
+$('mp-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const fecha       = $('inp-mp-fecha').value;
+  const supplier_id = $('inp-mp-supplier').value;
+  if (!fecha)       { toast('La fecha es requerida', 'error'); $('inp-mp-fecha').focus(); return; }
+  if (!supplier_id) { toast('El proveedor es requerido', 'error'); $('inp-mp-supplier').focus(); return; }
+
+  const items = collectMpItems();
+  if (!items.length) { toast('Completá al menos un ítem antes de guardar', 'error'); return; }
+
+  const btn = $('btn-mp-save');
+  btn.disabled = true;
+  try {
+    await api('POST', '/mp-orders', { fecha, supplier_id: Number(supplier_id),
+      notas: $('inp-mp-notas').value.trim(), items });
+    toast('Pedido MP guardado', 'success');
+    showMpView('list');
+    loadMpOrders();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+// Filtros de estado
+document.querySelectorAll('.mp-filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    _mpEstadoFilter = btn.dataset.estado;
+    document.querySelectorAll('.mp-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+    loadMpOrders();
+  });
+});
+
+// REPORTE MP
+if ($('btn-mp-reporte')) {
+  $('btn-mp-reporte').addEventListener('click', async () => {
+    await loadMpSuppliers();
+    populateMpSupplierSelect('inp-mp-report-supplier', true);
+    // Rango de fechas: mes actual
+    const now = new Date();
+    $('inp-mp-report-desde').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    $('inp-mp-report-hasta').value = now.toISOString().slice(0,10);
+    showMpView('report');
+    loadMpReport();
+  });
+}
+
+$('btn-mp-report-back').addEventListener('click', () => { showMpView('list'); loadMpOrders(); });
+
+$('btn-mp-report-filter').addEventListener('click', loadMpReport);
+
+$('btn-mp-report-print').addEventListener('click', () => {
+  const desde       = $('inp-mp-report-desde').value;
+  const hasta       = $('inp-mp-report-hasta').value;
+  const supplier_id = $('inp-mp-report-supplier').value;
+  const params = new URLSearchParams();
+  if (desde)       params.set('desde', desde);
+  if (hasta)       params.set('hasta', hasta);
+  if (supplier_id) params.set('supplier_id', supplier_id);
+  window.open(`/api/mp-orders/report/print?${params}`, '_blank');
+});
+
+async function loadMpReport() {
+  try {
+    const desde       = $('inp-mp-report-desde').value;
+    const hasta       = $('inp-mp-report-hasta').value;
+    const supplier_id = $('inp-mp-report-supplier').value;
+    const params = new URLSearchParams();
+    if (desde)       params.set('desde', desde);
+    if (hasta)       params.set('hasta', hasta);
+    if (supplier_id) params.set('supplier_id', supplier_id);
+    const orders = await api('GET', `/mp-orders/report?${params}`);
+    renderMpReport(orders);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderMpReport(orders) {
+  const tbody = $('mp-report-tbody'), noEl = $('no-mp-report');
+  $('mp-report-count').textContent = `${orders.length} pedido${orders.length!==1?'s':''} entregado${orders.length!==1?'s':''}`;
+  if (!orders.length) { tbody.innerHTML = ''; noEl.classList.remove('hidden'); return; }
+  noEl.classList.add('hidden');
+  const SECNAMES = ['C/Frnts','Frentes','Cremallera','Sup. Cremallera','Cajas','Tapas','Palanca','Combinaciones','Ac. Inox/Varios','Varios'];
+  tbody.innerHTML = orders.map(o => {
+    const secResumen = Object.entries(o.seccionMap || {})
+      .map(([s,c]) => `${SECNAMES[Number(s)-1]||'Sec.'+s} (${c} ítem${c!==1?'s':''})`)
+      .join(', ') || '—';
+    const r = o.receipt;
+    return `<tr>
+      <td style="font-family:monospace">#${o.id}</td>
+      <td>${fmtDate(o.fecha)}</td>
+      <td style="font-weight:500">${esc(o.supplier_name||o.proveedor||'—')}</td>
+      <td style="font-size:.82rem;color:var(--text-muted)">${esc(secResumen)}</td>
+      <td style="font-size:.83rem;color:var(--text-muted)">${esc(o.created_by_name||'—')}</td>
+      <td style="font-size:.83rem">${r ? esc(r.sucursal) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="font-size:.83rem">${r ? `${esc(r.tipo_comprobante)} ${esc(r.numero_comprobante||'')}`.trim() : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="text-right" style="font-size:.83rem">${r ? fmtMoney(r.monto_total) : '<span style="color:var(--text-muted)">—</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ================================================================ PRODUCCIÓN */
+
+const PROD_CATEGORIAS = ['','C/Frnts','Frentes','Cremallera','Sup. Cremallera','Cajas','Tapas','Palanca','Combinaciones','Ac. Inox / Varios'];
+const PROD_PIEZAS_CIRCUITO = ['cajas','tapas','cremalleras','combinaciones','contrafrentes'];
+const PROD_PIEZAS_DIRECTAS = ['llaves','nueces','pestillos'];
+const PROD_CAMPOS_PROCESO = [
+  ['cajas_pulidas','Cajas pulidas'],['cajas_sincadas','Cajas sincadas'],
+  ['tapas_pulidas','Tapas pulidas'],['tapas_sincadas','Tapas sincadas'],
+  ['cremalleras_pulidas','Cremalleras pulidas'],['cremalleras_sincadas','Cremalleras sincadas'],
+  ['combinaciones_pulidas','Combinaciones pulidas'],['combinaciones_sincadas','Combinaciones sincadas'],
+  ['contrafrentes_pulidos','Contrafrentes pulidos'],['contrafrentes_sincados','Contrafrentes sincados'],
+  ['llaves','Llaves'],['nueces','Nueces'],['pestillos','Pestillos']
+];
+const PROD_CAMPOS = {
+  proceso:   PROD_CAMPOS_PROCESO,
+  terminadas:[['cantidad','Cantidad']]
+};
+
+// Color de fila según nombre de artículo
+function prodRowClass(name) {
+  if (!name) return '';
+  if (/\b(108|111|118|128|115|116|124|125)\b/.test(name)) return 'prod-row-rosa';
+  if (/\b(117|114|122|126)\b/.test(name))                  return 'prod-row-verde';
+  if (/\b(121|127)\b/.test(name))                          return 'prod-row-verde-int';
+  if (/\b(120|123)\b/.test(name))                          return 'prod-row-celeste';
+  return '';
+}
+
+function prodTipoBadge(tipo) {
+  const MAP = {
+    ingreso_chapa:       ['info',    'Ingreso chapa'],
+    ajuste_chapa:        ['default', 'Ajuste chapa'],
+    procesado:           ['warning', 'Procesado'],
+    sincado:             ['info',    'Sincado'],
+    armado:              ['success', 'Armado'],
+    ingreso_componentes: ['info',    'Ingreso comp.'],
+    ajuste_manual:       ['default', 'Ajuste'],
+    ingreso_deposito:    ['success', 'Ingreso dep.'],
+    egreso_deposito:     ['warning', 'Egreso dep.'],
+    // legacy
+    entrada_mp:['info','Ingreso MP'], proceso:['warning','A proceso']
+  };
+  const [cls, label] = MAP[tipo] || ['default', tipo];
+  return `<span class="badge badge-${cls}">${label}</span>`;
+}
+
+function fmtQtyColored(v) {
+  if (v === null || v === undefined || v === 0) return '<span style="color:var(--text-muted)">—</span>';
+  const c = v > 0 ? '#166534' : 'var(--danger)';
+  return `<span style="color:${c}">${v > 0 ? '+' : ''}${v}</span>`;
+}
+
+// ── Tab navigation ─────────────────────────────────────────────
+
+function showProdTab(tab) {
+  document.querySelectorAll('.prod-tab').forEach(el =>
+    el.classList.toggle('active', el.dataset.prodTab === tab)
+  );
+  ['proceso','terminadas','deposito','historial'].forEach(t => {
+    const el = $(`prod-tab-${t}`);
+    if (el) el.classList.toggle('hidden', t !== tab);
+  });
+  if (tab === 'proceso')    { loadProdChapa(); loadProdProceso(); }
+  if (tab === 'terminadas') loadProdTerminadas();
+  if (tab === 'deposito')   loadDeposito();
+  if (tab === 'historial')  loadProdHistorial();
+}
+
+document.querySelectorAll('.prod-tab').forEach(btn =>
+  btn.addEventListener('click', () => showProdTab(btn.dataset.prodTab))
+);
+
+// ── Sección A: Chapa (kg) ──────────────────────────────────────
+
+let _prodChapa = [];
+
+async function loadProdChapa() {
+  try {
+    _prodChapa = await api('GET', '/produccion/chapa');
+    renderProdChapa(_prodChapa);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderProdChapa(rows) {
+  const tbody = $('prod-chapa-tbody');
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td style="font-weight:500">${esc(r.nombre)}</td>
+      <td class="text-right" style="font-weight:${r.kilos > 0 ? '700' : '400'};color:${r.kilos > 0 ? 'var(--text)' : 'var(--text-muted)'}">${(r.kilos||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})} kg</td>
+      <td class="text-center" style="white-space:nowrap">
+        <button class="btn btn-sm btn-secondary" data-action="ing-chapa" data-cat="${r.categoria}" data-nombre="${esc(r.nombre)}">+ Ingresar kg</button>
+        <button class="btn btn-sm btn-ghost"     data-action="procesado"  data-cat="${r.categoria}" data-nombre="${esc(r.nombre)}" data-kg="${r.kilos}" style="margin-left:4px">Procesar</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+$('prod-chapa-tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  if (btn.dataset.action === 'ing-chapa') openProdChapaIngModal(Number(btn.dataset.cat));
+  if (btn.dataset.action === 'procesado') openProdProcesadoModal(Number(btn.dataset.cat), Number(btn.dataset.kg));
+});
+
+$('btn-prod-refresh-chapa').addEventListener('click', loadProdChapa);
+$('btn-prod-aj-chapa').addEventListener('click', openProdChapaAjModal);
+
+// ── Sección B: Potencial para armar ───────────────────────────
+
+let _prodProceso = [];
+
+async function loadProdProceso() {
+  try {
+    _prodProceso = await api('GET', '/produccion/mp-proceso');
+    renderProdProceso(_prodProceso);
+    // Populate historial product filter
+    const sel = $('prod-hist-product');
+    if (sel.options.length <= 1) {
+      _prodProceso.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.product_id; opt.textContent = p.name;
+        sel.appendChild(opt);
+      });
+    }
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function fmtPZ(v, isSin) {
+  if (!v) return '<span style="color:var(--text-muted);font-size:.78rem">0</span>';
+  const bold = isSin && v > 0 ? 'font-weight:700;' : '';
+  const color = isSin && v > 0 ? 'color:var(--success-txt);' : '';
+  return `<span style="${bold}${color}">${v}</span>`;
+}
+
+function renderProdProceso(rows) {
+  const tbody = $('prod-proceso-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="16" class="text-center" style="color:var(--text-muted);padding:24px">No hay artículos activos en el catálogo</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const cls = prodRowClass(r.name);
+    const rowData = JSON.stringify({
+      cp:r.cajas_pulidas,cs:r.cajas_sincadas,
+      tp:r.tapas_pulidas,ts:r.tapas_sincadas,
+      crp:r.cremalleras_pulidas,crs:r.cremalleras_sincadas,
+      cop:r.combinaciones_pulidas,cos:r.combinaciones_sincadas,
+      cfp:r.contrafrentes_pulidos,cfs:r.contrafrentes_sincados,
+      ll:r.llaves,nu:r.nueces,pe:r.pestillos
+    });
+    return `<tr class="${cls}" data-pid="${r.product_id}">
+      <td style="font-weight:500;font-size:.82rem">${esc(r.name)}</td>
+      <td class="text-center">${fmtPZ(r.cajas_pulidas,false)}</td>
+      <td class="text-center">${fmtPZ(r.cajas_sincadas,true)}</td>
+      <td class="text-center">${fmtPZ(r.tapas_pulidas,false)}</td>
+      <td class="text-center">${fmtPZ(r.tapas_sincadas,true)}</td>
+      <td class="text-center">${fmtPZ(r.cremalleras_pulidas,false)}</td>
+      <td class="text-center">${fmtPZ(r.cremalleras_sincadas,true)}</td>
+      <td class="text-center">${fmtPZ(r.combinaciones_pulidas,false)}</td>
+      <td class="text-center">${fmtPZ(r.combinaciones_sincadas,true)}</td>
+      <td class="text-center">${fmtPZ(r.contrafrentes_pulidos,false)}</td>
+      <td class="text-center">${fmtPZ(r.contrafrentes_sincados,true)}</td>
+      <td class="text-center">${fmtPZ(r.llaves,false)}</td>
+      <td class="text-center">${fmtPZ(r.nueces,false)}</td>
+      <td class="text-center">${fmtPZ(r.pestillos,false)}</td>
+      <td class="prod-obs-cell" data-pid="${r.product_id}" title="Clic para editar" style="font-size:.8rem">${esc(r.observaciones)||'<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="text-center" style="white-space:nowrap">
+        <button class="btn btn-sm btn-ghost" data-action="sincar" data-pid="${r.product_id}" data-name="${esc(r.name)}" data-row='${rowData}' style="font-size:.78rem;padding:3px 8px">Sincar</button>
+        <button class="btn btn-sm btn-primary" data-action="armar" data-pid="${r.product_id}" data-name="${esc(r.name)}" data-row='${rowData}' style="font-size:.78rem;padding:3px 8px;margin-left:3px">Armar</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+$('prod-proceso-tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-action]');
+  if (btn) {
+    const pid  = Number(btn.dataset.pid);
+    const name = btn.dataset.name;
+    let rd = {};
+    try { rd = JSON.parse(btn.dataset.row || '{}'); } catch {}
+    if (btn.dataset.action === 'sincar') openProdSincarModal(pid, name, rd);
+    if (btn.dataset.action === 'armar')  openProdArmarModal(pid, name, rd);
+    return;
+  }
+  // Editar observaciones inline
+  const obsCell = e.target.closest('.prod-obs-cell');
+  if (obsCell && !obsCell.querySelector('input')) {
+    const pid     = Number(obsCell.dataset.pid);
+    const current = _prodProceso.find(r => r.product_id === pid)?.observaciones || '';
+    const inp     = document.createElement('input');
+    inp.type = 'text'; inp.value = current; inp.className = 'prod-obs-input';
+    obsCell.innerHTML = '';
+    obsCell.appendChild(inp);
+    inp.focus();
+    const save = async () => {
+      const val = inp.value.trim();
+      try {
+        await api('PUT', `/produccion/mp-proceso/${pid}/obs`, { observaciones: val });
+        const row = _prodProceso.find(r => r.product_id === pid);
+        if (row) row.observaciones = val;
+        obsCell.innerHTML = val ? esc(val) : '<span style="color:var(--text-muted)">—</span>';
+      } catch (err) { toast(err.message, 'error'); loadProdProceso(); }
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); }
+      if (ev.key === 'Escape') loadProdProceso();
+    });
+  }
+});
+
+$('btn-prod-refresh-proceso').addEventListener('click', () => { loadProdChapa(); loadProdProceso(); });
+$('btn-prod-aj-proceso').addEventListener('click',      () => openProdAjusteModal('proceso'));
+$('btn-prod-ingcomp').addEventListener('click',          openProdIngcompModal);
+
+// ── Tab: Terminadas ────────────────────────────────────────────
+
+async function loadProdTerminadas() {
+  try {
+    const rows = await api('GET', '/produccion/terminadas');
+    const tbody = $('prod-term-tbody');
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="color:var(--text-muted);padding:24px">Sin artículos</td></tr>'; return; }
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td style="font-weight:500">${esc(r.name)}</td>
+        <td class="text-center" style="font-weight:${r.cantidad>0?'700':'400'};color:${r.cantidad>0?'var(--success-txt)':'var(--text-muted)'}">${r.cantidad||0}</td>
+        <td style="color:var(--text-muted);font-size:.83rem">${r.updated_at?fmtDateTime(r.updated_at):'—'}</td>
+      </tr>`).join('');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-prod-refresh-term').addEventListener('click', loadProdTerminadas);
+$('btn-prod-aj-term').addEventListener('click', () => openProdAjusteModal('terminadas'));
+
+// ── Tab: Historial ─────────────────────────────────────────────
+
+async function loadProdHistorial() {
+  try {
+    const params = new URLSearchParams();
+    const pid   = $('prod-hist-product').value;
+    const tipo  = $('prod-hist-tipo').value;
+    const desde = $('prod-hist-desde').value;
+    const hasta = $('prod-hist-hasta').value;
+    if (pid)   params.set('product_id', pid);
+    if (tipo)  params.set('tipo', tipo);
+    if (desde) params.set('desde', desde);
+    if (hasta) params.set('hasta', hasta);
+    const rows = await api('GET', `/produccion/movimientos${params.toString()?'?'+params:''}`);
+    const tbody = $('prod-hist-tbody');
+    const empty = $('prod-hist-empty');
+    if (!rows.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    const CATNAMES = ['','C/Frnts','Frentes','Cremallera','Sup. Cremallera','Cajas','Tapas','Palanca','Combinaciones','Ac. Inox / Varios'];
+    tbody.innerHTML = rows.map(r => {
+      const subject = r.product_name
+        ? esc(r.product_name)
+        : (r.categoria ? `<span style="color:var(--text-muted)">${esc(CATNAMES[r.categoria]||'Cat.'+r.categoria)}</span>` : '—');
+      const pieza   = r.pieza ? `<span style="font-size:.82rem">${esc(r.pieza)}</span>` : '—';
+      const cantidad = r.cantidad !== null && r.cantidad !== 0 ? fmtQtyColored(r.cantidad) : '—';
+      const kgUsados = r.kg_usados ? `<span style="color:var(--text-muted)">${r.kg_usados} kg</span>` : '—';
+      return `<tr>
+        <td style="color:var(--text-muted)">${fmtDateTime(r.created_at)}</td>
+        <td>${subject}</td>
+        <td class="text-center">${prodTipoBadge(r.tipo)}</td>
+        <td>${pieza}</td>
+        <td class="text-right">${cantidad}</td>
+        <td class="text-right">${kgUsados}</td>
+        <td style="font-size:.82rem;color:var(--text-muted)">${esc(r.notas||'')}${r.purchase_doc?` <span class="badge badge-info" style="font-size:.72rem">${esc(r.purchase_doc)}</span>`:''}</td>
+        <td style="font-size:.82rem;color:var(--text-muted)">${esc(r.created_by_name||'—')}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-prod-refresh-hist').addEventListener('click', loadProdHistorial);
+$('btn-prod-hist-filter').addEventListener('click', loadProdHistorial);
+$('btn-prod-hist-clear').addEventListener('click', () => {
+  ['prod-hist-product','prod-hist-tipo','prod-hist-desde','prod-hist-hasta'].forEach(id => $(id).value = '');
+  loadProdHistorial();
+});
+
+// ── Helpers comunes ────────────────────────────────────────────
+
+function fillProdCatSelect(selId, presetCat) {
+  const sel = $(selId);
+  sel.innerHTML = PROD_CATEGORIAS.slice(1).map((n,i) => `<option value="${i+1}">${n}</option>`).join('');
+  if (presetCat) sel.value = presetCat;
+}
+
+async function fillProdProductSelect(selId, presetPid) {
+  const sel = $(selId);
+  const prods = _prodProceso.length ? _prodProceso : await api('GET', '/produccion/mp-proceso');
+  sel.innerHTML = '<option value="">— Seleccioná un artículo —</option>';
+  prods.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.product_id; opt.textContent = p.name;
+    sel.appendChild(opt);
+  });
+  if (presetPid) sel.value = presetPid;
+}
+
+async function loadPurchasesSelect(selId) {
+  try {
+    const purchases = await api('GET', '/produccion/purchases-for-mp');
+    const sel = $(selId);
+    sel.innerHTML = '<option value="">— Sin vincular —</option>';
+    purchases.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.purchase_number} — ${esc(p.supplier_name)}${p.doc_date?' ('+fmtDate(p.doc_date)+')':''}`;
+      sel.appendChild(opt);
+    });
+  } catch {}
+}
+
+// ── Modal: Ingresar kg de chapa ────────────────────────────────
+
+async function openProdChapaIngModal(presetCat) {
+  fillProdCatSelect('inp-prod-cha-cat', presetCat);
+  await loadPurchasesSelect('inp-prod-cha-purchase');
+  $('inp-prod-cha-kg').value    = '';
+  $('inp-prod-cha-notas').value = '';
+  $('prod-chapa-ing-modal').classList.remove('hidden');
+  $('inp-prod-cha-kg').focus();
+}
+
+$('btn-prod-cha-cancel').addEventListener('click', () => $('prod-chapa-ing-modal').classList.add('hidden'));
+$('btn-prod-cha-confirm').addEventListener('click', async () => {
+  const cat  = Number($('inp-prod-cha-cat').value);
+  const kg   = Number($('inp-prod-cha-kg').value);
+  const notas = $('inp-prod-cha-notas').value.trim();
+  const pid  = Number($('inp-prod-cha-purchase').value) || null;
+  if (!cat || kg <= 0) { toast('Categoría y kg requeridos', 'error'); return; }
+  try {
+    await api('POST', '/produccion/chapa/ingreso', { categoria: cat, kilos: kg, notas, purchase_id: pid });
+    $('prod-chapa-ing-modal').classList.add('hidden');
+    toast('Ingreso de chapa registrado', 'success');
+    loadProdChapa();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Ajuste kg de chapa ─────────────────────────────────
+
+function openProdChapaAjModal(presetCat) {
+  fillProdCatSelect('inp-prod-chaj-cat', presetCat);
+  $('inp-prod-chaj-delta').value = '';
+  $('inp-prod-chaj-notas').value = '';
+  $('prod-chapa-aj-modal').classList.remove('hidden');
+}
+
+$('btn-prod-chaj-cancel').addEventListener('click', () => $('prod-chapa-aj-modal').classList.add('hidden'));
+$('btn-prod-chaj-confirm').addEventListener('click', async () => {
+  const cat   = Number($('inp-prod-chaj-cat').value);
+  const delta = Number($('inp-prod-chaj-delta').value);
+  const notas = $('inp-prod-chaj-notas').value.trim();
+  if (!cat || isNaN(delta) || delta === 0) { toast('Categoría y delta requeridos', 'error'); return; }
+  try {
+    await api('POST', '/produccion/chapa/ajuste', { categoria: cat, delta, notas });
+    $('prod-chapa-aj-modal').classList.add('hidden');
+    toast('Ajuste de chapa aplicado', 'success');
+    loadProdChapa();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Procesar chapa → piezas pulidas ────────────────────
+
+async function openProdProcesadoModal(presetCat, chapaKg) {
+  fillProdCatSelect('inp-prod-prc-cat', presetCat);
+  await fillProdProductSelect('inp-prod-prc-product', null);
+  $('prod-proc-chapa-info').textContent = `Stock disponible: ${chapaKg||0} kg`;
+  $('inp-prod-prc-kg').value     = '';
+  $('inp-prod-prc-piezas').value = '';
+  $('inp-prod-prc-notas').value  = '';
+  $('prod-procesado-modal').classList.remove('hidden');
+}
+
+$('btn-prod-prc-cancel').addEventListener('click', () => $('prod-procesado-modal').classList.add('hidden'));
+$('btn-prod-prc-confirm').addEventListener('click', async () => {
+  const cat   = Number($('inp-prod-prc-cat').value);
+  const pid   = Number($('inp-prod-prc-product').value);
+  const pieza = $('inp-prod-prc-pieza').value;
+  const kg    = Number($('inp-prod-prc-kg').value);
+  const pzas  = Number($('inp-prod-prc-piezas').value);
+  const notas = $('inp-prod-prc-notas').value.trim();
+  if (!cat || !pid || !pieza || kg <= 0 || pzas <= 0) { toast('Completá todos los campos requeridos', 'error'); return; }
+  try {
+    await api('POST', '/produccion/procesado', { product_id: pid, categoria: cat, pieza, kg_usados: kg, piezas_resultado: pzas, notas });
+    $('prod-procesado-modal').classList.add('hidden');
+    toast('Procesado registrado', 'success');
+    loadProdChapa(); loadProdProceso();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Sincar piezas ───────────────────────────────────────
+
+let _prodSincarPid = null;
+
+function openProdSincarModal(pid, name, rd) {
+  _prodSincarPid = pid;
+  $('prod-sincar-name').textContent = name;
+  $('prod-sincar-info').innerHTML =
+    `Pulidas → Cajas: <b>${rd.cp||0}</b> | Tapas: <b>${rd.tp||0}</b> | Cremalleras: <b>${rd.crp||0}</b> | Comb.: <b>${rd.cop||0}</b> | C/Frnts: <b>${rd.cfp||0}</b>`;
+  $('inp-prod-sin-cantidad').value = '';
+  $('inp-prod-sin-notas').value    = '';
+  $('prod-sincar-modal').classList.remove('hidden');
+  $('inp-prod-sin-cantidad').focus();
+}
+
+$('btn-prod-sin-cancel').addEventListener('click', () => $('prod-sincar-modal').classList.add('hidden'));
+$('btn-prod-sin-confirm').addEventListener('click', async () => {
+  const pieza    = $('inp-prod-sin-pieza').value;
+  const cantidad = Number($('inp-prod-sin-cantidad').value);
+  const notas    = $('inp-prod-sin-notas').value.trim();
+  if (!_prodSincarPid || cantidad <= 0) { toast('Cantidad inválida', 'error'); return; }
+  try {
+    await api('POST', '/produccion/sincar', { product_id: _prodSincarPid, pieza, cantidad, notas });
+    $('prod-sincar-modal').classList.add('hidden');
+    toast('Sincado registrado', 'success');
+    loadProdProceso();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Armar cerraduras ────────────────────────────────────
+
+let _prodArmarPid = null;
+
+function openProdArmarModal(pid, name, rd) {
+  _prodArmarPid = pid;
+  $('prod-armar-name').textContent = name;
+  $('prod-armar-info').innerHTML =
+    `Sincadas → Cajas: <b>${rd.cs||0}</b> | Tapas: <b>${rd.ts||0}</b> | Crem.: <b>${rd.crs||0}</b> | Comb.: <b>${rd.cos||0}</b> | C/Frnts: <b>${rd.cfs||0}</b><br>Directas → Llaves: <b>${rd.ll||0}</b> | Nueces: <b>${rd.nu||0}</b> | Pestillos: <b>${rd.pe||0}</b>`;
+  $('inp-prod-arm-cantidad').value = 1;
+  // Pre-fill consumo fields with default consumption per cerradura (0 if no stock)
+  $('inp-arm-cajas').value          = (rd.cs||0) > 0 ? 1 : 0;
+  $('inp-arm-tapas').value          = (rd.ts||0) > 0 ? 1 : 0;
+  $('inp-arm-cremalleras').value    = (rd.crs||0) > 0 ? 1 : 0;
+  $('inp-arm-combinaciones').value  = (rd.cos||0) > 0 ? 1 : 0;
+  $('inp-arm-contrafrentes').value  = (rd.cfs||0) > 0 ? 1 : 0;
+  $('inp-arm-llaves').value         = (rd.ll||0) > 0 ? 2 : 0;
+  $('inp-arm-nueces').value         = (rd.nu||0) > 0 ? 1 : 0;
+  $('inp-arm-pestillos').value      = (rd.pe||0) > 0 ? 1 : 0;
+  $('inp-arm-notas').value          = '';
+  $('prod-armar-modal').classList.remove('hidden');
+  $('inp-prod-arm-cantidad').focus();
+  $('inp-prod-arm-cantidad').select();
+}
+
+$('btn-prod-arm-cancel').addEventListener('click', () => $('prod-armar-modal').classList.add('hidden'));
+$('btn-prod-arm-confirm').addEventListener('click', async () => {
+  const qty = Number($('inp-prod-arm-cantidad').value);
+  if (!_prodArmarPid || qty <= 0) { toast('Cantidad inválida', 'error'); return; }
+  const consumo = {
+    cajas:          Number($('inp-arm-cajas').value)         || 0,
+    tapas:          Number($('inp-arm-tapas').value)         || 0,
+    cremalleras:    Number($('inp-arm-cremalleras').value)   || 0,
+    combinaciones:  Number($('inp-arm-combinaciones').value) || 0,
+    contrafrentes:  Number($('inp-arm-contrafrentes').value) || 0,
+    llaves:         Number($('inp-arm-llaves').value)        || 0,
+    nueces:         Number($('inp-arm-nueces').value)        || 0,
+    pestillos:      Number($('inp-arm-pestillos').value)     || 0
+  };
+  try {
+    await api('POST', '/produccion/armar', { product_id: _prodArmarPid, cantidad: qty, consumo, notas: $('inp-arm-notas').value.trim() });
+    $('prod-armar-modal').classList.add('hidden');
+    toast(`${qty} cerradura${qty>1?'s':''} armada${qty>1?'s':''} correctamente`, 'success');
+    loadProdProceso(); loadProdTerminadas();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Ingresar componentes ────────────────────────────────
+
+async function openProdIngcompModal() {
+  await fillProdProductSelect('inp-prod-ic-product', null);
+  $('inp-prod-ic-cantidad').value = '';
+  $('inp-prod-ic-notas').value    = '';
+  $('prod-ingcomp-modal').classList.remove('hidden');
+}
+
+$('btn-prod-ic-cancel').addEventListener('click', () => $('prod-ingcomp-modal').classList.add('hidden'));
+$('btn-prod-ic-confirm').addEventListener('click', async () => {
+  const pid     = Number($('inp-prod-ic-product').value);
+  const pieza   = $('inp-prod-ic-pieza').value;
+  const cantidad = Number($('inp-prod-ic-cantidad').value);
+  const notas   = $('inp-prod-ic-notas').value.trim();
+  if (!pid || cantidad <= 0) { toast('Artículo y cantidad requeridos', 'error'); return; }
+  try {
+    await api('POST', '/produccion/ingreso-componentes', { product_id: pid, pieza, cantidad, notas });
+    $('prod-ingcomp-modal').classList.add('hidden');
+    toast('Componentes ingresados', 'success');
+    loadProdProceso();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Ajuste manual ───────────────────────────────────────
+
+async function openProdAjusteModal(presetEtapa) {
+  await fillProdProductSelect('inp-prod-aj-product', null);
+  if (presetEtapa) $('inp-prod-aj-etapa').value = presetEtapa;
+  updateProdAjCampos();
+  $('inp-prod-aj-delta').value = '';
+  $('inp-prod-aj-notas').value = '';
+  $('prod-ajuste-modal').classList.remove('hidden');
+}
+
+function updateProdAjCampos() {
+  const etapa  = $('inp-prod-aj-etapa').value;
+  const campos = PROD_CAMPOS[etapa] || [];
+  $('inp-prod-aj-campo').innerHTML = campos.map(([v,l]) => `<option value="${v}">${l}</option>`).join('');
+}
+
+$('inp-prod-aj-etapa').addEventListener('change', updateProdAjCampos);
+$('btn-prod-aj-cancel').addEventListener('click', () => $('prod-ajuste-modal').classList.add('hidden'));
+$('btn-prod-aj-confirm').addEventListener('click', async () => {
+  const pid   = Number($('inp-prod-aj-product').value);
+  const etapa = $('inp-prod-aj-etapa').value;
+  const campo = $('inp-prod-aj-campo').value;
+  const delta = Number($('inp-prod-aj-delta').value);
+  const notas = $('inp-prod-aj-notas').value.trim();
+  if (!pid)                       { toast('Seleccioná un artículo', 'error'); return; }
+  if (isNaN(delta) || delta === 0){ toast('El delta no puede ser cero', 'error'); return; }
+  try {
+    await api('POST', '/produccion/ajuste', { etapa, product_id: pid, campo, delta, notas });
+    $('prod-ajuste-modal').classList.add('hidden');
+    toast('Ajuste aplicado', 'success');
+    if (etapa === 'proceso')    loadProdProceso();
+    if (etapa === 'terminadas') loadProdTerminadas();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+/* ================================================================ DEPÓSITO */
+
+let _deposito = [];
+
+// ── Carga y render principal ───────────────────────────────────
+
+async function loadDeposito() {
+  try {
+    _deposito = await api('GET', '/produccion/deposito/insumos');
+    renderDepositoSummary(_deposito);
+    renderDepositoTable(_deposito);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderDepositoSummary(rows) {
+  const totalTornillos = rows.filter(r => r.tipo === 'tornillo').reduce((s, r) => s + r.stock_actual, 0);
+  const totalCajas     = rows.filter(r => r.tipo === 'caja').reduce((s, r) => s + r.stock_actual, 0);
+  const cerraduras     = Math.floor(totalTornillos / 4);
+  $('dep-summary').innerHTML = `
+    <div class="stat-card">
+      <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:6px">Tornillos en stock</div>
+      <div style="font-size:1.6rem;font-weight:700;color:var(--text)">${totalTornillos.toLocaleString('es-AR')}</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:6px">Cajas en stock</div>
+      <div style="font-size:1.6rem;font-weight:700;color:var(--text)">${totalCajas.toLocaleString('es-AR')}</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:6px">Tornillos → cerraduras</div>
+      <div style="font-size:1.6rem;font-weight:700;color:var(--success-txt)">${cerraduras.toLocaleString('es-AR')}</div>
+      <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">4 tornillos por cerradura</div>
+    </div>`;
+}
+
+function renderDepositoTable(rows) {
+  const tbody = $('dep-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="color:var(--text-muted);padding:24px">Sin insumos activos</td></tr>';
+    return;
+  }
+  // Group: tornillos first, then cajas
+  const sorted = [...rows].sort((a, b) => {
+    if (a.tipo !== b.tipo) return a.tipo === 'tornillo' ? -1 : 1;
+    return a.id - b.id;
+  });
+  let lastTipo = null;
+  tbody.innerHTML = sorted.map(r => {
+    const groupHeader = r.tipo !== lastTipo
+      ? `<tr><td colspan="5" style="background:var(--bg);font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:8px 14px">${r.tipo === 'tornillo' ? 'Tornillos' : 'Cajas de embalaje'}</td></tr>`
+      : '';
+    lastTipo = r.tipo;
+    const stockColor = r.stock_actual > 0 ? 'var(--text)' : 'var(--text-muted)';
+    return `${groupHeader}<tr data-id="${r.id}">
+      <td style="color:var(--text-muted);font-size:.83rem">${r.tipo === 'tornillo' ? 'Tornillo' : 'Caja'}</td>
+      <td style="font-weight:500">${esc(r.descripcion)}</td>
+      <td class="text-center" style="font-weight:700;color:${stockColor}">${r.stock_actual}</td>
+      <td style="color:var(--text-muted);font-size:.83rem">${r.updated_at ? fmtDateTime(r.updated_at) : '—'}</td>
+      <td class="text-center" style="white-space:nowrap">
+        <button class="btn btn-sm btn-secondary" data-dep-action="ingresar" data-id="${r.id}" data-name="${esc(r.descripcion)}">+ Ingresar</button>
+        <button class="btn btn-sm btn-ghost" data-dep-action="egresar" data-id="${r.id}" data-name="${esc(r.descripcion)}" data-stock="${r.stock_actual}" style="margin-left:4px">− Egresar</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+$('dep-tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-dep-action]');
+  if (!btn) return;
+  const id    = Number(btn.dataset.id);
+  const name  = btn.dataset.name;
+  const stock = Number(btn.dataset.stock);
+  if (btn.dataset.depAction === 'ingresar') openDepIngresoModal(id, name);
+  if (btn.dataset.depAction === 'egresar')  openDepEgresoModal(id, name, stock);
+});
+
+$('btn-dep-refresh').addEventListener('click', loadDeposito);
+$('btn-dep-gestionar').addEventListener('click', openDepGestionarModal);
+
+// ── Modal: Ingresar ────────────────────────────────────────────
+
+let _depIngId = null;
+
+function openDepIngresoModal(id, name) {
+  _depIngId = id;
+  $('dep-ing-name').textContent = name;
+  $('inp-dep-ing-cantidad').value = '';
+  $('inp-dep-ing-obs').value      = '';
+  $('dep-ingreso-modal').classList.remove('hidden');
+  $('inp-dep-ing-cantidad').focus();
+}
+
+$('btn-dep-ing-cancel').addEventListener('click', () => $('dep-ingreso-modal').classList.add('hidden'));
+$('btn-dep-ing-confirm').addEventListener('click', async () => {
+  const qty = Number($('inp-dep-ing-cantidad').value);
+  if (!_depIngId || qty <= 0) { toast('Cantidad inválida', 'error'); return; }
+  try {
+    await api('POST', '/produccion/deposito/ingreso', {
+      insumo_id:    _depIngId,
+      cantidad:     qty,
+      observaciones: $('inp-dep-ing-obs').value.trim()
+    });
+    $('dep-ingreso-modal').classList.add('hidden');
+    toast('Ingreso registrado', 'success');
+    loadDeposito();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Egresar ─────────────────────────────────────────────
+
+let _depEgrId = null;
+
+function openDepEgresoModal(id, name, stock) {
+  _depEgrId = id;
+  $('dep-egr-name').textContent  = name;
+  $('dep-egr-stock').textContent = `Stock disponible: ${stock} unidades`;
+  $('inp-dep-egr-cantidad').value = '';
+  $('inp-dep-egr-obs').value      = '';
+  $('inp-dep-egr-motivo').value   = 'uso';
+  $('dep-egreso-modal').classList.remove('hidden');
+  $('inp-dep-egr-cantidad').focus();
+}
+
+$('btn-dep-egr-cancel').addEventListener('click', () => $('dep-egreso-modal').classList.add('hidden'));
+$('btn-dep-egr-confirm').addEventListener('click', async () => {
+  const qty = Number($('inp-dep-egr-cantidad').value);
+  if (!_depEgrId || qty <= 0) { toast('Cantidad inválida', 'error'); return; }
+  try {
+    await api('POST', '/produccion/deposito/egreso', {
+      insumo_id:    _depEgrId,
+      cantidad:     qty,
+      motivo:       $('inp-dep-egr-motivo').value,
+      observaciones: $('inp-dep-egr-obs').value.trim()
+    });
+    $('dep-egreso-modal').classList.add('hidden');
+    toast('Egreso registrado', 'success');
+    loadDeposito();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+// ── Modal: Gestionar insumos ───────────────────────────────────
+
+async function openDepGestionarModal() {
+  await renderDepGestList();
+  $('dep-gestionar-modal').classList.remove('hidden');
+}
+
+async function renderDepGestList() {
+  try {
+    const todos = await api('GET', '/produccion/deposito/insumos?all=1');
+    $('dep-gest-tbody').innerHTML = todos.map(r => `
+      <tr id="dep-gest-row-${r.id}">
+        <td style="color:var(--text-muted);font-size:.82rem">${r.tipo === 'tornillo' ? 'Tornillo' : 'Caja'}</td>
+        <td id="dep-gest-desc-${r.id}">${esc(r.descripcion)}</td>
+        <td class="text-center">${r.stock_actual}</td>
+        <td class="text-center">
+          <span class="badge ${r.activo ? 'badge-success' : 'badge-default'}">${r.activo ? 'Activo' : 'Inactivo'}</span>
+        </td>
+        <td class="text-center">
+          <button class="btn btn-sm btn-ghost" data-gest-edit="${r.id}" data-desc="${esc(r.descripcion)}" data-activo="${r.activo}">Editar</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('dep-gest-tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-gest-edit]');
+  if (!btn) return;
+  const id     = Number(btn.dataset.gestEdit);
+  const desc   = btn.dataset.desc;
+  const activo = Number(btn.dataset.activo);
+  const row    = $(`dep-gest-row-${id}`);
+  if (!row) return;
+  row.innerHTML = `
+    <td colspan="2">
+      <input type="text" id="dep-gest-inp-${id}" class="input" style="font-size:.87rem;padding:5px 8px" value="${esc(desc)}">
+    </td>
+    <td class="text-center" style="font-size:.82rem;color:var(--text-muted)">${e.target.closest('tr').cells[2].textContent}</td>
+    <td class="text-center">
+      <select id="dep-gest-activo-${id}" class="input select" style="font-size:.82rem;padding:4px 6px;height:auto">
+        <option value="1" ${activo ? 'selected' : ''}>Activo</option>
+        <option value="0" ${!activo ? 'selected' : ''}>Inactivo</option>
+      </select>
+    </td>
+    <td class="text-center" style="white-space:nowrap">
+      <button class="btn btn-sm btn-primary" data-gest-save="${id}">Guardar</button>
+      <button class="btn btn-sm btn-ghost" data-gest-cancel="${id}" style="margin-left:4px">✕</button>
+    </td>`;
+  $(`dep-gest-inp-${id}`).focus();
+});
+
+$('dep-gest-tbody').addEventListener('click', async e => {
+  const saveBtn   = e.target.closest('button[data-gest-save]');
+  const cancelBtn = e.target.closest('button[data-gest-cancel]');
+  if (saveBtn) {
+    const id     = Number(saveBtn.dataset.gestSave);
+    const desc   = $(`dep-gest-inp-${id}`)?.value.trim();
+    const activo = Number($(`dep-gest-activo-${id}`)?.value);
+    if (!desc) { toast('La descripción no puede estar vacía', 'error'); return; }
+    try {
+      await api('PUT', `/produccion/deposito/insumos/${id}`, { descripcion: desc, activo });
+      toast('Insumo actualizado', 'success');
+      await renderDepGestList();
+      loadDeposito();
+    } catch (err) { toast(err.message, 'error'); }
+  }
+  if (cancelBtn) { await renderDepGestList(); }
+});
+
+$('btn-dep-new-add').addEventListener('click', async () => {
+  const tipo = $('inp-dep-new-tipo').value;
+  const desc = $('inp-dep-new-desc').value.trim();
+  if (!desc) { toast('Ingresá una descripción', 'error'); return; }
+  try {
+    await api('POST', '/produccion/deposito/insumos', { tipo, descripcion: desc });
+    $('inp-dep-new-desc').value = '';
+    toast('Insumo agregado', 'success');
+    await renderDepGestList();
+    loadDeposito();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+$('btn-dep-gest-close').addEventListener('click', () => $('dep-gestionar-modal').classList.add('hidden'));
+$('btn-dep-gest-done').addEventListener('click',  () => $('dep-gestionar-modal').classList.add('hidden'));
 
 /* ================================================================ INIT */
 checkAuth();
