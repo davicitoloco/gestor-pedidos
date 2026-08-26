@@ -258,6 +258,94 @@ router.get('/:id/recibo', (req, res) => {
   } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/payments/:id/allocations — detalle de a qué remitos está vinculado
+// este pago y cuánto le queda disponible para asignar.
+router.get('/:id/allocations', (req, res) => {
+  try {
+    const id  = Number(req.params.id);
+    const pmt = db.prepare('SELECT * FROM payments WHERE id=?').get(id);
+    if (!pmt) return res.status(404).json({ error: 'Pago no encontrado' });
+
+    const allocations = db.prepare(`
+      SELECT pra.id, pra.remito_id, pra.amount,
+             printf('R-%03d', r.remito_sequence) AS remito_number,
+             printf('#%03d', o.order_sequence)   AS order_number
+      FROM payment_remito_allocations pra
+      JOIN remitos r ON pra.remito_id = r.id
+      JOIN orders  o ON r.order_id   = o.id
+      WHERE pra.payment_id = ?
+      ORDER BY r.remito_sequence ASC
+    `).all(id);
+    const allocated_total = allocations.reduce((s, a) => s + a.amount, 0);
+
+    res.json({
+      payment: pmt,
+      allocations,
+      allocated_total,
+      available: Math.max(0, Math.round((pmt.amount - allocated_total) * 100) / 100),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/payments/:id/allocate — vincula (retroactivamente) un pago ya
+// existente a uno o varios remitos, sin generar movimiento de dinero ni asiento
+// contable nuevo: el pago ya fue cobrado y asentado en su momento, esto sólo
+// agrega filas a payment_remito_allocations para que el estado de cobro del
+// pedido/remito quede al día (misma tabla que usa POST /api/payments).
+router.post('/:id/allocate', requireAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { allocations } = req.body;
+    if (!Array.isArray(allocations) || !allocations.length)
+      return res.status(400).json({ error: 'Debés indicar al menos una asignación' });
+
+    const pmt = db.prepare('SELECT * FROM payments WHERE id=?').get(id);
+    if (!pmt) return res.status(404).json({ error: 'Pago no encontrado' });
+
+    const EPS = 0.005;
+    const alreadyAllocated = db.prepare(
+      'SELECT COALESCE(SUM(amount),0) AS t FROM payment_remito_allocations WHERE payment_id=?'
+    ).get(id).t;
+    const available = pmt.amount - alreadyAllocated;
+
+    let newTotal = 0;
+    const clean = [];
+    for (const a of allocations) {
+      const remitoId = Number(a.remito_id);
+      const amt = parseFloat(a.amount);
+      if (!remitoId || !(amt > 0)) return res.status(400).json({ error: 'Asignación inválida' });
+
+      const remito = db.prepare('SELECT * FROM remitos WHERE id=?').get(remitoId);
+      if (!remito) return res.status(404).json({ error: `Remito ${remitoId} no encontrado` });
+      if (remito.customer_id !== pmt.customer_id)
+        return res.status(400).json({ error: 'El remito no pertenece al cliente de este pago' });
+
+      const remitoAllocated = db.prepare(
+        'SELECT COALESCE(SUM(amount),0) AS t FROM payment_remito_allocations WHERE remito_id=?'
+      ).get(remitoId).t;
+      const remitoBalance = remito.total - remitoAllocated;
+      if (amt > remitoBalance + EPS)
+        return res.status(400).json({
+          error: `El monto asignado a R-${String(remito.remito_sequence).padStart(3,'0')} supera su saldo pendiente (${remitoBalance.toFixed(2)})`,
+        });
+
+      newTotal += amt;
+      clean.push({ remito_id: remitoId, amount: Math.round(amt * 100) / 100 });
+    }
+    if (newTotal > available + EPS)
+      return res.status(400).json({
+        error: `El total asignado (${newTotal.toFixed(2)}) supera el monto disponible del pago (${available.toFixed(2)})`,
+      });
+
+    withTransaction(() => {
+      const ins = db.prepare('INSERT INTO payment_remito_allocations (payment_id, remito_id, amount) VALUES (?,?,?)');
+      for (const a of clean) ins.run(id, a.remito_id, a.amount);
+    });
+
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // DELETE /api/payments/:id
 router.delete('/:id', requireAdmin, (req, res) => {
   try {

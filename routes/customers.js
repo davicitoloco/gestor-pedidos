@@ -82,7 +82,8 @@ router.get('/:id/account', (req, res) => {
     `).all(cid);
 
     const payments = db.prepare(`
-      SELECT p.*, COALESCE(u.full_name, u.username) AS created_by_name
+      SELECT p.*, COALESCE(u.full_name, u.username) AS created_by_name,
+             COALESCE((SELECT SUM(amount) FROM payment_remito_allocations WHERE payment_id = p.id), 0) AS allocated_total
       FROM payments p
       LEFT JOIN users u ON p.created_by = u.id
       WHERE p.customer_id = ?

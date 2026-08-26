@@ -2369,15 +2369,24 @@ async function loadAccount() {
       $('no-account-payments').classList.add('hidden');
       ptbody.innerHTML = data.payments.map(p => {
         const detail = [p.bank, p.reference, p.notes].filter(Boolean).join(' · ');
+        const allocated = p.allocated_total || 0;
+        const available = Math.round((p.amount - allocated) * 100) / 100;
+        const allocNote = allocated > 0.005
+          ? `<br><small style="font-weight:400;color:var(--text-muted)">Asignado ${fmtMoney(allocated)}${available > 0.005 ? ` · disp. ${fmtMoney(available)}` : ' · vinculado'}</small>`
+          : '';
         return `<tr>
           <td style="color:var(--text-muted);font-size:.83rem">${fmtDateTime(p.created_at)}</td>
           <td><span class="badge badge-info">${methodLabel[p.method] || p.method}</span></td>
           <td style="color:var(--text-muted);font-size:.85rem">${esc(detail || '—')}</td>
-          <td class="text-right" style="font-weight:600;color:var(--success-txt)">${fmtMoney(p.amount)}</td>
+          <td class="text-right" style="font-weight:600;color:var(--success-txt)">${fmtMoney(p.amount)}${allocNote}</td>
           <td class="text-center">
             <a href="/api/payments/${p.id}/recibo" target="_blank" class="btn-icon" title="Recibo PDF">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             </a>
+            ${available > 0.005 ? `
+            <button type="button" class="btn-icon admin-only" onclick="openAllocatePaymentModal(${p.id})" title="Asignar a pedido">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+            </button>` : ''}
           </td>
           <td class="text-center admin-only">
             <button class="btn-icon btn-delete" onclick="deletePayment(${p.id})" title="Eliminar pago">
@@ -2537,6 +2546,116 @@ function closePaymentModal() {
 }
 $('btn-payment-cancel').addEventListener('click', closePaymentModal);
 $('payment-modal').addEventListener('click', e => { if (e.target === $('payment-modal')) closePaymentModal(); });
+
+// ── Asignar (retroactivamente) un pago genérico existente a uno o varios ──────
+// remitos. No crea un pago nuevo ni un asiento contable: el pago ya existe y ya
+// generó su movimiento de caja/banco y su asiento en su momento — esto sólo
+// inserta filas en payment_remito_allocations para vincularlo, igual que hace
+// el modal de "Registrar pago" al armar sus allocations.
+let _allocPaymentId = null;
+
+function allocPmtTotal() {
+  let t = 0;
+  document.querySelectorAll('.alloc-pmt-row').forEach(row => {
+    if (row.querySelector('.alloc-pmt-chk').checked)
+      t += parseFloat(row.querySelector('.alloc-pmt-amt').value) || 0;
+  });
+  return Math.round(t * 100) / 100;
+}
+function updateAllocPmtTotal() {
+  $('alloc-pmt-total').textContent = fmtMoney(allocPmtTotal());
+}
+
+window.openAllocatePaymentModal = async function(paymentId) {
+  try {
+    const data = await api('GET', `/payments/${paymentId}/allocations`);
+    const pmt = data.payment;
+    _allocPaymentId = paymentId;
+
+    const methodLabel = { efectivo:'Efectivo', cheque:'Cheque', transferencia:'Transferencia', tarjeta:'Tarjeta', otros:'Otros' };
+    $('alloc-pmt-info').textContent =
+      `Pago del ${fmtDate(pmt.payment_date || pmt.created_at)} · ${methodLabel[pmt.method] || pmt.method} · Monto total ${fmtMoney(pmt.amount)}`;
+    $('alloc-pmt-available').textContent = fmtMoney(data.available);
+    $('alloc-pmt-total').textContent = fmtMoney(0);
+
+    const pending = await api('GET', `/customers/${pmt.customer_id}/pending-remitos`);
+    const listEl  = $('alloc-pmt-list');
+    if (!pending.length) {
+      listEl.innerHTML = '';
+      $('alloc-pmt-empty').classList.remove('hidden');
+    } else {
+      $('alloc-pmt-empty').classList.add('hidden');
+      listEl.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+          <thead>
+            <tr style="background:var(--bg-secondary);position:sticky;top:0">
+              <th style="padding:6px 8px;text-align:center;width:32px"></th>
+              <th style="padding:6px 8px;text-align:left">Remito</th>
+              <th style="padding:6px 8px;text-align:left">Pedido / Fecha</th>
+              <th style="padding:6px 8px;text-align:right">Saldo</th>
+              <th style="padding:6px 8px;text-align:right;width:120px">Asignar ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pending.map(r => `
+              <tr class="alloc-pmt-row" data-id="${r.id}" data-balance="${r.balance}">
+                <td style="padding:5px 8px;text-align:center">
+                  <input type="checkbox" class="alloc-pmt-chk">
+                </td>
+                <td style="padding:5px 8px;font-weight:600">${esc(r.remito_number)}</td>
+                <td style="padding:5px 8px;color:var(--text-muted)">${esc(r.order_number)}<br><small>${fmtDate(r.created_at)}</small></td>
+                <td style="padding:5px 8px;text-align:right">${fmtMoney(r.balance)}</td>
+                <td style="padding:5px 8px">
+                  <input type="number" class="input alloc-pmt-amt" value="${Math.min(r.balance, data.available).toFixed(2)}"
+                    min="0.01" max="${r.balance.toFixed(2)}" step="0.01"
+                    style="width:100%;padding:3px 6px;font-size:.82rem" disabled>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+      listEl.querySelectorAll('.alloc-pmt-row').forEach(row => {
+        const chk = row.querySelector('.alloc-pmt-chk');
+        const amt = row.querySelector('.alloc-pmt-amt');
+        chk.addEventListener('change', () => { amt.disabled = !chk.checked; updateAllocPmtTotal(); });
+        amt.addEventListener('input', updateAllocPmtTotal);
+      });
+    }
+
+    $('allocate-payment-modal').classList.remove('hidden');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+function closeAllocatePaymentModal() {
+  $('allocate-payment-modal').classList.add('hidden');
+  _allocPaymentId = null;
+}
+$('btn-alloc-pmt-cancel').addEventListener('click', closeAllocatePaymentModal);
+$('allocate-payment-modal').addEventListener('click', e => { if (e.target === $('allocate-payment-modal')) closeAllocatePaymentModal(); });
+
+$('btn-alloc-pmt-confirm').addEventListener('click', async () => {
+  if (!_allocPaymentId) return;
+  const allocations = [];
+  document.querySelectorAll('.alloc-pmt-row').forEach(row => {
+    if (row.querySelector('.alloc-pmt-chk').checked) {
+      const amt = parseFloat(row.querySelector('.alloc-pmt-amt').value) || 0;
+      if (amt > 0) allocations.push({ remito_id: Number(row.dataset.id), amount: amt });
+    }
+  });
+  if (!allocations.length) { toast('Seleccioná al menos un remito y un monto', 'error'); return; }
+
+  const btn = $('btn-alloc-pmt-confirm');
+  btn.disabled = true;
+  try {
+    await api('POST', `/payments/${_allocPaymentId}/allocate`, { allocations });
+    toast('Pago asignado al pedido', 'success');
+    closeAllocatePaymentModal();
+    loadAccount();
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ── "Cobro" de un pedido puntual (lista de pedidos) ───────────────────────────
 // Reutiliza el modal de "Registrar pago" de siempre: precarga el monto y, al

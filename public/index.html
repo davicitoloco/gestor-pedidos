@@ -2891,6 +2891,30 @@
   </div>
 </div>
 
+<div id="allocate-payment-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:580px;width:95%">
+    <div class="modal-header">Asignar pago a pedido(s)</div>
+    <div class="modal-form-body">
+      <div style="background:var(--bg-secondary);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:.85rem">
+        <div id="alloc-pmt-info" style="color:var(--text-muted)"></div>
+        <div style="margin-top:4px">Monto disponible para asignar: <strong id="alloc-pmt-available">$ 0,00</strong></div>
+      </div>
+      <div id="alloc-pmt-empty" class="hidden" style="color:var(--text-muted);font-size:.85rem;padding:8px 0">
+        Este cliente no tiene remitos con saldo pendiente.
+      </div>
+      <div id="alloc-pmt-list" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:.82rem;color:var(--text-muted)">
+        <span>Seleccioná uno o varios remitos y ajustá el monto</span>
+        <span>Total a asignar: <strong id="alloc-pmt-total">$ 0,00</strong></span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-alloc-pmt-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-alloc-pmt-confirm">Asignar</button>
+    </div>
+  </div>
+</div>
+
 <div id="sup-payment-modal" class="modal-overlay hidden">
   <div class="modal" style="max-width:580px;width:95%">
     <div class="modal-header">Registrar pago a proveedor</div>
