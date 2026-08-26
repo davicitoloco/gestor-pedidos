@@ -401,7 +401,35 @@ addColIfMissing('remitos', 'iva_exempt',        'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('orders',  'payment_efectivo',  'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('orders',  'payment_cheque',    'INTEGER NOT NULL DEFAULT 0');
 addColIfMissing('customers', 'cuit', "TEXT NOT NULL DEFAULT ''");
-db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_cuit ON customers(cuit) WHERE cuit != ''");
+
+// Normaliza CUITs legacy (guardados con guiones/espacios antes de que POST/PUT
+// normalizaran a solo-dígitos) para que el índice UNIQUE de abajo compare
+// manzanas con manzanas. Si dos clientes quedarían con el mismo CUIT tras
+// normalizar, no se tocan — son duplicados reales a resolver a mano, no un
+// problema de formato.
+(function normalizeLegacyCuits() {
+  const rows = db.prepare("SELECT id, cuit FROM customers WHERE cuit != ''").all();
+  const byNormalized = new Map();
+  for (const r of rows) {
+    const norm = String(r.cuit).replace(/\D/g, '');
+    if (!byNormalized.has(norm)) byNormalized.set(norm, []);
+    byNormalized.get(norm).push(r);
+  }
+  const upd = db.prepare('UPDATE customers SET cuit = ? WHERE id = ?');
+  for (const [norm, group] of byNormalized.entries()) {
+    if (group.length === 1 && group[0].cuit !== norm) upd.run(norm, group[0].id);
+  }
+})();
+
+// No usar db.exec sin try/catch acá: si ya existen CUITs duplicados idénticos
+// en la tabla, CREATE UNIQUE INDEX tira y tumbaría el arranque del server en
+// cada deploy. Se loguea y se reintenta solo en el próximo boot (una vez
+// resueltos los duplicados a mano, la creación va a pasar sin intervención).
+try {
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_cuit ON customers(cuit) WHERE cuit != '' AND cuit IS NOT NULL");
+} catch (e) {
+  console.error('[DB] No se pudo crear idx_customers_cuit — hay CUITs duplicados en customers. Resolvé los duplicados y reiniciá la app:', e.message);
+}
 addColIfMissing('customers', 'localidad',  "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('customers', 'provincia',  "TEXT NOT NULL DEFAULT ''");
 addColIfMissing('customers', 'vendor_id',  'INTEGER REFERENCES users(id)');

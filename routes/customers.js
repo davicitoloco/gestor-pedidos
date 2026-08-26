@@ -197,14 +197,33 @@ router.put('/:id', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /api/customers/:id
+// DELETE /api/customers/:id — solo admin, y sólo si el cliente no tiene
+// pedidos/remitos/pagos/cheques asociados (evita romper esos registros).
 router.delete('/:id', (req, res) => {
   try {
+    if (req.session.role !== 'admin')
+      return res.status(403).json({ error: 'Solo un administrador puede eliminar clientes' });
+
     const id = Number(req.params.id);
     const ex = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
     if (!ex) return res.status(404).json({ error: 'Cliente no encontrado' });
-    if (isVendor(req) && ex.created_by !== req.session.userId)
-      return res.status(403).json({ error: 'No podés eliminar clientes de otros vendedores' });
+
+    const ordersCount   = db.prepare("SELECT COUNT(*) AS c FROM orders WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM(?))").get(ex.name).c;
+    const remitosCount  = db.prepare('SELECT COUNT(*) AS c FROM remitos WHERE customer_id = ?').get(id).c;
+    const paymentsCount = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE customer_id = ?').get(id).c;
+    const chequesCount  = db.prepare('SELECT COUNT(*) AS c FROM cheques WHERE customer_id = ?').get(id).c;
+
+    if (ordersCount || remitosCount || paymentsCount || chequesCount) {
+      const parts = [];
+      if (ordersCount)   parts.push(`${ordersCount} pedido${ordersCount !== 1 ? 's' : ''}`);
+      if (remitosCount)  parts.push(`${remitosCount} remito${remitosCount !== 1 ? 's' : ''}`);
+      if (paymentsCount) parts.push(`${paymentsCount} pago${paymentsCount !== 1 ? 's' : ''}`);
+      if (chequesCount)  parts.push(`${chequesCount} cheque${chequesCount !== 1 ? 's' : ''}`);
+      return res.status(409).json({
+        error: `No se puede eliminar: el cliente tiene registros asociados (${parts.join(', ')}).`,
+      });
+    }
+
     db.prepare('DELETE FROM customers WHERE id = ?').run(id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
