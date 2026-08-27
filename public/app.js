@@ -2021,20 +2021,22 @@ function clientRowHtml(c) {
       <td style="color:var(--text-muted);font-size:.85rem" title="${esc(c.address || '')}">${esc(c.address || '—')}</td>
       <td style="color:var(--text-muted);font-size:.85rem" title="${esc(localidadProv)}">${esc(localidadProv || '—')}</td>
       <td class="text-right">${balanceBadge(c.balance)}</td>
-      <td class="text-center" style="white-space:nowrap;position:sticky;right:0;background:var(--white);box-shadow:-2px 0 4px rgba(0,0,0,0.06)">
-        <button class="btn-icon" onclick="openAccountView(${c.id})" title="Cuenta corriente">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-        </button>
-        <button class="btn-icon" onclick="newOrderForClient('${esc(c.name)}')" title="Crear pedido">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-        </button>
-        <button class="btn-icon" onclick="openClientForm(${c.id})" title="Editar">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </button>
-        ${isAdmin() ? `
-        <button class="btn-icon btn-delete" onclick="deleteClient(${c.id})" title="Eliminar">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-        </button>` : ''}
+      <td class="text-center" style="position:sticky;right:0;background:var(--white);box-shadow:-2px 0 4px rgba(0,0,0,0.06);overflow:visible">
+        <div style="display:inline-flex;gap:2px;align-items:center">
+          <button class="btn-icon" onclick="openAccountView(${c.id})" title="Cuenta corriente">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          </button>
+          <button class="btn-icon" onclick="newOrderForClient('${esc(c.name)}')" title="Crear pedido">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+          </button>
+          <button class="btn-icon" onclick="openClientForm(${c.id})" title="Editar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          ${isAdmin() ? `
+          <button class="btn-icon btn-delete" onclick="deleteClient(${c.id})" title="Eliminar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+          </button>` : ''}
+        </div>
       </td>
     </tr>`;
 }
