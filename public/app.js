@@ -944,6 +944,39 @@ if ($('btn-price-list-save')) {
   });
 }
 
+// ── Exportar Excel de la lista de precios vigente (ordenada por nombre) ──
+// Mismos encabezados ("Nombre"/"Precio") que espera tanto el input de
+// importación inline de este modal como el modal de "Importar lista", para
+// que el archivo se pueda editar y volver a subir sin ajustes.
+if ($('btn-export-price-list')) {
+  $('btn-export-price-list').addEventListener('click', async () => {
+    try {
+      const [products, activeList] = await Promise.all([
+        api('GET', '/products?all=1'),
+        api('GET', '/price-lists/active').catch(() => null)
+      ]);
+      const priceMap = {};
+      if (activeList && activeList.items) {
+        for (const it of activeList.items) priceMap[it.product_id] = it.precio;
+      }
+      const rows = products
+        .filter(p => p.active)
+        .map(p => ({ name: p.name, precio: priceMap[p.id] !== undefined ? priceMap[p.id] : p.base_price }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+
+      if (!rows.length) { toast('No hay productos activos para exportar', 'error'); return; }
+
+      const data = [['Nombre', 'Precio'], ...rows.map(r => [r.name, r.precio])];
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      ws['!cols'] = [{ wch: 40 }, { wch: 14 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Lista de precios');
+      const fecha = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      XLSX.writeFile(wb, `lista_precios_${fecha}.xlsx`);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
 // ── Importar Excel en lista de precios ──
 if ($('inp-pl-import-file')) {
   $('inp-pl-import-file').addEventListener('change', async e => {
