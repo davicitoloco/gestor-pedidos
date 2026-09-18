@@ -140,6 +140,11 @@
             <input type="text" id="inp-orders-modelo" class="search-orders" list="products-datalist" placeholder="Filtrar por modelo de cerradura…" autocomplete="off" style="padding-right:28px">
             <button type="button" id="btn-orders-modelo-clear" title="Limpiar filtro" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;padding:2px">✕</button>
           </div>
+          <select id="inp-orders-entrega-filter" class="input select" style="width:170px" title="Filtrar por si el pedido ya fue entregado, combinable con el resto de los filtros">
+            <option value="">Estado de entrega: Todos</option>
+            <option value="entregado">Entregado</option>
+            <option value="no_entregado">No entregado</option>
+          </select>
         </div>
         <p id="orders-modelo-info" class="page-subtitle" style="display:none;margin:-6px 0 10px"></p>
         <div class="table-wrap" style="overflow-x:auto">

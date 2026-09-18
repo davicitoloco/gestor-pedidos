@@ -72,9 +72,21 @@ function getCompanyName() {
 // ── GET /api/orders ───────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
   try {
-    const { status, search, modelo } = req.query;
+    const { status, search, modelo, entrega } = req.query;
     const vendorFilter = isVendor(req) ? `AND o.created_by = ${req.session.userId}` : '';
     const statusFilter = (status && status !== 'Todos') ? `AND o.status = ?` : '';
+    // Filtro binario de "estado de entrega", independiente de los tabs de estado
+    // granular: agrupa Pendiente/Entrega parcial/En preparación como "todavía no
+    // entregado" (Cancelado queda afuera de los dos lados — no está pendiente de
+    // entregar ni fue entregado), y Entregado/Entregado con devolución como
+    // "entregado" (la devolución es un evento posterior a una entrega ya completa).
+    const ENTREGA_PENDIENTE_STATUSES = ['Pendiente', 'Entrega parcial', 'En preparación'];
+    const ENTREGA_COMPLETA_STATUSES  = ['Entregado', 'Entregado con devolución'];
+    const entregaFilter = entrega === 'no_entregado'
+      ? `AND o.status IN (${ENTREGA_PENDIENTE_STATUSES.map(() => '?').join(',')})`
+      : entrega === 'entregado'
+      ? `AND o.status IN (${ENTREGA_COMPLETA_STATUSES.map(() => '?').join(',')})`
+      : '';
     const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ? OR LOWER(COALESCE(u.full_name, u.username)) LIKE ?)` : '';
     const modeloFilter = modelo ? `AND EXISTS (SELECT 1 FROM order_items oim WHERE oim.order_id = o.id AND LOWER(oim.product_name) LIKE ?)` : '';
     const modeloQtySelect = modelo
@@ -84,6 +96,8 @@ router.get('/', (req, res) => {
     const params = [];
     if (modelo) params.push(`%${modelo.toLowerCase()}%`);
     if (status && status !== 'Todos') params.push(status);
+    if (entrega === 'no_entregado') params.push(...ENTREGA_PENDIENTE_STATUSES);
+    else if (entrega === 'entregado') params.push(...ENTREGA_COMPLETA_STATUSES);
     if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q, q); }
     if (modelo) params.push(`%${modelo.toLowerCase()}%`);
     params.push(...sf.params);
@@ -115,7 +129,7 @@ router.get('/', (req, res) => {
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id
-      WHERE 1=1 ${vendorFilter} ${statusFilter} ${searchFilter} ${modeloFilter} ${sf.clause}
+      WHERE 1=1 ${vendorFilter} ${statusFilter} ${entregaFilter} ${searchFilter} ${modeloFilter} ${sf.clause}
       GROUP BY o.id
       ORDER BY o.order_sequence DESC
     `;

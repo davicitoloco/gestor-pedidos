@@ -289,9 +289,11 @@ async function loadOrders() {
     if (q) params.set('search', q);
     const modelo = ($('inp-orders-modelo').value || '').trim();
     if (modelo) params.set('modelo', modelo);
+    const entrega = $('inp-orders-entrega-filter').value;
+    if (entrega) params.set('entrega', entrega);
     const qs = params.toString() ? `?${params}` : '';
     const orders = await api('GET', `/orders${qs}`);
-    renderOrders(orders, q, modelo);
+    renderOrders(orders, q, modelo, entrega);
   } catch (err) { toast(err.message, 'error'); }
 }
 
@@ -306,23 +308,27 @@ function applyOrderModeloFilter() {
   _ordersSearchTimer = setTimeout(loadOrders, 250);
 }
 
-function renderOrders(orders, searchQuery = '', modeloQuery = '') {
+function renderOrders(orders, searchQuery = '', modeloQuery = '', entregaFilter = '') {
   const tbody = $('orders-tbody');
   const noEl  = $('no-orders');
   const infoEl = $('orders-modelo-info');
   $('list-count').textContent = orders.length === 0 ? 'Sin pedidos' : `${orders.length} pedido${orders.length !== 1 ? 's' : ''}`;
 
-  if (modeloQuery) {
+  const entregaLabel = entregaFilter === 'entregado' ? 'entregados' : entregaFilter === 'no_entregado' ? 'no entregados' : '';
+  if (modeloQuery || entregaLabel) {
     infoEl.style.display = '';
-    infoEl.textContent = `${orders.length} pedido${orders.length !== 1 ? 's' : ''} con el modelo "${modeloQuery}"`;
+    const parts = [];
+    if (modeloQuery)  parts.push(`con el modelo "${modeloQuery}"`);
+    if (entregaLabel) parts.push(entregaLabel);
+    infoEl.textContent = `${orders.length} pedido${orders.length !== 1 ? 's' : ''} ${parts.join(' — ')}`;
   } else {
     infoEl.style.display = 'none';
   }
 
   if (orders.length === 0) {
     tbody.innerHTML = '';
-    $('no-orders-msg').textContent = modeloQuery
-      ? 'No se encontraron pedidos con ese modelo'
+    $('no-orders-msg').textContent = (modeloQuery || entregaLabel)
+      ? 'No se encontraron pedidos con esos filtros'
       : (searchQuery ? 'No se encontraron pedidos' : 'No hay pedidos');
     noEl.classList.remove('hidden');
     return;
@@ -411,6 +417,7 @@ $('btn-orders-modelo-clear').addEventListener('click', () => {
   $('btn-orders-modelo-clear').style.display = 'none';
   loadOrders();
 });
+$('inp-orders-entrega-filter').addEventListener('change', loadOrders);
 $('btn-new-order').addEventListener('click', () => openOrderForm(null));
 
 function showOrdersSubview(view) {
