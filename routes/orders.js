@@ -80,15 +80,32 @@ router.get('/', (req, res) => {
     // entregado" (Cancelado queda afuera de los dos lados — no está pendiente de
     // entregar ni fue entregado), y Entregado/Entregado con devolución como
     // "entregado" (la devolución es un evento posterior a una entrega ya completa).
+    //
+    // Combinado con "modelo": la comparación deja de ser a nivel de pedido y pasa
+    // a ser a nivel de ÍTEM — un pedido "Entrega parcial" puede tener el modelo X
+    // ya 100% entregado y otro modelo todavía pendiente; en ese caso el filtro
+    // "No entregado" + modelo X NO debe mostrar ese pedido. Ítems donde una parte
+    // fue cancelada (Cancelar unidades pendientes) y el resto no se entregó del
+    // todo quedan afuera de los dos lados, igual que "Cancelado" a nivel pedido.
     const ENTREGA_PENDIENTE_STATUSES = ['Pendiente', 'Entrega parcial', 'En preparación'];
     const ENTREGA_COMPLETA_STATUSES  = ['Entregado', 'Entregado con devolución', 'Entregado y cerrado'];
-    const entregaFilter = entrega === 'no_entregado'
+    const itemDeliveredExpr = `COALESCE((SELECT SUM(di.quantity_delivered) FROM delivery_items di WHERE di.order_item_id = oim.id), 0)`;
+    const itemReturnedExpr  = `COALESCE((SELECT SUM(ori.quantity_returned) FROM order_return_items ori WHERE ori.order_item_id = oim.id), 0)`;
+    const itemCancelledExpr = `COALESCE((SELECT SUM(ci.quantity_cancelled) FROM order_cancellation_items ci WHERE ci.order_item_id = oim.id), 0)`;
+    const itemNetDeliveredExpr = `(${itemDeliveredExpr} - ${itemReturnedExpr})`;
+    const itemPendingExpr = `(oim.quantity - ${itemNetDeliveredExpr} - ${itemCancelledExpr})`;
+
+    const entregaFilter = (entrega && modelo) ? '' : entrega === 'no_entregado'
       ? `AND o.status IN (${ENTREGA_PENDIENTE_STATUSES.map(() => '?').join(',')})`
       : entrega === 'entregado'
       ? `AND o.status IN (${ENTREGA_COMPLETA_STATUSES.map(() => '?').join(',')})`
       : '';
     const searchFilter = search ? `AND (LOWER(o.customer_name) LIKE ? OR printf('%03d', o.order_sequence) LIKE ? OR LOWER(COALESCE(u.full_name, u.username)) LIKE ?)` : '';
-    const modeloFilter = modelo ? `AND EXISTS (SELECT 1 FROM order_items oim WHERE oim.order_id = o.id AND LOWER(oim.product_name) LIKE ?)` : '';
+    const modeloFilter = !modelo ? '' : entrega === 'no_entregado'
+      ? `AND EXISTS (SELECT 1 FROM order_items oim WHERE oim.order_id = o.id AND LOWER(oim.product_name) LIKE ? AND ${itemPendingExpr} > 0.0001)`
+      : entrega === 'entregado'
+      ? `AND EXISTS (SELECT 1 FROM order_items oim WHERE oim.order_id = o.id AND LOWER(oim.product_name) LIKE ? AND ${itemNetDeliveredExpr} >= oim.quantity - 0.0001)`
+      : `AND EXISTS (SELECT 1 FROM order_items oim WHERE oim.order_id = o.id AND LOWER(oim.product_name) LIKE ?)`;
     const modeloQtySelect = modelo
       ? `, COALESCE((SELECT SUM(oiq.quantity) FROM order_items oiq WHERE oiq.order_id = o.id AND LOWER(oiq.product_name) LIKE ?), 0) AS modelo_qty`
       : '';
@@ -96,8 +113,10 @@ router.get('/', (req, res) => {
     const params = [];
     if (modelo) params.push(`%${modelo.toLowerCase()}%`);
     if (status && status !== 'Todos') params.push(status);
-    if (entrega === 'no_entregado') params.push(...ENTREGA_PENDIENTE_STATUSES);
-    else if (entrega === 'entregado') params.push(...ENTREGA_COMPLETA_STATUSES);
+    if (!modelo) {
+      if (entrega === 'no_entregado') params.push(...ENTREGA_PENDIENTE_STATUSES);
+      else if (entrega === 'entregado') params.push(...ENTREGA_COMPLETA_STATUSES);
+    }
     if (search) { const q = `%${search.toLowerCase()}%`; params.push(q, q, q); }
     if (modelo) params.push(`%${modelo.toLowerCase()}%`);
     params.push(...sf.params);
@@ -154,7 +173,11 @@ router.get('/:id', (req, res) => {
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
     if (isVendor(req) && order.created_by !== req.session.userId)
       return res.status(403).json({ error: 'Acceso denegado' });
-    const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
+    const items = db.prepare(`
+      SELECT oi.*,
+        COALESCE((SELECT SUM(ci.quantity_cancelled) FROM order_cancellation_items ci WHERE ci.order_item_id = oi.id), 0) AS cancelled
+      FROM order_items oi WHERE oi.order_id = ? ORDER BY oi.id
+    `).all(id);
     res.json({ ...order, items });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -813,6 +836,22 @@ router.post('/:id/deliveries', (req, res) => {
     if (!validItems.length)
       return res.status(400).json({ error: 'Ingresá al menos una cantidad mayor a 0' });
 
+    // No permitir entregar unidades que ya fueron canceladas (Cancelar unidades pendientes)
+    const cancelledMap = {};
+    for (const row of db.prepare(`
+      SELECT oi.id, oi.quantity,
+        COALESCE((SELECT SUM(di.quantity_delivered) FROM delivery_items di WHERE di.order_item_id = oi.id), 0) AS delivered,
+        COALESCE((SELECT SUM(ci.quantity_cancelled) FROM order_cancellation_items ci WHERE ci.order_item_id = oi.id), 0) AS cancelled
+      FROM order_items oi WHERE oi.order_id = ?
+    `).all(id)) cancelledMap[row.id] = row;
+    for (const item of validItems) {
+      const row = cancelledMap[item.order_item_id];
+      if (!row) continue;
+      const remaining = Math.max(0, row.quantity - row.delivered - row.cancelled);
+      if (parseFloat(item.quantity_delivered) > remaining + 0.0001)
+        return res.status(400).json({ error: `La cantidad a entregar supera lo pendiente (algunas unidades ya fueron canceladas)` });
+    }
+
     withTransaction(() => {
       const dr = db.prepare(
         'INSERT INTO deliveries (order_id, notes, created_by) VALUES (?, ?, ?)'
@@ -842,16 +881,18 @@ router.post('/:id/deliveries', (req, res) => {
         }
       }
 
-      // Recalcular estado automáticamente
+      // Recalcular estado automáticamente. Un ítem se considera resuelto cuando
+      // lo entregado + lo cancelado (Cancelar unidades pendientes) cubre el total
+      // pedido, para que un pedido con cancelaciones parciales no quede trabado
+      // en "Entrega parcial" para siempre.
       const summary = db.prepare(`
-        SELECT oi.quantity, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
-        FROM order_items oi
-        LEFT JOIN delivery_items di ON di.order_item_id = oi.id
-        WHERE oi.order_id = ?
-        GROUP BY oi.id
+        SELECT oi.quantity,
+          COALESCE((SELECT SUM(di.quantity_delivered) FROM delivery_items di WHERE di.order_item_id = oi.id), 0) AS total_delivered,
+          COALESCE((SELECT SUM(ci.quantity_cancelled) FROM order_cancellation_items ci WHERE ci.order_item_id = oi.id), 0) AS total_cancelled
+        FROM order_items oi WHERE oi.order_id = ?
       `).all(id);
 
-      const allDone  = summary.length > 0 && summary.every(r => r.total_delivered >= r.quantity);
+      const allDone  = summary.length > 0 && summary.every(r => r.total_delivered + r.total_cancelled >= r.quantity);
       const anyDone  = summary.some(r => r.total_delivered > 0);
       const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
       db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
@@ -927,53 +968,110 @@ router.post('/:id/deliveries', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── POST /api/orders/:id/close-partial ───────────────────────────────────────
-// Cierra un pedido en "Entrega parcial": las unidades aún no entregadas se dan
-// de baja sin tocar stock (nunca salieron). El asiento de venta original (creado
-// al entrar en "Entrega parcial") reconoce el TOTAL del pedido, no solo lo
-// entregado — así que acá se genera un asiento de ajuste que revierte únicamente
-// el valor de las unidades canceladas, dejando el asiento original intacto como
-// registro de auditoría y el saldo del cliente correcto (solo lo entregado).
-// Pasa a "Entregado y cerrado": no acepta nuevas entregas ni vuelve a un estado
-// anterior, pero sigue aceptando devoluciones (POST /:id/returns) sobre lo que
-// sí se entregó.
-router.post('/:id/close-partial', (req, res) => {
+// ── GET /api/orders/:id/cancellations ────────────────────────────────────────
+router.get('/:id/cancellations', (req, res) => {
   try {
-    if (!isAdminLike(req)) return res.status(403).json({ error: 'Solo administradores pueden cerrar un pedido' });
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (isVendor(req) && order.created_by !== req.session.userId)
+      return res.status(403).json({ error: 'Acceso denegado' });
+
+    const cancellations = db.prepare(`
+      SELECT c.*, COALESCE(u.full_name, u.username) AS created_by_name
+      FROM order_cancellations c LEFT JOIN users u ON c.created_by = u.id
+      WHERE c.order_id = ? ORDER BY c.created_at ASC
+    `).all(id);
+    for (const c of cancellations) {
+      c.items = db.prepare('SELECT * FROM order_cancellation_items WHERE cancellation_id = ? ORDER BY id').all(c.id);
+    }
+    res.json(cancellations);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /api/orders/:id/cancel-pending ──────────────────────────────────────
+// Cancela unidades pendientes (aún no entregadas) de un pedido en "Entrega
+// parcial", ítem por ítem, sin tocar stock (nunca salieron). Si tras la
+// cancelación no queda nada pendiente en ningún ítem, el pedido pasa a
+// "Entregado y cerrado" (no acepta nuevas entregas ni vuelve a un estado
+// anterior, pero sigue aceptando devoluciones sobre lo entregado). Si queda
+// pendiente en algún ítem, el pedido permanece en "Entrega parcial" y la
+// cancelación parcial queda registrada en el historial y en las notas.
+//
+// El asiento de venta original (creado al entrar en "Entrega parcial") reconoce
+// el TOTAL del pedido, no solo lo entregado — así que acá se genera un asiento
+// de ajuste que revierte únicamente el valor de lo cancelado en este evento,
+// dejando el asiento original intacto como registro de auditoría.
+router.post('/:id/cancel-pending', (req, res) => {
+  try {
+    if (!isAdminLike(req)) return res.status(403).json({ error: 'Solo administradores pueden cancelar unidades pendientes' });
     const id = Number(req.params.id);
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
     if (order.status !== 'Entrega parcial')
-      return res.status(400).json({ error: 'Solo se puede cerrar un pedido en estado "Entrega parcial"' });
+      return res.status(400).json({ error: 'Solo se pueden cancelar unidades pendientes de un pedido en estado "Entrega parcial"' });
 
     const observaciones = (req.body.observaciones || '').trim();
-    const stamp = new Date().toISOString().slice(0, 10);
-    const closeNote = `[Cierre parcial ${stamp}]${observaciones ? ' ' + observaciones : ''}`;
-    const newNotes = order.notes ? `${order.notes}\n${closeNote}` : closeNote;
+    const requestedItems = (req.body.items || []).filter(i => parseFloat(i.quantity_cancelled) > 0);
+    if (!requestedItems.length)
+      return res.status(400).json({ error: 'Ingresá al menos una cantidad mayor a 0 para cancelar' });
+
+    const itemRows = db.prepare(`
+      SELECT oi.id, oi.product_name, oi.quantity, oi.unit_price, oi.discount,
+        COALESCE((SELECT SUM(di.quantity_delivered) FROM delivery_items di WHERE di.order_item_id = oi.id), 0) AS delivered,
+        COALESCE((SELECT SUM(ci.quantity_cancelled) FROM order_cancellation_items ci WHERE ci.order_item_id = oi.id), 0) AS already_cancelled
+      FROM order_items oi WHERE oi.order_id = ?
+    `).all(id);
+    const itemMap = {};
+    for (const r of itemRows) itemMap[r.id] = { ...r, pending: Math.max(0, r.quantity - r.delivered - r.already_cancelled) };
+
+    const cancelItems = [];
+    for (const it of requestedItems) {
+      const oiId = Number(it.order_item_id);
+      const qty  = parseFloat(it.quantity_cancelled);
+      const row  = itemMap[oiId];
+      if (!row) return res.status(400).json({ error: 'Ítem de pedido inválido' });
+      if (qty > row.pending + 0.0001)
+        return res.status(400).json({ error: `No se puede cancelar más de lo pendiente para "${row.product_name}" (pendiente: ${row.pending})` });
+      cancelItems.push({ order_item_id: oiId, product_name: row.product_name, quantity_cancelled: qty, unit_price: row.unit_price, discount: row.discount });
+    }
+
+    const cancelSub = cancelItems.reduce((s, i) => s + i.quantity_cancelled * i.unit_price * (1 - i.discount / 100), 0);
+    const cancelTotal = cancelSub
+      * (1 - (order.discount  || 0) / 100)
+      * (1 - (order.discount2 || 0) / 100)
+      * (1 - (order.discount3 || 0) / 100)
+      * (1 - (order.discount4 || 0) / 100);
 
     withTransaction(() => {
-      db.prepare("UPDATE orders SET status='Entregado y cerrado', notes=?, updated_at=datetime('now','localtime') WHERE id=?")
-        .run(newNotes, id);
+      const cr = db.prepare(
+        'INSERT INTO order_cancellations (order_id, notes, created_by, sucursal_id) VALUES (?, ?, ?, ?)'
+      ).run(id, observaciones, req.session.userId, getInsertSucursalId(req));
+      const cancellationId = Number(cr.lastInsertRowid);
+      const insCI = db.prepare(
+        'INSERT INTO order_cancellation_items (cancellation_id, order_item_id, product_name, quantity_cancelled) VALUES (?, ?, ?, ?)'
+      );
+      for (const it of cancelItems) insCI.run(cancellationId, it.order_item_id, it.product_name, it.quantity_cancelled);
 
-      // ── Ajuste contable por lo cancelado ────────────────────────────────────
-      const summary = db.prepare(`
-        SELECT oi.quantity, oi.unit_price, oi.discount, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
-        FROM order_items oi
-        LEFT JOIN delivery_items di ON di.order_item_id = oi.id
-        WHERE oi.order_id = ?
-        GROUP BY oi.id
-      `).all(id);
-      const pendingSub = summary.reduce((s, r) => {
-        const pendingQty = Math.max(0, r.quantity - r.total_delivered);
-        return s + pendingQty * r.unit_price * (1 - r.discount / 100);
-      }, 0);
-      const pendingTotal = pendingSub
-        * (1 - (order.discount  || 0) / 100)
-        * (1 - (order.discount2 || 0) / 100)
-        * (1 - (order.discount3 || 0) / 100)
-        * (1 - (order.discount4 || 0) / 100);
+      // ¿Queda algo pendiente en algún ítem tras esta cancelación?
+      const stillPending = itemRows.some(r => {
+        const cancelledNow = cancelItems.find(c => c.order_item_id === r.id);
+        const cancelledQty = cancelledNow ? cancelledNow.quantity_cancelled : 0;
+        return (r.quantity - r.delivered - r.already_cancelled - cancelledQty) > 0.0001;
+      });
 
-      if (pendingTotal > 0.005) {
+      const stamp = new Date().toISOString().slice(0, 10);
+      const itemsSummary = cancelItems.map(i => `${i.product_name} x${i.quantity_cancelled}`).join(', ');
+      const label = stillPending ? 'Cancelación parcial' : 'Cierre por cancelación de pendiente';
+      const noteLine = `[${label} ${stamp}] ${itemsSummary}${observaciones ? ' — ' + observaciones : ''}`;
+      const newNotes = order.notes ? `${order.notes}\n${noteLine}` : noteLine;
+      const newStatus = stillPending ? 'Entrega parcial' : 'Entregado y cerrado';
+
+      db.prepare("UPDATE orders SET status=?, notes=?, updated_at=datetime('now','localtime') WHERE id=?")
+        .run(newStatus, newNotes, id);
+
+      // ── Ajuste contable por lo cancelado en este evento ─────────────────────
+      if (cancelTotal > 0.005) {
         const saleEntry = db.prepare(
           "SELECT id FROM journal_entries WHERE ref_type='order' AND ref_id=? AND is_reversed=0"
         ).get(id);
@@ -986,20 +1084,20 @@ router.post('/:id/close-partial', (req, res) => {
             let lines;
             if (order.iva_exempt || !ivaVentas) {
               lines = [
-                { account_id: ventas.id,   debit: pendingTotal, credit: 0 },
-                { account_id: deudores.id, debit: 0, credit: pendingTotal },
+                { account_id: ventas.id,   debit: cancelTotal, credit: 0 },
+                { account_id: deudores.id, debit: 0, credit: cancelTotal },
               ];
             } else {
-              const iva   = Math.round(pendingTotal * 0.21 * 100) / 100;
-              const gross = pendingTotal + iva;
+              const iva   = Math.round(cancelTotal * 0.21 * 100) / 100;
+              const gross = cancelTotal + iva;
               lines = [
-                { account_id: ventas.id,    debit: pendingTotal, credit: 0 },
-                { account_id: ivaVentas.id, debit: iva,          credit: 0 },
-                { account_id: deudores.id,  debit: 0,            credit: gross },
+                { account_id: ventas.id,    debit: cancelTotal, credit: 0 },
+                { account_id: ivaVentas.id, debit: iva,         credit: 0 },
+                { account_id: deudores.id,  debit: 0,           credit: gross },
               ];
             }
             recordJournal({
-              date:     new Date().toISOString().slice(0, 10),
+              date:     stamp,
               desc:     `Cancelación unidades pendientes - pedido #${orderNum} - cliente ${order.customer_name}`,
               ref_type: 'order_close',
               ref_id:   id,
@@ -1012,7 +1110,11 @@ router.post('/:id/close-partial', (req, res) => {
     });
 
     const updated = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id WHERE o.id = ?`).get(id);
-    const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
+    const orderItems = db.prepare(`
+      SELECT oi.*,
+        COALESCE((SELECT SUM(ci.quantity_cancelled) FROM order_cancellation_items ci WHERE ci.order_item_id = oi.id), 0) AS cancelled
+      FROM order_items oi WHERE oi.order_id = ? ORDER BY oi.id
+    `).all(id);
     res.json({ ...updated, items: orderItems });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1058,14 +1160,13 @@ router.delete('/:id/deliveries/:delivId', (req, res) => {
       // restaura el stock.
       if (order.status !== 'Entregado y cerrado') {
         const summary = db.prepare(`
-          SELECT oi.quantity, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
-          FROM order_items oi
-          LEFT JOIN delivery_items di ON di.order_item_id = oi.id
-          WHERE oi.order_id = ?
-          GROUP BY oi.id
+          SELECT oi.quantity,
+            COALESCE((SELECT SUM(di.quantity_delivered) FROM delivery_items di WHERE di.order_item_id = oi.id), 0) AS total_delivered,
+            COALESCE((SELECT SUM(ci.quantity_cancelled) FROM order_cancellation_items ci WHERE ci.order_item_id = oi.id), 0) AS total_cancelled
+          FROM order_items oi WHERE oi.order_id = ?
         `).all(orderId);
 
-        const allDone  = summary.length > 0 && summary.every(r => r.total_delivered >= r.quantity);
+        const allDone  = summary.length > 0 && summary.every(r => r.total_delivered + r.total_cancelled >= r.quantity);
         const anyDone  = summary.some(r => r.total_delivered > 0);
         const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
         db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")

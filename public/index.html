@@ -356,6 +356,13 @@
             <div class="card-body" id="returns-body" style="padding:0"></div>
           </div>
 
+          <div class="card hidden" id="cancellations-card">
+            <div class="card-header card-header-flex">
+              <span>Historial de cancelaciones</span>
+            </div>
+            <div class="card-body" id="cancellations-body" style="padding:0"></div>
+          </div>
+
           <div id="disc-limit-error" class="hidden" style="color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px 14px;font-size:.88rem;font-weight:600;margin-bottom:8px">
             El descuento máximo permitido es 20+5+5 (27.8%)
           </div>
@@ -2769,7 +2776,7 @@
     <div class="modal-header">Cancelar unidades pendientes</div>
     <div class="modal-form-body">
       <p style="font-size:.88rem;color:var(--text-muted);margin-bottom:14px">
-        El pedido pasará a <strong>"Entregado y cerrado"</strong>. Lo ya entregado queda como está (y podés seguir registrando devoluciones sobre eso); las unidades pendientes se cancelan y no se van a entregar. No se modifica el stock. Se genera un asiento contable de ajuste que revierte solo el valor de lo cancelado, dejando el saldo del cliente correcto según lo efectivamente entregado.
+        Elegí cuántas unidades pendientes de cada ítem cancelar (por defecto, todo lo pendiente). Lo ya entregado queda como está (y podés seguir registrando devoluciones sobre eso). Si no queda nada pendiente en ningún ítem, el pedido pasa a <strong>"Entregado y cerrado"</strong>; si queda pendiente en algún ítem, sigue en <strong>"Entrega parcial"</strong>. No se modifica el stock. Se genera un asiento contable de ajuste que revierte solo el valor de lo cancelado.
       </p>
       <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:16px">
         <table class="table" style="font-size:.88rem">
@@ -2777,7 +2784,8 @@
             <th>Producto</th>
             <th style="width:90px;text-align:right">Pedido</th>
             <th style="width:90px;text-align:right">Entregado</th>
-            <th style="width:100px;text-align:right">Pendiente a cancelar</th>
+            <th style="width:90px;text-align:right">Pendiente</th>
+            <th style="width:120px;text-align:right">¿Cuántas cancelar?</th>
           </tr></thead>
           <tbody id="close-partial-modal-tbody"></tbody>
         </table>
@@ -2789,7 +2797,7 @@
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-close-partial-cancel">Cancelar</button>
-      <button class="btn btn-danger" id="btn-close-partial-confirm">Confirmar cierre</button>
+      <button class="btn btn-danger" id="btn-close-partial-confirm">Confirmar cancelación</button>
     </div>
   </div>
 </div>

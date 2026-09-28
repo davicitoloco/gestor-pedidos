@@ -542,6 +542,15 @@ async function openOrderForm(orderId, prefillCustomer = null) {
     returnsCard.classList.add('hidden');
   }
 
+  // Mostrar/ocultar sección de cancelaciones
+  const cancellationsCard = $('cancellations-card');
+  if (orderId) {
+    cancellationsCard.classList.remove('hidden');
+    loadCancellations(orderId);
+  } else {
+    cancellationsCard.classList.add('hidden');
+  }
+
   showOrdersSubview('form');
   $('inp-customer').focus();
 }
@@ -2996,7 +3005,7 @@ async function openDeliveryModal(orderId) {
       product_name:       item.product_name,
       quantity_ordered:   item.quantity,
       quantity_delivered: deliveredMap[item.id] || 0,
-      quantity_remaining: Math.max(0, item.quantity - (deliveredMap[item.id] || 0))
+      quantity_remaining: Math.max(0, item.quantity - (deliveredMap[item.id] || 0) - (item.cancelled || 0))
     }));
 
     $('delivery-modal-tbody').innerHTML = modalItems.map(it => `
@@ -3081,20 +3090,29 @@ async function openClosePartialModal() {
 
     const modalItems = order.items.map(item => {
       const delivered = deliveredMap[item.id] || 0;
+      const cancelled = item.cancelled || 0;
       return {
+        order_item_id:    item.id,
         product_name:     item.product_name,
         quantity_ordered: item.quantity,
         delivered,
-        pending: Math.max(0, item.quantity - delivered)
+        pending: Math.max(0, item.quantity - delivered - cancelled)
       };
-    });
+    }).filter(it => it.pending > 0.0000001);
+
+    if (!modalItems.length) { toast('No hay unidades pendientes para cancelar en este pedido', 'error'); return; }
 
     $('close-partial-modal-tbody').innerHTML = modalItems.map(it => `
       <tr>
         <td>${esc(it.product_name)}</td>
         <td class="text-right">${it.quantity_ordered}</td>
         <td class="text-right" style="color:${it.delivered > 0 ? 'var(--success-txt)' : 'var(--text-muted)'}">${it.delivered}</td>
-        <td class="text-right" style="font-weight:700;color:${it.pending > 0 ? 'var(--danger-dark)' : 'var(--text-muted)'}">${it.pending > 0 ? it.pending : '—'}</td>
+        <td class="text-right" style="font-weight:700;color:var(--danger-dark)">${it.pending}</td>
+        <td class="text-right">
+          <input type="number" class="input close-partial-qty-inp" data-item-id="${it.order_item_id}"
+            min="0" max="${it.pending}" step="any" value="${it.pending}"
+            style="width:90px;text-align:right;padding:5px 8px">
+        </td>
       </tr>
     `).join('');
 
@@ -3107,27 +3125,69 @@ $('btn-close-partial-confirm').addEventListener('click', async () => {
   const orderId = state.editingOrderId;
   if (!orderId) return;
 
+  const items = [];
+  document.querySelectorAll('.close-partial-qty-inp').forEach(inp => {
+    const qty = parseFloat(inp.value) || 0;
+    if (qty > 0) items.push({ order_item_id: Number(inp.dataset.itemId), quantity_cancelled: qty });
+  });
+  if (!items.length) { toast('Ingresá al menos una cantidad mayor a 0 para cancelar', 'error'); return; }
+
   const btn = $('btn-close-partial-confirm');
   btn.disabled = true;
   try {
-    const updated = await api('POST', `/orders/${orderId}/close-partial`, {
-      observaciones: $('inp-close-partial-notes').value.trim()
+    const updated = await api('POST', `/orders/${orderId}/cancel-pending`, {
+      observaciones: $('inp-close-partial-notes').value.trim(),
+      items
     });
     $('close-partial-modal').classList.add('hidden');
-    toast('Pedido cerrado', 'success');
+    toast(updated.status === 'Entregado y cerrado' ? 'Pedido cerrado' : 'Cancelación parcial registrada', 'success');
 
     $('inp-status').value = updated.status;
-    $('inp-status').disabled = true;
     $('inp-notes').value = updated.notes || '';
     state.currentOrderStatus = updated.status;
     $('form-status-badge').innerHTML = statusBadge(updated.status);
-    $('btn-register-delivery').classList.add('hidden');
-    $('btn-close-partial').classList.add('hidden');
+    if (updated.status === 'Entregado y cerrado') {
+      $('inp-status').disabled = true;
+      $('btn-register-delivery').classList.add('hidden');
+      $('btn-close-partial').classList.add('hidden');
+    }
     updateReturnButtonVisibility();
+    loadCancellations(orderId);
     if (!$('list-view').classList.contains('hidden')) loadOrders();
   } catch (err) { toast(err.message, 'error'); }
   finally { btn.disabled = false; }
 });
+
+async function loadCancellations(orderId) {
+  try {
+    const cancellations = await api('GET', `/orders/${orderId}/cancellations`);
+    renderCancellations(cancellations);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderCancellations(cancellations) {
+  const body = $('cancellations-body');
+  if (!cancellations.length) {
+    body.innerHTML = '<div class="empty-items">Todavía no hay cancelaciones registradas para este pedido.</div>';
+    return;
+  }
+  body.innerHTML = cancellations.map(c => `
+    <div class="delivery-entry">
+      <div class="delivery-entry-header">
+        <span class="delivery-date">${fmtDateTime(c.created_at)}</span>
+        ${c.created_by_name ? `<span style="color:var(--text-muted);font-size:.82rem">por ${esc(c.created_by_name)}</span>` : ''}
+      </div>
+      <div class="delivery-items-list">
+        ${c.items.map(it => `
+          <span class="delivery-item-chip">
+            ${esc(it.product_name)} &times; <strong>${it.quantity_cancelled}</strong>
+          </span>
+        `).join('')}
+      </div>
+      ${c.notes ? `<div class="delivery-notes">${esc(c.notes)}</div>` : ''}
+    </div>
+  `).join('');
+}
 
 // Refresca todo lo que puede haber cambiado tras registrar/cancelar una entrega:
 // la lista de pedidos (estado, Entrega, Cobro) y, si el formulario de edición de
@@ -3161,7 +3221,7 @@ async function quickDeliverTotal(orderId, orderNumber) {
       }
     }
     const items = order.items
-      .map(it => ({ order_item_id: it.id, quantity_delivered: Math.max(0, it.quantity - (deliveredMap[it.id] || 0)) }))
+      .map(it => ({ order_item_id: it.id, quantity_delivered: Math.max(0, it.quantity - (deliveredMap[it.id] || 0) - (it.cancelled || 0)) }))
       .filter(it => it.quantity_delivered > 0.0000001);
 
     if (!items.length) { toast('Este pedido ya está completamente entregado', 'error'); return; }

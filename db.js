@@ -317,6 +317,21 @@ db.exec(`
     unit_price REAL NOT NULL DEFAULT 0,
     subtotal_returned REAL NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS order_cancellations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    notes TEXT DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    sucursal_id INTEGER REFERENCES sucursales(id),
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS order_cancellation_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cancellation_id INTEGER NOT NULL REFERENCES order_cancellations(id) ON DELETE CASCADE,
+    order_item_id INTEGER NOT NULL REFERENCES order_items(id),
+    product_name TEXT NOT NULL,
+    quantity_cancelled REAL NOT NULL DEFAULT 0
+  );
   CREATE TABLE IF NOT EXISTS repair_stock (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id INTEGER REFERENCES products(id),
