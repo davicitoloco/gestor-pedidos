@@ -461,6 +461,9 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   if ($('inp-price-list-id')) $('inp-price-list-id').value  = '';
   if (isAdminLike()) $('btn-register-delivery').classList.remove('hidden');
   $('btn-close-partial').classList.add('hidden');
+  state.orderPriceListId = null;
+  state.allowedProducts  = null;
+  state.allowedPriceMap  = null;
 
   // Vendedores solo pueden seleccionar Cancelado. "Entregado y cerrado" nunca es
   // seleccionable a mano: solo se llega ahí vía "Cancelar unidades pendientes".
@@ -470,8 +473,8 @@ async function openOrderForm(orderId, prefillCustomer = null) {
     opt.disabled = opt.value === 'Entregado y cerrado' || (isVendor() && opt.value !== 'Cancelado');
   });
 
-  // Cargar listas de precios para selector (solo admin)
-  if (isAdmin()) await loadPriceLists();
+  // Cargar listas de precios para selector (admin y subadmin)
+  if (isAdminLike()) await loadPriceLists();
 
   // Cargar lista de usuarios para selector de vendedor (solo admin)
   if (isAdmin() && $('inp-vendor-id')) {
@@ -511,13 +514,15 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       }
       // "Cancelar unidades pendientes" solo tiene sentido en Entrega parcial.
       if (o.status === 'Entrega parcial' && isAdminLike()) $('btn-close-partial').classList.remove('hidden');
-      if ($('inp-vendor-id') && isAdmin())     $('inp-vendor-id').value     = o.vendor_id || '';
-      if ($('inp-sucursal-id'))                 $('inp-sucursal-id').value    = o.sucursal_id || '';
-      if ($('inp-price-list-id') && isAdmin()) $('inp-price-list-id').value  = o.price_list_id || '';
+      if ($('inp-vendor-id') && isAdmin())         $('inp-vendor-id').value     = o.vendor_id || '';
+      if ($('inp-sucursal-id'))                     $('inp-sucursal-id').value    = o.sucursal_id || '';
+      if ($('inp-price-list-id') && isAdminLike()) $('inp-price-list-id').value  = o.price_list_id || '';
+      state.orderPriceListId = o.price_list_id || null;
       state.items = (o.items || []).map(i => ({ ...i }));
     } catch (err) { toast(err.message, 'error'); return; }
   }
 
+  await refreshAllowedProducts();
   await loadCustomerList();
   if (prefillCustomer) $('inp-customer').value = prefillCustomer;
   renderItems();
@@ -619,7 +624,7 @@ function renderItems() {
           value="${esc(item.product_name)}" placeholder="Buscar o escribir producto..." required>
       </td>
       <td><input type="number" class="input item-inp-qty" data-i="${i}" value="${item.quantity}" min="0.001" step="any"></td>
-      <td><input type="number" class="input item-inp-price" data-i="${i}" value="${item.unit_price}" min="0" step="any"></td>
+      <td><input type="number" class="input item-inp-price" data-i="${i}" value="${item.unit_price}" min="0" step="any" ${isAdmin() ? '' : 'disabled title="Precio de la lista de precios — solo editable por admin"'}></td>
       <td><input type="number" class="input item-inp-disc" data-i="${i}" value="${item.discount}" min="0" max="100" step="any"></td>
       <td class="item-subtotal-cell" id="item-sub-${i}">${fmtMoney(itemSubtotal(item))}</td>
       <td><button type="button" class="btn-remove item-remove" data-i="${i}">×</button></td>
@@ -630,12 +635,12 @@ function renderItems() {
     inp.addEventListener('input', () => {
       const i = inp.dataset.i;
       state.items[i].product_name = inp.value;
-      // Auto-fill price from selected price list (or active list / base_price fallback)
-      const match = state.productCatalog.find(p => p.name.toLowerCase() === inp.value.toLowerCase());
+      // Auto-fill price from selected price list (o vigente / base_price)
+      const source = (!isAdmin() && state.allowedProducts) ? state.allowedProducts : state.productCatalog;
+      const match = source.find(p => p.name.toLowerCase() === inp.value.toLowerCase());
       if (match) {
         const priceInp = inp.closest('tr').querySelector('.item-inp-price');
-        const selListId = $('inp-price-list-id') ? Number($('inp-price-list-id').value) || null : null;
-        getPriceForList(selListId).then(priceMap => {
+        getPriceForList(effectivePriceListId()).then(priceMap => {
           const price = (priceMap && priceMap[match.id] !== undefined) ? priceMap[match.id] : match.base_price;
           state.items[i].unit_price = price;
           priceInp.value = price;
@@ -647,7 +652,8 @@ function renderItems() {
       const i = inp.dataset.i;
       const val = inp.value.trim();
       if (!val) return;
-      const match = state.productCatalog.find(p => p.name.toLowerCase() === val.toLowerCase());
+      const source = (!isAdmin() && state.allowedProducts) ? state.allowedProducts : state.productCatalog;
+      const match = source.find(p => p.name.toLowerCase() === val.toLowerCase());
       if (!match) {
         state.items[i].product_name = '';
         state.items[i].unit_price   = 0;
@@ -655,6 +661,7 @@ function renderItems() {
         const priceInp = inp.closest('tr').querySelector('.item-inp-price');
         if (priceInp) priceInp.value = 0;
         refreshItem(i);
+        if (!isAdmin()) toast('Ese producto no está en la lista de precios de este pedido', 'error');
       }
     });
   });
@@ -799,11 +806,17 @@ $('inp-payment-cheque').addEventListener('change', () => {
 $('order-form').addEventListener('submit', async e => {
   e.preventDefault();
   if (state.discountOver) { toast('El descuento máximo permitido es 20+5+5 (27.8%)', 'error'); return; }
+  const productSource = (!isAdmin() && state.allowedProducts) ? state.allowedProducts : state.productCatalog;
   const invalidItem = state.items.find(it => {
     const name = (it.product_name || '').trim();
-    return name && !state.productCatalog.find(p => p.name.toLowerCase() === name.toLowerCase());
+    return name && !productSource.find(p => p.name.toLowerCase() === name.toLowerCase());
   });
-  if (invalidItem) { toast('Todos los ítems deben tener un producto seleccionado de la lista', 'error'); return; }
+  if (invalidItem) {
+    toast(isAdmin()
+      ? 'Todos los ítems deben tener un producto seleccionado de la lista'
+      : `"${invalidItem.product_name}" no está en la lista de precios de este pedido`, 'error');
+    return;
+  }
   const customer = $('inp-customer').value.trim();
   if (!customer) { toast('El nombre del cliente es requerido', 'error'); $('inp-customer').focus(); return; }
   if (!findCustomerByName(customer)) { toast('El cliente debe estar registrado en el módulo Clientes', 'error'); $('inp-customer').focus(); return; }
@@ -834,7 +847,7 @@ $('order-form').addEventListener('submit', async e => {
     const vid = $('inp-vendor-id').value;
     data.vendor_id = vid ? Number(vid) : null;
   }
-  if (isAdmin() && $('inp-price-list-id')) {
+  if (isAdminLike() && $('inp-price-list-id')) {
     const plid = $('inp-price-list-id').value;
     data.price_list_id = plid ? Number(plid) : null;
   }
@@ -868,10 +881,35 @@ async function loadProductCatalog() {
 function updateDatalist() {
   const dl = $('products-datalist');
   if (!dl) return;
-  dl.innerHTML = state.productCatalog
+  const source = (!isAdmin() && state.allowedProducts) ? state.allowedProducts : state.productCatalog;
+  dl.innerHTML = source
     .filter(p => p.active)
     .map(p => `<option value="${esc(p.name)}">`)
     .join('');
+}
+
+// Lista de precios que aplica a los ítems del pedido: la elegida en el selector
+// (admin/subadmin) o la que ya tenía guardada el pedido (vendedor/mp, que no ven
+// el selector) — null cae en la lista vigente (ver getPriceForList).
+function effectivePriceListId() {
+  if (isAdminLike() && $('inp-price-list-id')) return Number($('inp-price-list-id').value) || null;
+  return state.orderPriceListId || null;
+}
+
+// Para admin no hay restricción (state.allowedProducts queda null = catálogo
+// completo). Para el resto, solo pueden usarse productos de la lista de precios
+// vigente para este pedido, con el precio que esa lista define.
+async function refreshAllowedProducts() {
+  if (isAdmin()) {
+    state.allowedProducts = null;
+    state.allowedPriceMap = null;
+    updateDatalist();
+    return;
+  }
+  const priceMap = await getPriceForList(effectivePriceListId());
+  state.allowedPriceMap = priceMap || {};
+  state.allowedProducts = state.productCatalog.filter(p => state.allowedPriceMap[p.id] !== undefined);
+  updateDatalist();
 }
 
 async function loadCustomerList() {
@@ -1053,6 +1091,14 @@ async function loadPriceLists() {
     sel.innerHTML = '<option value="">— Vigente —</option>' +
       _priceLists.map(l => `<option value="${l.id}">${esc(l.nombre)} (${fmtDate(l.fecha_vigencia)})${l.active ? ' ✓' : ''}</option>`).join('');
   } catch {}
+}
+
+// Subadmin puede elegir lista de precios (admin no tiene restricción de
+// productos, así que no necesita recalcular nada acá).
+if ($('inp-price-list-id')) {
+  $('inp-price-list-id').addEventListener('change', () => {
+    if (!isAdmin()) refreshAllowedProducts();
+  });
 }
 
 async function getPriceForList(listId) {

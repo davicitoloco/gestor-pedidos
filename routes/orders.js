@@ -41,6 +41,38 @@ function exceedsDiscountLimit(d1, d2, d3, d4, items) {
   return eff > DISC_LIMIT;
 }
 
+// Ítems de la lista de precios indicada, o de la vigente si no se pasa ninguna.
+function getPriceListItems(priceListId) {
+  let listId = priceListId;
+  if (!listId) {
+    const active = db.prepare('SELECT id FROM price_lists WHERE active=1 ORDER BY id DESC LIMIT 1').get();
+    listId = active ? active.id : null;
+  }
+  if (!listId) return [];
+  return db.prepare(`
+    SELECT pli.product_id, pli.precio, p.name
+    FROM price_list_items pli JOIN products p ON pli.product_id = p.id
+    WHERE pli.price_list_id = ?
+  `).all(listId);
+}
+
+// Para roles no-admin: cada ítem debe existir en la lista de precios del pedido
+// (o la vigente) y el precio unitario se toma de ahí, ignorando lo que haya
+// mandado el cliente. Tira si algún producto no está en esa lista.
+function resolveRestrictedItems(items, priceListId) {
+  const listItems = getPriceListItems(priceListId);
+  const byName = new Map(listItems.map(it => [it.name.trim().toLowerCase(), it]));
+  const resolved = [];
+  for (const it of (items || [])) {
+    const name = (it.product_name || '').trim();
+    if (!name) continue;
+    const match = byName.get(name.toLowerCase());
+    if (!match) throw new Error(`"${name}" no está en la lista de precios de este pedido`);
+    resolved.push({ ...it, product_name: match.name, unit_price: match.precio, product_id: match.product_id });
+  }
+  return resolved;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function fmtMoney(v) {
   return '$ ' + (v || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -619,6 +651,22 @@ router.post('/', (req, res) => {
       items
     )) return res.status(403).json({ error: 'Descuento supera el máximo permitido (27.8%)' });
 
+    // Solo admin/subadmin pueden elegir la lista de precios del pedido; el resto
+    // siempre arranca sin lista propia (usa la vigente al validar/completar precios).
+    const finalPriceListId = isAdminLike(req) && price_list_id
+      ? Number(price_list_id) : null;
+
+    // No-admin: cada ítem debe existir en esa lista de precios y el precio se
+    // toma de ahí, ignorando lo que haya mandado el cliente.
+    let finalItems = items;
+    if (!isAdmin(req)) {
+      try {
+        finalItems = resolveRestrictedItems(items, finalPriceListId);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
     const orderId = withTransaction(() => {
       const { next } = db.prepare('SELECT COALESCE(MAX(order_sequence), 0) + 1 AS next FROM orders').get();
       const efe = payment_efectivo ? 1 : 0;
@@ -634,11 +682,11 @@ router.post('/', (req, res) => {
              iva_exempt ? 1 : 0, efe, chq,
              req.session.userId, orderSucursalId,
              vendor_id ? Number(vendor_id) : null,
-             price_list_id ? Number(price_list_id) : null);
+             finalPriceListId);
       const oid = Number(result.lastInsertRowid);
-      if (items && items.length > 0) {
+      if (finalItems && finalItems.length > 0) {
         const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
-        for (const it of items) {
+        for (const it of finalItems) {
           if (it.product_name && it.product_name.trim()) {
             const prod = db.prepare('SELECT id FROM products WHERE name = ?').get(it.product_name.trim());
             ins.run(oid, it.product_name.trim(), parseFloat(it.quantity)||1, parseFloat(it.unit_price)||0, parseFloat(it.discount)||0, prod ? prod.id : null);
@@ -686,6 +734,22 @@ router.put('/:id', (req, res) => {
         return res.status(403).json({ error: 'Descuento supera el máximo permitido (27.8%)' });
     }
 
+    // Solo admin/subadmin pueden elegir la lista de precios del pedido.
+    const newPriceListId = isAdminLike(req) && price_list_id !== undefined
+      ? (price_list_id ? Number(price_list_id) : null)
+      : existing.price_list_id;
+
+    // No-admin: cada ítem debe existir en esa lista de precios y el precio se
+    // toma de ahí, ignorando lo que haya mandado el cliente.
+    let finalItems = items;
+    if (items !== undefined && !isAdmin(req)) {
+      try {
+        finalItems = resolveRestrictedItems(items, newPriceListId);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
     withTransaction(() => {
       const efe = payment_efectivo !== undefined ? (payment_efectivo ? 1 : 0) : (existing.payment_efectivo || 0);
       const chq = payment_cheque  !== undefined ? (payment_cheque  ? 1 : 0) : (existing.payment_cheque  || 0);
@@ -695,9 +759,6 @@ router.put('/:id', (req, res) => {
       const newVendorId = req.session.role === 'admin' && vendor_id !== undefined
         ? (vendor_id ? Number(vendor_id) : null)
         : existing.vendor_id;
-      const newPriceListId = req.session.role === 'admin' && price_list_id !== undefined
-        ? (price_list_id ? Number(price_list_id) : null)
-        : existing.price_list_id;
       db.prepare(`UPDATE orders SET customer_name=?, notes=?, delivery_date=?, status=?, discount=?, discount2=?, discount3=?, discount4=?, iva_exempt=?, payment_efectivo=?, payment_cheque=?, sucursal_id=?, vendor_id=?, price_list_id=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         customer_name !== undefined ? customer_name.trim() : existing.customer_name,
         notes !== undefined ? notes : existing.notes,
@@ -711,11 +772,11 @@ router.put('/:id', (req, res) => {
         efe, chq, newSucursalId, newVendorId, newPriceListId,
         id
       );
-      if (items !== undefined) {
+      if (finalItems !== undefined) {
         db.prepare('DELETE FROM order_items WHERE order_id = ?').run(id);
-        if (items.length > 0) {
+        if (finalItems.length > 0) {
           const ins = db.prepare('INSERT INTO order_items (order_id, product_name, quantity, unit_price, discount, product_id) VALUES (?, ?, ?, ?, ?, ?)');
-          for (const it of items) {
+          for (const it of finalItems) {
             if (it.product_name && it.product_name.trim()) {
               const prod = db.prepare('SELECT id FROM products WHERE name = ?').get(it.product_name.trim());
               ins.run(id, it.product_name.trim(), parseFloat(it.quantity)||1, parseFloat(it.unit_price)||0, parseFloat(it.discount)||0, prod ? prod.id : null);
