@@ -473,8 +473,8 @@ async function openOrderForm(orderId, prefillCustomer = null) {
     opt.disabled = opt.value === 'Entregado y cerrado' || (isVendor() && opt.value !== 'Cancelado');
   });
 
-  // Cargar listas de precios para selector (admin y subadmin)
-  if (isAdminLike()) await loadPriceLists();
+  // Cargar listas de precios para selector (solo admin — subadmin/vendedor usan la vigente)
+  if (isAdmin()) await loadPriceLists();
 
   // Cargar lista de usuarios para selector de vendedor (solo admin)
   if (isAdmin() && $('inp-vendor-id')) {
@@ -516,7 +516,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       if (o.status === 'Entrega parcial' && isAdminLike()) $('btn-close-partial').classList.remove('hidden');
       if ($('inp-vendor-id') && isAdmin())         $('inp-vendor-id').value     = o.vendor_id || '';
       if ($('inp-sucursal-id'))                     $('inp-sucursal-id').value    = o.sucursal_id || '';
-      if ($('inp-price-list-id') && isAdminLike()) $('inp-price-list-id').value  = o.price_list_id || '';
+      if ($('inp-price-list-id') && isAdmin()) $('inp-price-list-id').value  = o.price_list_id || '';
       state.orderPriceListId = o.price_list_id || null;
       state.items = (o.items || []).map(i => ({ ...i }));
     } catch (err) { toast(err.message, 'error'); return; }
@@ -847,7 +847,7 @@ $('order-form').addEventListener('submit', async e => {
     const vid = $('inp-vendor-id').value;
     data.vendor_id = vid ? Number(vid) : null;
   }
-  if (isAdminLike() && $('inp-price-list-id')) {
+  if (isAdmin() && $('inp-price-list-id')) {
     const plid = $('inp-price-list-id').value;
     data.price_list_id = plid ? Number(plid) : null;
   }
@@ -889,10 +889,10 @@ function updateDatalist() {
 }
 
 // Lista de precios que aplica a los ítems del pedido: la elegida en el selector
-// (admin/subadmin) o la que ya tenía guardada el pedido (vendedor/mp, que no ven
-// el selector) — null cae en la lista vigente (ver getPriceForList).
+// (solo admin) o la que ya tenía guardada el pedido (subadmin/vendedor/mp, que
+// no ven el selector) — null cae en la lista vigente (ver getPriceForList).
 function effectivePriceListId() {
-  if (isAdminLike() && $('inp-price-list-id')) return Number($('inp-price-list-id').value) || null;
+  if (isAdmin() && $('inp-price-list-id')) return Number($('inp-price-list-id').value) || null;
   return state.orderPriceListId || null;
 }
 

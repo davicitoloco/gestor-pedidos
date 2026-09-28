@@ -651,9 +651,9 @@ router.post('/', (req, res) => {
       items
     )) return res.status(403).json({ error: 'Descuento supera el máximo permitido (27.8%)' });
 
-    // Solo admin/subadmin pueden elegir la lista de precios del pedido; el resto
-    // siempre arranca sin lista propia (usa la vigente al validar/completar precios).
-    const finalPriceListId = isAdminLike(req) && price_list_id
+    // Solo admin puede elegir la lista de precios del pedido; el resto siempre
+    // arranca sin lista propia (usa la vigente al validar/completar precios).
+    const finalPriceListId = isAdmin(req) && price_list_id
       ? Number(price_list_id) : null;
 
     // No-admin: cada ítem debe existir en esa lista de precios y el precio se
@@ -734,8 +734,8 @@ router.put('/:id', (req, res) => {
         return res.status(403).json({ error: 'Descuento supera el máximo permitido (27.8%)' });
     }
 
-    // Solo admin/subadmin pueden elegir la lista de precios del pedido.
-    const newPriceListId = isAdminLike(req) && price_list_id !== undefined
+    // Solo admin puede elegir la lista de precios del pedido.
+    const newPriceListId = isAdmin(req) && price_list_id !== undefined
       ? (price_list_id ? Number(price_list_id) : null)
       : existing.price_list_id;
 
