@@ -21,7 +21,27 @@
       "Bash(pkill -f \"node.*server\")",
       "Bash(git pull *)",
       "Bash(git stash *)",
-      "Bash(grep -v \"Use \\\\`node\")"
+      "Bash(grep -v \"Use \\\\`node\")",
+      "Bash(grep -n \"^const \\\\$ \\\\|^function \\\\$\\\\|^let \\\\$\\\\|window\\\\.\\\\$ \\\\|^\\\\$ \" /Users/davidpatini/Documents/app/public/app.js)",
+      "Bash(git -C /Users/davidpatini/Documents/app status)",
+      "Bash(git -C /Users/davidpatini/Documents/app log --oneline -3)",
+      "Bash(git *)",
+      "Bash(PORT=3099 node /Users/davidpatini/Documents/app/server.js)",
+      "Bash(pkill -f \"node server.js\")",
+      "Bash(DATABASE_PATH=/private/tmp/claude-501/-Users-davidpatini-Documents-app/596f6ee9-c881-4a0d-ba20-521e0bb10ed5/scratchpad/candex-test/pedidos.db PORT=3099 node server.js)",
+      "Bash(lsof -iTCP -sTCP:LISTEN -P)",
+      "Bash(kill 71568 71513)",
+      "Bash(DATABASE_PATH=/private/tmp/claude-501/-Users-davidpatini-Documents-app/596f6ee9-c881-4a0d-ba20-521e0bb10ed5/scratchpad/candex-test/pedidos.db PORT=3099 timeout 5 node server.js)",
+      "Bash(echo \"EXIT CODE: $?\")",
+      "Bash(lsof -iTCP:3001 -sTCP:LISTEN -P)",
+      "Bash(lsof -i :3001 -sTCP:LISTEN -t)",
+      "Bash(nohup node server.js)",
+      "Read(//tmp/**)",
+      "Bash(cd /Users/davidpatini/Documents/app-linea2 && sed -n '175,220p' routes/payments.js)",
+      "Bash(rm -f /private/tmp/claude-501/-Users-davidpatini-Documents-app/bc7c3b38-2f63-464c-a8e3-558eb106e40d/scratchpad/linea2-test.db*)",
+      "Bash(rm -f /private/tmp/claude-501/-Users-davidpatini-Documents-app/bc7c3b38-2f63-464c-a8e3-558eb106e40d/scratchpad/linea2-test.db* *)",
+      "Bash(disown)",
+      "Bash(lsof -iTCP -sTCP:LISTEN -n -P)"
     ]
   }
 }

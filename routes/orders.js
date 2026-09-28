@@ -81,7 +81,7 @@ router.get('/', (req, res) => {
     // entregar ni fue entregado), y Entregado/Entregado con devolución como
     // "entregado" (la devolución es un evento posterior a una entrega ya completa).
     const ENTREGA_PENDIENTE_STATUSES = ['Pendiente', 'Entrega parcial', 'En preparación'];
-    const ENTREGA_COMPLETA_STATUSES  = ['Entregado', 'Entregado con devolución'];
+    const ENTREGA_COMPLETA_STATUSES  = ['Entregado', 'Entregado con devolución', 'Entregado y cerrado'];
     const entregaFilter = entrega === 'no_entregado'
       ? `AND o.status IN (${ENTREGA_PENDIENTE_STATUSES.map(() => '?').join(',')})`
       : entrega === 'entregado'
@@ -222,8 +222,8 @@ router.get('/:id/print', (req, res) => {
       for (const di of d.items)
         deliveredMap[di.product_name] = (deliveredMap[di.product_name] || 0) + di.quantity_delivered;
 
-    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Entregado con devolución':'#c2410c','Cancelado':'#475569' };
-    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Entregado con devolución':'#ffedd5','Cancelado':'#f1f5f9' };
+    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entrega parcial':'#c2410c','Entregado':'#166534','Entregado con devolución':'#c2410c','Entregado y cerrado':'#334155','Cancelado':'#475569' };
+    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entrega parcial':'#fff7ed','Entregado':'#dcfce7','Entregado con devolución':'#ffedd5','Entregado y cerrado':'#e2e8f0','Cancelado':'#f1f5f9' };
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>Pedido #${esc(order.order_number)} — ${esc(company)}</title>
@@ -446,8 +446,8 @@ router.get('/:id/print-deposito', (req, res) => {
     const discParts = [dd1, dd2, dd3, dd4].filter(v => v > 0).map(v => `${v}%`);
     const hasDiscount = discParts.length > 0;
 
-    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entregado':'#166534','Entregado con devolución':'#c2410c','Cancelado':'#475569' };
-    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entregado':'#dcfce7','Entregado con devolución':'#ffedd5','Cancelado':'#f1f5f9' };
+    const statusColor = { 'Pendiente':'#92400e','En preparación':'#1e40af','Entrega parcial':'#c2410c','Entregado':'#166534','Entregado con devolución':'#c2410c','Entregado y cerrado':'#334155','Cancelado':'#475569' };
+    const statusBg    = { 'Pendiente':'#fef3c7','En preparación':'#dbeafe','Entrega parcial':'#fff7ed','Entregado':'#dcfce7','Entregado con devolución':'#ffedd5','Entregado y cerrado':'#e2e8f0','Cancelado':'#f1f5f9' };
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>Pedido #${esc(order.order_number)} — Depósito</title>
@@ -645,6 +645,12 @@ router.put('/:id', (req, res) => {
     if (isVendor(req) && status !== undefined && status !== 'Cancelado')
       return res.status(403).json({ error: 'Solo podés cambiar el estado a Cancelado' });
 
+    if (existing.status === 'Entregado y cerrado' && status !== undefined && status !== 'Entregado y cerrado')
+      return res.status(400).json({ error: 'El pedido está cerrado y no puede volver a un estado anterior' });
+
+    if (status === 'Entregado y cerrado' && existing.status !== 'Entregado y cerrado')
+      return res.status(400).json({ error: 'Usá "Cancelar unidades pendientes" para cerrar un pedido con entrega parcial' });
+
     if (!isAdmin(req)) {
       const fd1 = discount  !== undefined ? (parseFloat(discount)  || 0) : (existing.discount  || 0);
       const fd2 = discount2 !== undefined ? (parseFloat(discount2) || 0) : (existing.discount2 || 0);
@@ -799,6 +805,8 @@ router.post('/:id/deliveries', (req, res) => {
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
     if (isVendor(req) && order.created_by !== req.session.userId)
       return res.status(403).json({ error: 'Acceso denegado' });
+    if (order.status === 'Entregado y cerrado')
+      return res.status(400).json({ error: 'El pedido está cerrado, no se pueden registrar más entregas' });
 
     const { notes, items } = req.body;
     const validItems = (items || []).filter(i => parseFloat(i.quantity_delivered) > 0);
@@ -919,6 +927,96 @@ router.post('/:id/deliveries', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── POST /api/orders/:id/close-partial ───────────────────────────────────────
+// Cierra un pedido en "Entrega parcial": las unidades aún no entregadas se dan
+// de baja sin tocar stock (nunca salieron). El asiento de venta original (creado
+// al entrar en "Entrega parcial") reconoce el TOTAL del pedido, no solo lo
+// entregado — así que acá se genera un asiento de ajuste que revierte únicamente
+// el valor de las unidades canceladas, dejando el asiento original intacto como
+// registro de auditoría y el saldo del cliente correcto (solo lo entregado).
+// Pasa a "Entregado y cerrado": no acepta nuevas entregas ni vuelve a un estado
+// anterior, pero sigue aceptando devoluciones (POST /:id/returns) sobre lo que
+// sí se entregó.
+router.post('/:id/close-partial', (req, res) => {
+  try {
+    if (!isAdminLike(req)) return res.status(403).json({ error: 'Solo administradores pueden cerrar un pedido' });
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (order.status !== 'Entrega parcial')
+      return res.status(400).json({ error: 'Solo se puede cerrar un pedido en estado "Entrega parcial"' });
+
+    const observaciones = (req.body.observaciones || '').trim();
+    const stamp = new Date().toISOString().slice(0, 10);
+    const closeNote = `[Cierre parcial ${stamp}]${observaciones ? ' ' + observaciones : ''}`;
+    const newNotes = order.notes ? `${order.notes}\n${closeNote}` : closeNote;
+
+    withTransaction(() => {
+      db.prepare("UPDATE orders SET status='Entregado y cerrado', notes=?, updated_at=datetime('now','localtime') WHERE id=?")
+        .run(newNotes, id);
+
+      // ── Ajuste contable por lo cancelado ────────────────────────────────────
+      const summary = db.prepare(`
+        SELECT oi.quantity, oi.unit_price, oi.discount, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
+        FROM order_items oi
+        LEFT JOIN delivery_items di ON di.order_item_id = oi.id
+        WHERE oi.order_id = ?
+        GROUP BY oi.id
+      `).all(id);
+      const pendingSub = summary.reduce((s, r) => {
+        const pendingQty = Math.max(0, r.quantity - r.total_delivered);
+        return s + pendingQty * r.unit_price * (1 - r.discount / 100);
+      }, 0);
+      const pendingTotal = pendingSub
+        * (1 - (order.discount  || 0) / 100)
+        * (1 - (order.discount2 || 0) / 100)
+        * (1 - (order.discount3 || 0) / 100)
+        * (1 - (order.discount4 || 0) / 100);
+
+      if (pendingTotal > 0.005) {
+        const saleEntry = db.prepare(
+          "SELECT id FROM journal_entries WHERE ref_type='order' AND ref_id=? AND is_reversed=0"
+        ).get(id);
+        if (saleEntry) {
+          const deudores  = findAcctBySubtype('Clientes');
+          const ventas    = findAcctByCode('4.1.01');
+          const ivaVentas = findAcctByCode('2.1.03');
+          if (deudores && ventas) {
+            const orderNum = String(order.order_sequence).padStart(3, '0');
+            let lines;
+            if (order.iva_exempt || !ivaVentas) {
+              lines = [
+                { account_id: ventas.id,   debit: pendingTotal, credit: 0 },
+                { account_id: deudores.id, debit: 0, credit: pendingTotal },
+              ];
+            } else {
+              const iva   = Math.round(pendingTotal * 0.21 * 100) / 100;
+              const gross = pendingTotal + iva;
+              lines = [
+                { account_id: ventas.id,    debit: pendingTotal, credit: 0 },
+                { account_id: ivaVentas.id, debit: iva,          credit: 0 },
+                { account_id: deudores.id,  debit: 0,            credit: gross },
+              ];
+            }
+            recordJournal({
+              date:     new Date().toISOString().slice(0, 10),
+              desc:     `Cancelación unidades pendientes - pedido #${orderNum} - cliente ${order.customer_name}`,
+              ref_type: 'order_close',
+              ref_id:   id,
+              lines,
+              userId:   req.session.userId
+            });
+          }
+        }
+      }
+    });
+
+    const updated = db.prepare(`SELECT o.*, printf('%03d', o.order_sequence) AS order_number, COALESCE(u.full_name, u.username) AS vendor_name FROM orders o LEFT JOIN users u ON COALESCE(o.vendor_id, o.created_by) = u.id WHERE o.id = ?`).get(id);
+    const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
+    res.json({ ...updated, items: orderItems });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── DELETE /api/orders/:id/deliveries/:delivId ───────────────────────────────
 router.delete('/:id/deliveries/:delivId', (req, res) => {
   try {
@@ -955,20 +1053,24 @@ router.delete('/:id/deliveries/:delivId', (req, res) => {
 
       db.prepare('DELETE FROM deliveries WHERE id = ?').run(delivId);
 
-      // Recalcular estado
-      const summary = db.prepare(`
-        SELECT oi.quantity, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
-        FROM order_items oi
-        LEFT JOIN delivery_items di ON di.order_item_id = oi.id
-        WHERE oi.order_id = ?
-        GROUP BY oi.id
-      `).all(orderId);
+      // Recalcular estado — salvo que el pedido ya esté cerrado ("Entregado y
+      // cerrado"), en cuyo caso no debe volver a un estado anterior; solo se
+      // restaura el stock.
+      if (order.status !== 'Entregado y cerrado') {
+        const summary = db.prepare(`
+          SELECT oi.quantity, COALESCE(SUM(di.quantity_delivered), 0) AS total_delivered
+          FROM order_items oi
+          LEFT JOIN delivery_items di ON di.order_item_id = oi.id
+          WHERE oi.order_id = ?
+          GROUP BY oi.id
+        `).all(orderId);
 
-      const allDone  = summary.length > 0 && summary.every(r => r.total_delivered >= r.quantity);
-      const anyDone  = summary.some(r => r.total_delivered > 0);
-      const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
-      db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
-        .run(newStatus, orderId);
+        const allDone  = summary.length > 0 && summary.every(r => r.total_delivered >= r.quantity);
+        const anyDone  = summary.some(r => r.total_delivered > 0);
+        const newStatus = allDone ? 'Entregado' : anyDone ? 'Entrega parcial' : 'Pendiente';
+        db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
+          .run(newStatus, orderId);
+      }
     });
 
     res.json({ success: true });
@@ -1003,7 +1105,7 @@ router.post('/:id/returns', (req, res) => {
     const id = Number(req.params.id);
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
-    if (!['Entregado', 'Entrega parcial', 'Entregado con devolución'].includes(order.status))
+    if (!['Entregado', 'Entrega parcial', 'Entregado con devolución', 'Entregado y cerrado'].includes(order.status))
       return res.status(400).json({ error: 'El pedido debe estar entregado (total o parcial) para registrar una devolución' });
 
     const { return_type, notes, items } = req.body;
@@ -1096,7 +1198,10 @@ router.post('/:id/returns', (req, res) => {
         }
       }
 
-      db.prepare("UPDATE orders SET status='Entregado con devolución', updated_at=datetime('now','localtime') WHERE id=?").run(id);
+      // Un pedido ya cerrado ("Entregado y cerrado") no vuelve a un estado
+      // anterior por una devolución posterior sobre lo entregado.
+      const postReturnStatus = order.status === 'Entregado y cerrado' ? 'Entregado y cerrado' : 'Entregado con devolución';
+      db.prepare("UPDATE orders SET status=?, updated_at=datetime('now','localtime') WHERE id=?").run(postReturnStatus, id);
 
       const ventasDevolAcct = db.prepare("SELECT id FROM accounts WHERE code='4.1.02' LIMIT 1").get();
       const clientesAcct    = acctBySubtype('Clientes');

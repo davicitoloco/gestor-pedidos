@@ -25,7 +25,7 @@ function formatCuit(c) {
   return `${d.slice(0,2)}-${d.slice(2,10)}-${d.slice(10)}`;
 }
 function statusBadge(s) {
-  const cls = { 'Pendiente':'warning','En preparación':'info','Entregado':'success','Cancelado':'default','Entrega parcial':'partial','Entregado con devolución':'return' };
+  const cls = { 'Pendiente':'warning','En preparación':'info','Entregado':'success','Cancelado':'default','Entrega parcial':'partial','Entregado con devolución':'return','Entregado y cerrado':'closed' };
   return `<span class="badge badge-${cls[s]||'default'}">${esc(s)}</span>`;
 }
 function isAdmin()      { return state.user && state.user.role === 'admin'; }
@@ -375,7 +375,7 @@ function renderOrders(orders, searchQuery = '', modeloQuery = '', entregaFilter 
 // estado paralelo, se lee directo de o.status (Pendiente/En preparación/
 // Entrega parcial/Entregado/Cancelado), igual que la columna "Estado".
 function renderEntregaCell(o) {
-  const canAct = isAdmin() && !['Entregado', 'Cancelado'].includes(o.status);
+  const canAct = isAdmin() && !['Entregado', 'Cancelado', 'Entregado y cerrado'].includes(o.status);
   if (!canAct) return `<span style="color:var(--text-muted)">—</span>`;
   return `
     <div style="display:flex;gap:4px;justify-content:center">
@@ -459,10 +459,16 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('btn-export-pdf-deposito').classList.add('hidden');
   if ($('inp-sucursal-id'))    $('inp-sucursal-id').value    = '';
   if ($('inp-price-list-id')) $('inp-price-list-id').value  = '';
+  if (isAdminLike()) $('btn-register-delivery').classList.remove('hidden');
+  $('btn-close-partial').classList.add('hidden');
 
-  // Vendedores solo pueden seleccionar Cancelado
+  // Vendedores solo pueden seleccionar Cancelado. "Entregado y cerrado" nunca es
+  // seleccionable a mano: solo se llega ahí vía "Cancelar unidades pendientes".
   const statusSel = $('inp-status');
-  Array.from(statusSel.options).forEach(opt => { opt.disabled = isVendor() && opt.value !== 'Cancelado'; });
+  statusSel.disabled = false;
+  Array.from(statusSel.options).forEach(opt => {
+    opt.disabled = opt.value === 'Entregado y cerrado' || (isVendor() && opt.value !== 'Cancelado');
+  });
 
   // Cargar listas de precios para selector (solo admin)
   if (isAdmin()) await loadPriceLists();
@@ -498,6 +504,13 @@ async function openOrderForm(orderId, prefillCustomer = null) {
       $('form-status-badge').innerHTML = statusBadge(o.status);
       $('btn-export-pdf').classList.remove('hidden');
       $('btn-export-pdf-deposito').classList.remove('hidden');
+      // Pedido cerrado: el estado queda fijo, no se pueden registrar más entregas.
+      if (o.status === 'Entregado y cerrado') {
+        statusSel.disabled = true;
+        $('btn-register-delivery').classList.add('hidden');
+      }
+      // "Cancelar unidades pendientes" solo tiene sentido en Entrega parcial.
+      if (o.status === 'Entrega parcial' && isAdminLike()) $('btn-close-partial').classList.remove('hidden');
       if ($('inp-vendor-id') && isAdmin())     $('inp-vendor-id').value     = o.vendor_id || '';
       if ($('inp-sucursal-id'))                 $('inp-sucursal-id').value    = o.sucursal_id || '';
       if ($('inp-price-list-id') && isAdmin()) $('inp-price-list-id').value  = o.price_list_id || '';
@@ -1748,7 +1761,7 @@ function renderStatusChart(byStatus) {
   if (!canvas || typeof Chart === 'undefined') return;
   if (state.charts.status) state.charts.status.destroy();
 
-  const colorMap = { 'Pendiente':'#f59e0b','En preparación':'#3b82f6','Entregado':'#10b981','Entregado con devolución':'#f97316','Cancelado':'#94a3b8' };
+  const colorMap = { 'Pendiente':'#f59e0b','En preparación':'#3b82f6','Entrega parcial':'#ea580c','Entregado':'#10b981','Entregado con devolución':'#f97316','Entregado y cerrado':'#64748b','Cancelado':'#94a3b8' };
   const labels = byStatus.map(s => s.status);
   const data   = byStatus.map(s => s.cnt);
   const colors = labels.map(l => colorMap[l] || '#cbd5e1');
@@ -3044,6 +3057,78 @@ $('btn-delivery-confirm').addEventListener('click', async () => {
   finally { btn.disabled = false; }
 });
 
+// ── "Cancelar unidades pendientes" (cierre de un pedido en Entrega parcial) ──
+$('btn-close-partial').addEventListener('click', () => openClosePartialModal());
+$('btn-close-partial-cancel').addEventListener('click', () => $('close-partial-modal').classList.add('hidden'));
+$('close-partial-modal').addEventListener('click', e => { if (e.target === $('close-partial-modal')) $('close-partial-modal').classList.add('hidden'); });
+
+async function openClosePartialModal() {
+  const orderId = state.editingOrderId;
+  if (!orderId) return;
+
+  try {
+    const [order, deliveries] = await Promise.all([
+      api('GET', `/orders/${orderId}`),
+      api('GET', `/orders/${orderId}/deliveries`)
+    ]);
+
+    const deliveredMap = {};
+    for (const d of deliveries) {
+      for (const di of d.items) {
+        deliveredMap[di.order_item_id] = (deliveredMap[di.order_item_id] || 0) + di.quantity_delivered;
+      }
+    }
+
+    const modalItems = order.items.map(item => {
+      const delivered = deliveredMap[item.id] || 0;
+      return {
+        product_name:     item.product_name,
+        quantity_ordered: item.quantity,
+        delivered,
+        pending: Math.max(0, item.quantity - delivered)
+      };
+    });
+
+    $('close-partial-modal-tbody').innerHTML = modalItems.map(it => `
+      <tr>
+        <td>${esc(it.product_name)}</td>
+        <td class="text-right">${it.quantity_ordered}</td>
+        <td class="text-right" style="color:${it.delivered > 0 ? 'var(--success-txt)' : 'var(--text-muted)'}">${it.delivered}</td>
+        <td class="text-right" style="font-weight:700;color:${it.pending > 0 ? 'var(--danger-dark)' : 'var(--text-muted)'}">${it.pending > 0 ? it.pending : '—'}</td>
+      </tr>
+    `).join('');
+
+    $('inp-close-partial-notes').value = '';
+    $('close-partial-modal').classList.remove('hidden');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+$('btn-close-partial-confirm').addEventListener('click', async () => {
+  const orderId = state.editingOrderId;
+  if (!orderId) return;
+
+  const btn = $('btn-close-partial-confirm');
+  btn.disabled = true;
+  try {
+    const updated = await api('POST', `/orders/${orderId}/close-partial`, {
+      observaciones: $('inp-close-partial-notes').value.trim()
+    });
+    $('close-partial-modal').classList.add('hidden');
+    toast('Pedido cerrado', 'success');
+
+    $('inp-status').value = updated.status;
+    $('inp-status').disabled = true;
+    $('inp-notes').value = updated.notes || '';
+    state.currentOrderStatus = updated.status;
+    $('form-status-badge').innerHTML = statusBadge(updated.status);
+    $('btn-register-delivery').classList.add('hidden');
+    $('btn-close-partial').classList.add('hidden');
+    updateReturnButtonVisibility();
+    if (!$('list-view').classList.contains('hidden')) loadOrders();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
 // Refresca todo lo que puede haber cambiado tras registrar/cancelar una entrega:
 // la lista de pedidos (estado, Entrega, Cobro) y, si el formulario de edición de
 // ESE pedido está abierto, también su badge de estado y el historial de entregas.
@@ -3092,7 +3177,7 @@ async function quickDeliverTotal(orderId, orderNumber) {
 
 /* ================================================================ DEVOLUCIONES */
 function updateReturnButtonVisibility() {
-  const canReturn = isAdminLike() && ['Entregado', 'Entrega parcial', 'Entregado con devolución'].includes(state.currentOrderStatus);
+  const canReturn = isAdminLike() && ['Entregado', 'Entrega parcial', 'Entregado con devolución', 'Entregado y cerrado'].includes(state.currentOrderStatus);
   $('btn-register-return').classList.toggle('hidden', !canReturn);
 }
 
@@ -5049,7 +5134,8 @@ window.toggleJournalDetail = async function(id, btn) {
     const refLabels = {
       manual: 'Manual', venta: 'Venta', cobro: 'Cobro', compra: 'Compra',
       pago: 'Pago', caja: 'Caja', banco: 'Banco', cheque: 'Cheque',
-      reversal: 'Anulación', note_customer: 'Nota cliente', note_supplier: 'Nota proveedor'
+      reversal: 'Anulación', note_customer: 'Nota cliente', note_supplier: 'Nota proveedor',
+      order_close: 'Cancelación parcial'
     };
     const lines = e.lines || [];
     inner.innerHTML =
