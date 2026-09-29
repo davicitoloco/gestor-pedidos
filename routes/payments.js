@@ -7,6 +7,7 @@ const PDFDocument = require('pdfkit');
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'No autenticado' });
+  if (req.session.role === 'deposito') return res.status(403).json({ error: 'Acceso denegado' });
   next();
 }
 function requireAdmin(req, res, next) {

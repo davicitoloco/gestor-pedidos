@@ -9,7 +9,7 @@ function requireAuth(req, res, next) {
   next();
 }
 function requireAdmin(req, res, next) {
-  if (!['admin','subadmin','mp'].includes(req.session.role)) return res.status(403).json({ error: 'Sin acceso' });
+  if (!['admin','subadmin','mp','deposito'].includes(req.session.role)) return res.status(403).json({ error: 'Sin acceso' });
   next();
 }
 router.use(requireAuth, requireAdmin);

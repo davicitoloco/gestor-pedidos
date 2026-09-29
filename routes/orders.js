@@ -26,6 +26,7 @@ router.use(requireAuth);
 function isVendor(req) { return req.session.role === 'vendedor'; }
 function isAdminLike(req) { return ['admin','subadmin'].includes(req.session.role); }
 function isAdmin(req)  { return req.session.role === 'admin'; }
+function isDeposito(req) { return req.session.role === 'deposito'; }
 function checkPeriodClosed(date) {
   const period = (date || new Date().toISOString().slice(0,10)).slice(0,7);
   const closed = db.prepare('SELECT id FROM accounting_closes WHERE period=?').get(period);
@@ -772,6 +773,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
   body{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .page{padding:20px}
   .watermark{position:fixed}
+  .page-break{page-break-before:always}
 }
 </style></head><body>
 <div class="page">
@@ -818,7 +820,12 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         </tr>
       </tfoot>
     </table>
+  </div>
+</div>
 
+<div class="page page-break">
+  <div class="watermark">USO INTERNO — DEPÓSITO</div>
+  <div class="content">
     ${deliveries.length ? `
     <div class="delivery-section">
       <h3>Entregas realizadas</h3>
@@ -946,6 +953,7 @@ router.get('/:id/cobro-info', (req, res) => {
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
+    if (isDeposito(req)) return res.status(403).json({ error: 'Acceso denegado' });
     const { customer_name, notes, delivery_date, status, discount, discount2, discount3, discount4, iva_exempt, payment_efectivo, payment_cheque, items, sucursal_id, vendor_id, price_list_id } = req.body;
     if (!customer_name || !customer_name.trim())
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
@@ -1011,6 +1019,7 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const id = Number(req.params.id);
+    if (isDeposito(req)) return res.status(403).json({ error: 'Acceso denegado' });
     const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'Pedido no encontrado' });
     if (isVendor(req) && existing.created_by !== req.session.userId)
@@ -1506,6 +1515,7 @@ router.post('/:id/cancel-pending', (req, res) => {
 // ── DELETE /api/orders/:id/deliveries/:delivId ───────────────────────────────
 router.delete('/:id/deliveries/:delivId', (req, res) => {
   try {
+    if (isDeposito(req)) return res.status(403).json({ error: 'Acceso denegado' });
     const orderId  = Number(req.params.id);
     const delivId  = Number(req.params.delivId);
     const order    = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
@@ -1849,6 +1859,7 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 // ── DELETE /api/orders/:id ────────────────────────────────────────────────────
 router.delete('/:id', (req, res) => {
   try {
+    if (isDeposito(req)) return res.status(403).json({ error: 'Acceso denegado' });
     const id = Number(req.params.id);
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });

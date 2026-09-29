@@ -14,9 +14,10 @@ function requireAdmin(req, res, next) {
 }
 router.use(requireAuth);
 
-// GET /api/stock/alerts — productos en o por debajo del mínimo (todos los autenticados)
+// GET /api/stock/alerts — productos en o por debajo del mínimo (todos los autenticados salvo depósito)
 router.get('/alerts', (req, res) => {
   try {
+    if (req.session.role === 'deposito') return res.status(403).json({ error: 'Acceso denegado' });
     const rows = db.prepare(`
       SELECT id, name, stock, stock_min
       FROM products

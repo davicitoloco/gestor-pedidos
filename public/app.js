@@ -32,6 +32,7 @@ function isAdmin()      { return state.user && state.user.role === 'admin'; }
 function isSubAdmin()   { return state.user && state.user.role === 'subadmin'; }
 function isAdminLike()  { return state.user && (state.user.role === 'admin' || state.user.role === 'subadmin'); }
 function isVendor()     { return state.user && state.user.role === 'vendedor'; }
+function isDeposito()   { return state.user && state.user.role === 'deposito'; }
 
 /* ================================================================ STATE */
 const state = {
@@ -121,7 +122,7 @@ async function showApp() {
 
   // Aplicar visibilidad según rol
   $('sidebar-username').textContent = state.user.username;
-  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor', mp: 'MP / Fábrica' };
+  const roleLabels = { admin: 'Administrador', subadmin: 'Subadmin', vendedor: 'Vendedor', mp: 'MP / Fábrica', deposito: 'Depósito' };
   $('sidebar-role').textContent = roleLabels[state.user.role] || 'Vendedor';
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
   document.querySelectorAll('.admin-only-col').forEach(el => el.classList.toggle('hidden', !isAdminLike()));
@@ -133,7 +134,15 @@ async function showApp() {
   document.querySelectorAll('.prod-visible').forEach(el => el.classList.toggle('hidden', !canAccessProd()));
   if (isFabrica()) {
     document.querySelectorAll('.nav-item:not(.mp-visible):not(.prod-visible)').forEach(el => el.classList.add('hidden'));
+  } else if (isDeposito()) {
+    // Depósito: solo Pedidos y Producción
+    document.querySelectorAll('.nav-item').forEach(el => {
+      const sec = el.dataset.section;
+      el.classList.toggle('hidden', sec !== 'pedidos' && sec !== 'produccion');
+    });
+    $('btn-new-order').classList.add('hidden');
   } else {
+    $('btn-new-order').classList.remove('hidden');
     // Restaurar módulos base para roles no-mp (pueden haber quedado ocultos si antes
     // había una sesión mp activa en la misma pestaña)
     document.querySelectorAll('.nav-item:not(.mp-visible):not(.prod-visible):not(.admin-only):not(.strict-admin-only)')
@@ -244,6 +253,11 @@ function navigate(section) {
     toast('Sin acceso a esta sección', 'error');
     return;
   }
+  if (isDeposito() && section !== 'pedidos' && section !== 'produccion') {
+    toast('Sin acceso a esta sección', 'error');
+    navigate('pedidos');
+    return;
+  }
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.section === section)
   );
@@ -352,12 +366,13 @@ function renderOrders(orders, searchQuery = '', modeloQuery = '', entregaFilter 
       <td class="col-mobile-hide">${fmtDate(o.delivery_date)}</td>
       <td class="col-mobile-hide" style="color:var(--text-muted);font-size:.82rem">${fmtDateTime(o.created_at)}</td>
       <td class="text-center" style="white-space:nowrap;position:sticky;right:0;background:var(--white);box-shadow:-2px 0 4px rgba(0,0,0,0.06)">
+        ${isDeposito() ? '' : `
         <button class="btn-icon btn-edit" data-id="${o.id}" onclick="event.stopPropagation()" title="Editar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
         <button class="btn-icon btn-delete" data-id="${o.id}" data-num="${o.order_number}" onclick="event.stopPropagation()" title="Eliminar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-        </button>
+        </button>`}
       </td>
     </tr>
   `).join('');
@@ -499,7 +514,7 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   $('btn-export-pdf-deposito').classList.add('hidden');
   if ($('inp-sucursal-id'))    $('inp-sucursal-id').value    = '';
   if ($('inp-price-list-id')) $('inp-price-list-id').value  = '';
-  if (isAdminLike()) $('btn-register-delivery').classList.remove('hidden');
+  if (isAdminLike() || isDeposito()) $('btn-register-delivery').classList.remove('hidden');
   $('btn-close-partial').classList.add('hidden');
   state.orderPriceListId = null;
   state.allowedProducts  = null;
@@ -565,6 +580,15 @@ async function openOrderForm(orderId, prefillCustomer = null) {
   await refreshAllowedProducts();
   await loadCustomerList();
   if (prefillCustomer) $('inp-customer').value = prefillCustomer;
+
+  // Depósito: solo puede ver el pedido, no crear/editar/eliminar
+  const readOnly = isDeposito();
+  $('btn-save').classList.toggle('hidden', readOnly);
+  $('btn-add-item').classList.toggle('hidden', readOnly);
+  ['inp-customer','inp-status','inp-delivery-date','inp-notes','inp-disc1','inp-disc2','inp-disc3','inp-disc4',
+   'inp-iva-exempt','inp-payment-efectivo','inp-payment-cheque','inp-sucursal-id','inp-price-list-id','inp-vendor-id']
+    .forEach(id => { const el = $(id); if (el) el.disabled = readOnly; });
+
   renderItems();
   calcTotals();
 
@@ -661,13 +685,13 @@ function renderItems() {
     <tr data-index="${i}">
       <td>
         <input type="text" list="products-datalist" class="input item-inp-name" data-i="${i}"
-          value="${esc(item.product_name)}" placeholder="Buscar o escribir producto..." required>
+          value="${esc(item.product_name)}" placeholder="Buscar o escribir producto..." required ${isDeposito() ? 'disabled' : ''}>
       </td>
-      <td><input type="number" class="input item-inp-qty" data-i="${i}" value="${item.quantity}" min="0.001" step="any"></td>
-      <td><input type="number" class="input item-inp-price" data-i="${i}" value="${item.unit_price}" min="0" step="any" ${isAdmin() ? '' : 'disabled title="Precio de la lista de precios — solo editable por admin"'}></td>
-      <td><input type="number" class="input item-inp-disc" data-i="${i}" value="${item.discount}" min="0" max="100" step="any"></td>
+      <td><input type="number" class="input item-inp-qty" data-i="${i}" value="${item.quantity}" min="0.001" step="any" ${isDeposito() ? 'disabled' : ''}></td>
+      <td><input type="number" class="input item-inp-price" data-i="${i}" value="${item.unit_price}" min="0" step="any" ${isAdmin() && !isDeposito() ? '' : 'disabled title="Precio de la lista de precios — solo editable por admin"'}></td>
+      <td><input type="number" class="input item-inp-disc" data-i="${i}" value="${item.discount}" min="0" max="100" step="any" ${isDeposito() ? 'disabled' : ''}></td>
       <td class="item-subtotal-cell" id="item-sub-${i}">${fmtMoney(itemSubtotal(item))}</td>
-      <td><button type="button" class="btn-remove item-remove" data-i="${i}">×</button></td>
+      <td>${isDeposito() ? '' : `<button type="button" class="btn-remove item-remove" data-i="${i}">×</button>`}</td>
     </tr>
   `).join('');
 
@@ -1414,7 +1438,9 @@ function renderUsers(users) {
           ? '<span class="badge badge-info">Subadmin</span>'
           : u.role === 'mp'
             ? '<span class="badge" style="background:#7c3aed;color:#fff">MP / Fábrica</span>'
-            : '<span class="badge badge-vendor">Vendedor</span>'}</td>
+            : u.role === 'deposito'
+              ? '<span class="badge" style="background:#1e3a8a;color:#fff">Depósito</span>'
+              : '<span class="badge badge-vendor">Vendedor</span>'}</td>
       <td style="font-size:.82rem;color:var(--text-muted)">${(u.sucursales||[]).map(s=>esc(s.name)).join(', ') || '—'}</td>
       <td class="text-center">
         ${u.active
