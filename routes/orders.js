@@ -653,6 +653,52 @@ router.get('/:id/print-deposito', (req, res) => {
     const provincia = cust && cust.provincia ? cust.provincia : null;
     const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
 
+    // Entregas realizadas (con remito, si tiene) + lo pendiente por ítem, neto
+    // de devoluciones y de unidades canceladas ("Cancelar unidades pendientes")
+    // — mismo criterio que el resto de la app (modal de cancelación, filtro de
+    // modelo): lo cancelado ya no cuenta como pendiente, nunca se va a entregar.
+    const deliveries = db.prepare(`
+      SELECT d.id, d.created_at, r.remito_sequence
+      FROM deliveries d
+      LEFT JOIN remitos r ON r.delivery_id = d.id
+      WHERE d.order_id = ? ORDER BY d.created_at ASC
+    `).all(id);
+    for (const d of deliveries) {
+      d.items = db.prepare(`
+        SELECT oi.product_name, di.quantity_delivered
+        FROM delivery_items di JOIN order_items oi ON di.order_item_id = oi.id
+        WHERE di.delivery_id = ?
+      `).all(d.id);
+    }
+
+    const deliveredMap = {};
+    for (const d of deliveries)
+      for (const di of d.items)
+        deliveredMap[di.product_name] = (deliveredMap[di.product_name] || 0) + di.quantity_delivered;
+
+    const returnedMap = {};
+    for (const r of db.prepare(`
+      SELECT ori.product_name, SUM(ori.quantity_returned) AS qty
+      FROM order_return_items ori JOIN order_returns rt ON ori.return_id = rt.id
+      WHERE rt.order_id = ? GROUP BY ori.product_name
+    `).all(id)) returnedMap[r.product_name] = r.qty;
+
+    const cancelledMap = {};
+    for (const r of db.prepare(`
+      SELECT ci.product_name, SUM(ci.quantity_cancelled) AS qty
+      FROM order_cancellation_items ci JOIN order_cancellations c ON ci.cancellation_id = c.id
+      WHERE c.order_id = ? GROUP BY ci.product_name
+    `).all(id)) cancelledMap[r.product_name] = r.qty;
+
+    const pendingItems = items.map(item => {
+      const delivered     = deliveredMap[item.product_name] || 0;
+      const returned      = returnedMap[item.product_name] || 0;
+      const cancelled     = cancelledMap[item.product_name] || 0;
+      const deliveredNeto = delivered - returned;
+      const pending       = Math.max(0, item.quantity - deliveredNeto - cancelled);
+      return { product_name: item.product_name, quantity: item.quantity, delivered_neto: deliveredNeto, pending };
+    }).filter(it => it.pending > 0.0000001);
+
     // Descuento y medio de pago para el PDF depósito
     const medioPago = order.payment_efectivo ? 'Efectivo' : order.payment_cheque ? 'Cheque' : null;
     const depSubtotal = items.reduce((s, i) => s + i.quantity * i.unit_price * (1 - i.discount / 100), 0);
@@ -696,6 +742,17 @@ thead th.r{text-align:right}
 tbody td{padding:8px 10px;border-bottom:1px solid #e2e8f0}
 tbody td.r{text-align:right;font-weight:600}
 tbody tr:nth-child(even) td{background:#f8fafc}
+.delivery-section{margin-top:28px}
+.delivery-entry{border:1px solid #e2e8f0;border-radius:6px;margin-bottom:12px;overflow:hidden}
+.delivery-entry-hdr{background:#f8fafc;padding:8px 12px;display:flex;gap:16px;align-items:center;font-size:11px;border-bottom:1px solid #e2e8f0}
+.delivery-entry-hdr strong{font-size:12px;color:#1e293b}
+.delivery-entry-hdr span{color:#64748b}
+.delivery-entry table{margin:0}
+.delivery-entry td,.delivery-entry th{font-size:11.5px}
+.pending-section{margin-top:24px;padding:14px 16px;border:1.5px solid #fbbf24;background:#fffbeb;border-radius:8px}
+.pending-section h3{color:#92400e;margin-bottom:10px}
+.pending-section table{margin-bottom:0}
+.pending-ok{font-weight:700;color:#166534;font-size:13px}
 .notes-box{margin-top:20px;padding:14px 16px;background:#f8fafc;border-left:3px solid #475569;border-radius:0 6px 6px 0}
 .notes-box strong{display:block;margin-bottom:5px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
 .footer{margin-top:36px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
@@ -750,6 +807,53 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         </tr>
       </tfoot>
     </table>
+
+    ${deliveries.length ? `
+    <div class="delivery-section">
+      <h3>Entregas realizadas</h3>
+      ${deliveries.map((d, i) => `
+        <div class="delivery-entry">
+          <div class="delivery-entry-hdr">
+            <strong>Entrega #${i + 1}</strong>
+            <span>${fmtDateTime(d.created_at)}</span>
+            ${d.remito_sequence ? `<span>Remito R-${String(d.remito_sequence).padStart(3, '0')}</span>` : ''}
+          </div>
+          <table>
+            <thead><tr><th>Producto</th><th class="r">Cantidad entregada</th></tr></thead>
+            <tbody>
+              ${d.items.map(it => `<tr>
+                <td>${esc(it.product_name)}</td>
+                <td class="r">${it.quantity_delivered}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+
+    <div class="pending-section">
+      <h3>Pendiente de entrega</h3>
+      ${pendingItems.length ? `
+        <table>
+          <thead><tr>
+            <th>Producto</th>
+            <th class="r">Pedida</th>
+            <th class="r">Entregada</th>
+            <th class="r">Pendiente</th>
+          </tr></thead>
+          <tbody>
+            ${pendingItems.map(it => `<tr>
+              <td>${esc(it.product_name)}</td>
+              <td class="r">${it.quantity}</td>
+              <td class="r">${it.delivered_neto}</td>
+              <td class="r" style="color:#dc2626">${it.pending}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      ` : `<p class="pending-ok">✓ Pedido completamente entregado — sin pendientes</p>`}
+    </div>
+
     ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
     <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>
   </div>
