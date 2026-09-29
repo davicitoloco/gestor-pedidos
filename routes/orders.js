@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const PDFDocument = require('pdfkit');
 const { db, withTransaction } = require('../db');
 const { getSucursalFilter, getInsertSucursalId } = require('../lib/sucursal');
 const { acctBySubtype, acctByCode, recordJournal } = require('../lib/accounting');
@@ -190,6 +191,137 @@ router.get('/', (req, res) => {
     }));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /api/orders/export-pdf ───────────────────────────────────────────────
+// Listado de Pedidos en PDF. Mismo patrón que POST /api/customers/export-pdf:
+// el frontend ya filtró/ordenó exactamente lo que se ve en pantalla (mismos
+// query params que GET /api/orders) y lo manda tal cual en el body — acá solo
+// se dibuja con PDFKit, no HTML + window.print(), porque el diálogo de
+// impresión del navegador puede "recordar" Portrait de una impresión anterior
+// e ignorar el @page CSS, dando un PDF vertical con columnas cortadas.
+function cobroLabelPdf(o) {
+  if (o.cobro_status === 'parcial') return `Parcial ${fmtMoney(o.cobro_cobrado)} / ${fmtMoney(o.cobro_entregado)}`;
+  if (o.cobro_status === 'cobrado') return 'Cobrado';
+  if (o.cobro_status === 'pendiente') return 'Pendiente';
+  return '—';
+}
+router.post('/export-pdf', (req, res) => {
+  try {
+    const { subtitle, orders } = req.body;
+    if (!Array.isArray(orders)) return res.status(400).json({ error: 'Datos inválidos' });
+
+    const company = getCompanyName();
+    const todayStr = fmtDate(new Date().toISOString().slice(0, 10));
+
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40, bufferPages: true, info: { Title: 'Listado de Pedidos' } });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="pedidos.pdf"');
+    doc.pipe(res);
+
+    const mL = 40, mR = 40;
+    const pageW = doc.page.width;
+    const cW    = pageW - mL - mR;
+
+    // N° | Cliente | Estado | Vendedor | Unidades | Total | Cobro | F. entrega | F. creación
+    const COL = {
+      numero:   { x: mL,       w: 50  },
+      cliente:  { x: mL + 50,  w: 150 },
+      estado:   { x: mL + 200, w: 100 },
+      vendedor: { x: mL + 300, w: 90  },
+      unidades: { x: mL + 390, w: 55  },
+      total:    { x: mL + 445, w: 90  },
+      cobro:    { x: mL + 535, w: 100 },
+      fentrega: { x: mL + 635, w: 55  },
+      fcreado:  { x: mL + 690, w: 72  },
+    };
+    const ROW_H = 16;
+
+    // Recorta con "…" midiendo el ancho real (no por cantidad de caracteres).
+    function truncate(text, maxWidth) {
+      const s = String(text || '');
+      if (doc.widthOfString(s) <= maxWidth) return s;
+      let lo = 0, hi = s.length;
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (doc.widthOfString(s.slice(0, mid) + '…') <= maxWidth) lo = mid; else hi = mid - 1;
+      }
+      return s.slice(0, lo) + '…';
+    }
+    function drawTableHeader(y) {
+      doc.rect(mL, y, cW, 18).fill('#2563eb');
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#ffffff');
+      doc.text('N°',           COL.numero.x + 3,   y + 5, { width: COL.numero.w - 3,   lineBreak: false });
+      doc.text('Cliente',      COL.cliente.x + 3,  y + 5, { width: COL.cliente.w - 3,  lineBreak: false });
+      doc.text('Estado',       COL.estado.x + 3,   y + 5, { width: COL.estado.w - 3,   lineBreak: false });
+      doc.text('Vendedor',     COL.vendedor.x + 3, y + 5, { width: COL.vendedor.w - 3, lineBreak: false });
+      doc.text('Unidades',     COL.unidades.x,     y + 5, { width: COL.unidades.w - 3, align: 'right', lineBreak: false });
+      doc.text('Total',        COL.total.x,        y + 5, { width: COL.total.w - 3,    align: 'right', lineBreak: false });
+      doc.text('Cobro',        COL.cobro.x + 3,    y + 5, { width: COL.cobro.w - 3,    lineBreak: false });
+      doc.text('F. entrega',   COL.fentrega.x + 3, y + 5, { width: COL.fentrega.w - 3, lineBreak: false });
+      doc.text('Creado',       COL.fcreado.x + 3,  y + 5, { width: COL.fcreado.w - 3,  lineBreak: false });
+      return y + 18;
+    }
+    function ensureSpace(y, needed) {
+      if (y + needed > doc.page.height - 60) {
+        doc.addPage({ size: 'A4', layout: 'landscape', margin: 40 });
+        return drawTableHeader(40);
+      }
+      return y;
+    }
+
+    // ── HEADER ────────────────────────────────────────────────────────────────
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#94a3b8')
+       .text(company.toUpperCase(), mL, 40, { lineBreak: false });
+    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1a1a1a')
+       .text('Listado de Pedidos', mL, 54, { lineBreak: false });
+    doc.fontSize(9).font('Helvetica').fillColor('#666666')
+       .text(`Exportado el ${todayStr}`, mL, 76, { lineBreak: false });
+    if (subtitle) {
+      doc.fontSize(9).font('Helvetica').fillColor('#666666')
+         .text(subtitle, mL, 90, { width: cW, lineBreak: false });
+    }
+
+    let y = drawTableHeader(subtitle ? 108 : 96);
+    let rowIdx = 0, totalOrders = 0, grandTotal = 0;
+
+    for (const o of orders) {
+      y = ensureSpace(y, ROW_H);
+      if (rowIdx % 2 === 0) doc.rect(mL, y, cW, ROW_H).fill('#f5f8fc');
+
+      doc.fontSize(8).font('Helvetica').fillColor('#1a1a1a');
+      doc.text(`#${o.order_number}`,                                              COL.numero.x + 3,   y + 4, { lineBreak: false });
+      doc.text(truncate(o.customer_name, COL.cliente.w - 6),                      COL.cliente.x + 3,  y + 4, { lineBreak: false });
+      doc.text(truncate(o.status, COL.estado.w - 6),                              COL.estado.x + 3,   y + 4, { lineBreak: false });
+      doc.text(truncate(o.vendor_name || '—', COL.vendedor.w - 6),                COL.vendedor.x + 3, y + 4, { lineBreak: false });
+      const unidTxt = (o.total_units % 1 === 0 ? o.total_units : (o.total_units || 0).toFixed(2)).toString();
+      doc.text(unidTxt, COL.unidades.x, y + 4, { width: COL.unidades.w - 3, align: 'right', lineBreak: false });
+      const totTxt = fmtMoney(o.total);
+      doc.font('Helvetica-Bold').text(totTxt, COL.total.x, y + 4, { width: COL.total.w - 3, align: 'right', lineBreak: false });
+      doc.font('Helvetica').text(truncate(cobroLabelPdf(o), COL.cobro.w - 6),      COL.cobro.x + 3,    y + 4, { lineBreak: false });
+      doc.text(fmtDate(o.delivery_date),                                          COL.fentrega.x + 3, y + 4, { lineBreak: false });
+      doc.text(fmtDate(o.created_at),                                             COL.fcreado.x + 3,  y + 4, { lineBreak: false });
+
+      y += ROW_H;
+      rowIdx++; totalOrders++;
+      grandTotal += (o.total || 0);
+    }
+
+    // ── FOOTER ────────────────────────────────────────────────────────────────
+    y = ensureSpace(y, 26);
+    y += 6;
+    doc.moveTo(mL, y).lineTo(mL + cW, y).strokeColor('#2563eb').lineWidth(1).stroke();
+    y += 10;
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a1a1a')
+       .text(`Total de pedidos exportados: ${totalOrders} pedido${totalOrders !== 1 ? 's' : ''}`, mL, y, { lineBreak: false });
+    const grandTxt = `Importe total: ${fmtMoney(grandTotal)}`;
+    const grandW = doc.widthOfString(grandTxt);
+    doc.text(grandTxt, mL + cW - grandW, y, { lineBreak: false });
+
+    doc.end();
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
 });
 
 // ── GET /api/orders/:id ───────────────────────────────────────────────────────

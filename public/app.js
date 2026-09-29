@@ -293,6 +293,7 @@ async function loadOrders() {
     if (entrega) params.set('entrega', entrega);
     const qs = params.toString() ? `?${params}` : '';
     const orders = await api('GET', `/orders${qs}`);
+    state.lastOrdersList = orders;
     renderOrders(orders, q, modelo, entrega);
   } catch (err) { toast(err.message, 'error'); }
 }
@@ -419,6 +420,45 @@ $('btn-orders-modelo-clear').addEventListener('click', () => {
 });
 $('inp-orders-entrega-filter').addEventListener('change', loadOrders);
 $('btn-new-order').addEventListener('click', () => openOrderForm(null));
+
+// Exporta EXACTAMENTE lo que se ve en pantalla: reusa la última lista que trajo
+// loadOrders() (ya filtrada/ordenada por el backend con los mismos filtros
+// activos) y arma el mismo texto de filtros que muestra orders-modelo-info,
+// pasándolo a POST /api/orders/export-pdf, que lo dibuja con PDFKit en el
+// servidor (no HTML + window.print(), ver comentario en el backend).
+$('btn-orders-export-pdf').addEventListener('click', async () => {
+  const orders = state.lastOrdersList || [];
+  if (!orders.length) { toast('No hay pedidos para exportar con estos filtros', 'error'); return; }
+
+  const filterParts = [];
+  if (state.filterStatus !== 'Todos') filterParts.push(`Estado: ${state.filterStatus}`);
+  const searchVal = ($('inp-orders-search').value || '').trim();
+  if (searchVal) filterParts.push(`Búsqueda: "${searchVal}"`);
+  const modeloVal = ($('inp-orders-modelo').value || '').trim();
+  if (modeloVal) filterParts.push(`Modelo: "${modeloVal}"`);
+  const entregaVal = $('inp-orders-entrega-filter').value;
+  if (entregaVal === 'entregado') filterParts.push('Entrega: Entregado');
+  else if (entregaVal === 'no_entregado') filterParts.push('Entrega: No entregado');
+  filterParts.push('Orden: N° pedido (desc.)');
+  const subtitle = filterParts.join(' | ');
+
+  const btn = $('btn-orders-export-pdf');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/orders/export-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subtitle, orders }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'No se pudo generar el PDF');
+    }
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
 
 function showOrdersSubview(view) {
   $('list-view').classList.toggle('hidden', view !== 'list');
