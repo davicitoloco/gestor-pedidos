@@ -671,6 +671,12 @@ router.get('/:id/print-deposito', (req, res) => {
       `).all(d.id);
     }
 
+    // Bultos de la ÚLTIMA entrega registrada (no de todas — igual que el remito,
+    // que muestra los bultos de la entrega puntual que lo generó).
+    const lastDelivery = deliveries.length ? deliveries[deliveries.length - 1] : null;
+    const bultos    = lastDelivery ? db.prepare('SELECT * FROM delivery_bultos WHERE delivery_id = ? ORDER BY bulto_numero').all(lastDelivery.id) : [];
+    const pesoTotal = bultos.reduce((s, b) => s + (b.peso_kg || 0), 0);
+
     const deliveredMap = {};
     for (const d of deliveries)
       for (const di of d.items)
@@ -753,6 +759,11 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 .pending-section h3{color:#92400e;margin-bottom:10px}
 .pending-section table{margin-bottom:0}
 .pending-ok{font-weight:700;color:#166534;font-size:13px}
+.bultos-section{margin-top:24px;padding:14px 16px;border:1.5px solid #e2e8f0;background:#f8fafc;border-radius:8px}
+.bultos-section h3{margin-bottom:10px}
+.bultos-section table{margin-bottom:0}
+.bultos-totals{display:flex;gap:32px;margin-top:12px;font-size:12.5px}
+.bultos-totals strong{color:#1e293b}
 .notes-box{margin-top:20px;padding:14px 16px;background:#f8fafc;border-left:3px solid #475569;border-radius:0 6px 6px 0}
 .notes-box strong{display:block;margin-bottom:5px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
 .footer{margin-top:36px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
@@ -853,6 +864,30 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         </table>
       ` : `<p class="pending-ok">✓ Pedido completamente entregado — sin pendientes</p>`}
     </div>
+
+    ${bultos.length ? `
+    <div class="bultos-section">
+      <h3>Detalle de bultos</h3>
+      <table>
+        <thead><tr>
+          <th style="width:90px">Bulto N°</th>
+          <th class="r" style="width:110px">Peso (kg)</th>
+          <th>Productos que lo integran</th>
+        </tr></thead>
+        <tbody>
+          ${bultos.map(b => `<tr>
+            <td>${b.bulto_numero}</td>
+            <td class="r">${b.peso_kg != null ? b.peso_kg : '—'}</td>
+            <td>${esc(b.composicion) || '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="bultos-totals">
+        <span>Total de bultos: <strong>${bultos.length}</strong></span>
+        <span>Peso total: <strong>${pesoTotal > 0 ? pesoTotal.toLocaleString('es-AR', { maximumFractionDigits: 2 }) + ' kg' : '—'}</strong></span>
+      </div>
+    </div>
+    ` : ''}
 
     ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
     <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>
