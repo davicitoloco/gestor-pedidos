@@ -208,8 +208,37 @@ function cobroLabelPdf(o) {
 }
 router.post('/export-pdf', (req, res) => {
   try {
-    const { subtitle, orders } = req.body;
+    const { subtitle, orders, modelo } = req.body;
     if (!Array.isArray(orders)) return res.status(400).json({ error: 'Datos inválidos' });
+    const modeloText = (modelo || '').trim();
+
+    // Con filtro de modelo activo, "Unidades" y el importe del pie pasan a ser
+    // específicos de ese modelo por pedido (no el total del pedido completo).
+    // stats[order_id] = { qty, subtotal } — subtotal es neto de descuento de
+    // ítem, antes de los descuentos encadenados del pedido (se aplican abajo
+    // con order.discount..4, igual que el cálculo de "Total" de cada fila).
+    let modeloStats = {};
+    if (modeloText && orders.length) {
+      const ids = orders.map(o => o.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const rows = db.prepare(`
+        SELECT oi.order_id,
+          SUM(oi.quantity) AS qty,
+          SUM(oi.quantity * oi.unit_price * (1 - oi.discount / 100.0)) AS subtotal
+        FROM order_items oi
+        WHERE oi.order_id IN (${placeholders}) AND LOWER(oi.product_name) LIKE ?
+        GROUP BY oi.order_id
+      `).all(...ids, `%${modeloText.toLowerCase()}%`);
+      for (const r of rows) modeloStats[r.order_id] = { qty: r.qty, subtotal: r.subtotal };
+    }
+    function modeloTotalForOrder(o) {
+      const raw = (modeloStats[o.id] || {}).subtotal || 0;
+      return raw
+        * (1 - (o.discount  || 0) / 100)
+        * (1 - (o.discount2 || 0) / 100)
+        * (1 - (o.discount3 || 0) / 100)
+        * (1 - (o.discount4 || 0) / 100);
+    }
 
     const company = getCompanyName();
     const todayStr = fmtDate(new Date().toISOString().slice(0, 10));
@@ -224,17 +253,20 @@ router.post('/export-pdf', (req, res) => {
     const cW    = pageW - mL - mR;
 
     // N° | Cliente | Estado | Vendedor | Unidades | Total | Cobro | F. entrega | F. creación
-    const COL = {
-      numero:   { x: mL,       w: 50  },
-      cliente:  { x: mL + 50,  w: 150 },
-      estado:   { x: mL + 200, w: 100 },
-      vendedor: { x: mL + 300, w: 90  },
-      unidades: { x: mL + 390, w: 55  },
-      total:    { x: mL + 445, w: 90  },
-      cobro:    { x: mL + 535, w: 100 },
-      fentrega: { x: mL + 635, w: 55  },
-      fcreado:  { x: mL + 690, w: 72  },
-    };
+    // Con filtro de modelo activo, "Unidades" necesita más ancho para mostrar
+    // 'Unidades "<modelo>"' — se le resta a Cliente/Vendedor/Cobro para que la
+    // tabla siga sumando el mismo ancho total (cW).
+    const WIDTHS = modeloText
+      ? { numero: 50, cliente: 120, estado: 100, vendedor: 70, unidades: 140, total: 90, cobro: 65,  fentrega: 55, fcreado: 72 }
+      : { numero: 50, cliente: 150, estado: 100, vendedor: 90, unidades: 55,  total: 90, cobro: 100, fentrega: 55, fcreado: 72 };
+    const COL = {};
+    {
+      let x = mL;
+      for (const key of ['numero','cliente','estado','vendedor','unidades','total','cobro','fentrega','fcreado']) {
+        COL[key] = { x, w: WIDTHS[key] };
+        x += WIDTHS[key];
+      }
+    }
     const ROW_H = 16;
 
     // Recorta con "…" midiendo el ancho real (no por cantidad de caracteres).
@@ -255,7 +287,8 @@ router.post('/export-pdf', (req, res) => {
       doc.text('Cliente',      COL.cliente.x + 3,  y + 5, { width: COL.cliente.w - 3,  lineBreak: false });
       doc.text('Estado',       COL.estado.x + 3,   y + 5, { width: COL.estado.w - 3,   lineBreak: false });
       doc.text('Vendedor',     COL.vendedor.x + 3, y + 5, { width: COL.vendedor.w - 3, lineBreak: false });
-      doc.text('Unidades',     COL.unidades.x,     y + 5, { width: COL.unidades.w - 3, align: 'right', lineBreak: false });
+      const unidadesLabel = modeloText ? truncate(`Unidades "${modeloText}"`, COL.unidades.w - 3) : 'Unidades';
+      doc.text(unidadesLabel,  COL.unidades.x,     y + 5, { width: COL.unidades.w - 3, align: 'right', lineBreak: false });
       doc.text('Total',        COL.total.x,        y + 5, { width: COL.total.w - 3,    align: 'right', lineBreak: false });
       doc.text('Cobro',        COL.cobro.x + 3,    y + 5, { width: COL.cobro.w - 3,    lineBreak: false });
       doc.text('F. entrega',   COL.fentrega.x + 3, y + 5, { width: COL.fentrega.w - 3, lineBreak: false });
@@ -294,7 +327,8 @@ router.post('/export-pdf', (req, res) => {
       doc.text(truncate(o.customer_name, COL.cliente.w - 6),                      COL.cliente.x + 3,  y + 4, { lineBreak: false });
       doc.text(truncate(o.status, COL.estado.w - 6),                              COL.estado.x + 3,   y + 4, { lineBreak: false });
       doc.text(truncate(o.vendor_name || '—', COL.vendedor.w - 6),                COL.vendedor.x + 3, y + 4, { lineBreak: false });
-      const unidTxt = (o.total_units % 1 === 0 ? o.total_units : (o.total_units || 0).toFixed(2)).toString();
+      const unidsVal = modeloText ? ((modeloStats[o.id] || {}).qty || 0) : (o.total_units || 0);
+      const unidTxt = (unidsVal % 1 === 0 ? unidsVal : unidsVal.toFixed(2)).toString();
       doc.text(unidTxt, COL.unidades.x, y + 4, { width: COL.unidades.w - 3, align: 'right', lineBreak: false });
       const totTxt = fmtMoney(o.total);
       doc.font('Helvetica-Bold').text(totTxt, COL.total.x, y + 4, { width: COL.total.w - 3, align: 'right', lineBreak: false });
@@ -304,7 +338,7 @@ router.post('/export-pdf', (req, res) => {
 
       y += ROW_H;
       rowIdx++; totalOrders++;
-      grandTotal += (o.total || 0);
+      grandTotal += modeloText ? modeloTotalForOrder(o) : (o.total || 0);
     }
 
     // ── FOOTER ────────────────────────────────────────────────────────────────

@@ -448,7 +448,7 @@ $('btn-orders-export-pdf').addEventListener('click', async () => {
     const res = await fetch('/api/orders/export-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subtitle, orders }),
+      body: JSON.stringify({ subtitle, orders, modelo: modeloVal }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
