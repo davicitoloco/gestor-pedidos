@@ -2768,6 +2768,27 @@
         <label class="label">Notas de entrega (opcional)</label>
         <input type="text" id="inp-delivery-notes" class="input" placeholder="Ej: Entregado en depósito norte...">
       </div>
+
+      <div id="delivery-bultos-toggle" style="cursor:pointer;display:flex;align-items:center;gap:8px;margin-top:16px;padding:10px 0;border-top:1px solid var(--border)">
+        <span style="font-weight:600;font-size:.88rem">📦 Bultos para el transportista (opcional)</span>
+        <svg id="delivery-bultos-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto;transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div id="delivery-bultos-body" class="hidden">
+        <div class="field" style="max-width:160px">
+          <label class="label">Cantidad de bultos</label>
+          <input type="number" id="inp-delivery-bultos-count" class="input" min="0" step="1" value="0">
+        </div>
+        <div id="delivery-bultos-tbody-wrap" class="hidden" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);margin-top:10px">
+          <table class="table" style="font-size:.85rem">
+            <thead><tr>
+              <th style="width:60px">Bulto</th>
+              <th style="width:110px">Peso (kg)</th>
+              <th>Composición</th>
+            </tr></thead>
+            <tbody id="delivery-bultos-tbody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-delivery-cancel">Cancelar</button>

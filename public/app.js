@@ -3041,6 +3041,7 @@ function renderDeliveries(deliveries) {
         <span class="delivery-num">Entrega #${i + 1}</span>
         <span class="delivery-date">${fmtDateTime(d.created_at)}</span>
         ${d.remito ? `<a href="/api/remitos/${d.remito.id}/print" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:8px;padding:3px 9px;font-size:.78rem">${esc(d.remito.number)}</a>` : ''}
+        ${d.bultos && d.bultos.length ? `<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 9px;font-size:.78rem" onclick="toggleDeliveryBultos(${d.id})">📦 ${d.bultos.length} bulto${d.bultos.length !== 1 ? 's' : ''}</button>` : ''}
         ${isAdmin() ? `<button class="btn-icon btn-delete" style="margin-left:auto"
           onclick="deleteDelivery(${state.editingOrderId},${d.id},${i+1})" title="Cancelar esta entrega">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
@@ -3054,8 +3055,26 @@ function renderDeliveries(deliveries) {
         `).join('')}
       </div>
       ${d.notes ? `<div class="delivery-notes">${esc(d.notes)}</div>` : ''}
+      ${d.bultos && d.bultos.length ? `
+      <div id="delivery-bultos-detail-${d.id}" class="hidden" style="margin-top:8px;padding:8px 10px;background:var(--bg);border-radius:var(--radius-sm)">
+        <table class="table" style="font-size:.8rem;margin:0">
+          <thead><tr><th>Bulto</th><th style="text-align:right">Peso (kg)</th><th>Composición</th></tr></thead>
+          <tbody>
+            ${d.bultos.map(b => `<tr>
+              <td>${b.bulto_numero}</td>
+              <td style="text-align:right">${b.peso_kg != null ? b.peso_kg : '—'}</td>
+              <td>${esc(b.composicion) || '—'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
     </div>
   `).join('');
+}
+
+function toggleDeliveryBultos(deliveryId) {
+  const el = $(`delivery-bultos-detail-${deliveryId}`);
+  if (el) el.classList.toggle('hidden');
 }
 
 $('btn-register-delivery').addEventListener('click', () => openDeliveryModal());
@@ -3113,9 +3132,48 @@ async function openDeliveryModal(orderId) {
     $('inp-delivery-notes').value = '';
     $('chk-delivery-complete').checked = false;
     $('chk-delivery-complete').closest('label').classList.remove('active');
+    $('inp-delivery-bultos-count').value = 0;
+    $('delivery-bultos-tbody').innerHTML = '';
+    $('delivery-bultos-tbody-wrap').classList.add('hidden');
+    $('delivery-bultos-body').classList.add('hidden');
+    $('delivery-bultos-chevron').style.transform = '';
     $('delivery-modal').classList.remove('hidden');
   } catch (err) { toast(err.message, 'error'); }
 }
+
+$('delivery-bultos-toggle').addEventListener('click', () => {
+  const body = $('delivery-bultos-body');
+  const collapsed = body.classList.toggle('hidden');
+  $('delivery-bultos-chevron').style.transform = collapsed ? '' : 'rotate(180deg)';
+});
+
+// Genera/regenera las filas de la mini-tabla de bultos al cambiar la cantidad,
+// conservando lo ya tipeado en las filas que siguen existiendo.
+function renderDeliveryBultosRows(count) {
+  const tbody = $('delivery-bultos-tbody');
+  const prevValues = Array.from(tbody.querySelectorAll('tr')).map(tr => ({
+    peso: tr.querySelector('.bulto-peso-inp').value,
+    comp: tr.querySelector('.bulto-comp-inp').value,
+  }));
+  const rows = [];
+  for (let i = 1; i <= count; i++) {
+    const prev = prevValues[i - 1] || { peso: '', comp: '' };
+    rows.push(`
+      <tr>
+        <td>${i}</td>
+        <td><input type="number" class="input bulto-peso-inp" min="0" step="any" value="${esc(prev.peso)}" placeholder="—" style="width:90px;padding:5px 8px"></td>
+        <td><input type="text" class="input bulto-comp-inp" value="${esc(prev.comp)}" placeholder="Ej: 50 × Cerradura 115..." style="width:100%;padding:5px 8px"></td>
+      </tr>
+    `);
+  }
+  tbody.innerHTML = rows.join('');
+  $('delivery-bultos-tbody-wrap').classList.toggle('hidden', count <= 0);
+}
+
+$('inp-delivery-bultos-count').addEventListener('input', () => {
+  const count = Math.max(0, parseInt($('inp-delivery-bultos-count').value, 10) || 0);
+  renderDeliveryBultosRows(count);
+});
 
 $('chk-delivery-complete').addEventListener('change', function () {
   const checked = this.checked;
@@ -3138,12 +3196,22 @@ $('btn-delivery-confirm').addEventListener('click', async () => {
 
   if (!items.length) { toast('Ingresá al menos una cantidad mayor a 0', 'error'); return; }
 
+  const bultos = [];
+  document.querySelectorAll('#delivery-bultos-tbody tr').forEach((tr, i) => {
+    bultos.push({
+      bulto_numero: i + 1,
+      peso_kg:      tr.querySelector('.bulto-peso-inp').value,
+      composicion:  tr.querySelector('.bulto-comp-inp').value.trim(),
+    });
+  });
+
   const btn = $('btn-delivery-confirm');
   btn.disabled = true;
   try {
     await api('POST', `/orders/${orderId}/deliveries`, {
       notes: $('inp-delivery-notes').value.trim(),
-      items
+      items,
+      bultos
     });
     $('delivery-modal').classList.add('hidden');
     toast('Entrega registrada', 'success');

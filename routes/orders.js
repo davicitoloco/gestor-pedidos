@@ -1145,7 +1145,8 @@ router.get('/:id/deliveries', (req, res) => {
       `).all(d.id);
       const rem = db.prepare('SELECT id, remito_sequence FROM remitos WHERE delivery_id = ?').get(d.id);
       const remito = rem ? { id: rem.id, number: `R-${String(rem.remito_sequence).padStart(3,'0')}` } : null;
-      return { ...d, items, remito };
+      const bultos = db.prepare('SELECT * FROM delivery_bultos WHERE delivery_id = ? ORDER BY bulto_numero').all(d.id);
+      return { ...d, items, remito, bultos };
     });
     res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1162,10 +1163,20 @@ router.post('/:id/deliveries', (req, res) => {
     if (order.status === 'Entregado y cerrado')
       return res.status(400).json({ error: 'El pedido está cerrado, no se pueden registrar más entregas' });
 
-    const { notes, items } = req.body;
+    const { notes, items, bultos } = req.body;
     const validItems = (items || []).filter(i => parseFloat(i.quantity_delivered) > 0);
     if (!validItems.length)
       return res.status(400).json({ error: 'Ingresá al menos una cantidad mayor a 0' });
+
+    // Bultos para el transportista: totalmente opcionales. Si vienen, se guardan
+    // tal cual (peso/composición pueden quedar vacíos ítem por ítem).
+    const validBultos = (bultos || [])
+      .map(b => ({
+        bulto_numero: parseInt(b.bulto_numero, 10),
+        peso_kg:      b.peso_kg !== '' && b.peso_kg != null && !isNaN(parseFloat(b.peso_kg)) ? parseFloat(b.peso_kg) : null,
+        composicion:  (b.composicion || '').trim(),
+      }))
+      .filter(b => Number.isInteger(b.bulto_numero) && b.bulto_numero > 0);
 
     // No permitir entregar unidades que ya fueron canceladas (Cancelar unidades pendientes)
     const cancelledMap = {};
@@ -1194,6 +1205,13 @@ router.post('/:id/deliveries', (req, res) => {
       );
       for (const item of validItems)
         ins.run(delivId, item.order_item_id, parseFloat(item.quantity_delivered));
+
+      if (validBultos.length) {
+        const insBulto = db.prepare(
+          'INSERT INTO delivery_bultos (delivery_id, bulto_numero, peso_kg, composicion) VALUES (?, ?, ?, ?)'
+        );
+        for (const b of validBultos) insBulto.run(delivId, b.bulto_numero, b.peso_kg, b.composicion);
+      }
 
       // Descontar stock por entrega
       const ref = `Pedido #${String(order.order_sequence).padStart(3, '0')}`;

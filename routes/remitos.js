@@ -56,6 +56,10 @@ router.get('/:id/print', (req, res) => {
     const discAmt    = subtotal * (remito.order_discount || 0) / 100;
     const ivaExempt  = !!remito.iva_exempt;
 
+    // Hoja del transportista: solo si la entrega tiene bultos cargados.
+    const bultos     = db.prepare('SELECT * FROM delivery_bultos WHERE delivery_id = ? ORDER BY bulto_numero').all(remito.delivery_id);
+    const pesoTotal  = bultos.reduce((s, b) => s + (b.peso_kg || 0), 0);
+
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>${esc(remito.remito_number)} — ${esc(company)}</title>
 <style>
@@ -90,6 +94,12 @@ tbody tr:nth-child(even) td{background:#f8fafc}
 .firma-row{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:50px}
 .firma-box{border-top:1px solid #94a3b8;padding-top:8px;font-size:11px;color:#64748b;text-align:center}
 .footer{margin-top:32px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
+.page-bultos{page-break-before:always}
+.bultos-title{font-size:18px;font-weight:700;color:#1e293b;margin-bottom:4px}
+.bultos-subtitle{font-size:12px;color:#64748b;margin-bottom:22px}
+.bultos-totals{display:flex;gap:40px;margin:18px 0 10px;font-size:13px}
+.bultos-totals strong{color:#1e293b}
+.firma-row-transporte{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:60px}
 @media print{.no-print{display:none}body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.page{padding:20px}}
 </style></head><body>
 <div class="page">
@@ -150,6 +160,36 @@ tbody tr:nth-child(even) td{background:#f8fafc}
   </div>
   <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>
 </div>
+
+${bultos.length ? `
+<div class="page page-bultos">
+  <div class="bultos-title">DETALLE DE BULTOS — ${esc(remito.customer_name)}</div>
+  <div class="bultos-subtitle">Remito ${esc(remito.remito_number)} — Fecha ${fmtDateTime(remito.created_at)}</div>
+  <table>
+    <thead><tr>
+      <th style="width:90px">Bulto N°</th>
+      <th class="r" style="width:110px">Peso (kg)</th>
+      <th>Productos que lo integran</th>
+    </tr></thead>
+    <tbody>
+      ${bultos.map(b => `<tr>
+        <td>${b.bulto_numero}</td>
+        <td class="r">${b.peso_kg != null ? b.peso_kg : '—'}</td>
+        <td>${esc(b.composicion) || '—'}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  <div class="bultos-totals">
+    <span>Total de bultos: <strong>${bultos.length}</strong></span>
+    <span>Peso total: <strong>${pesoTotal > 0 ? pesoTotal.toLocaleString('es-AR', { maximumFractionDigits: 2 }) + ' kg' : '—'}</strong></span>
+  </div>
+  <div class="firma-row-transporte">
+    <div class="firma-box">Firma del transportista</div>
+    <div class="firma-box">Aclaración</div>
+    <div class="firma-box">DNI</div>
+  </div>
+</div>
+` : ''}
 <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));</script>
 </body></html>`;
 

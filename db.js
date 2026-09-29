@@ -83,6 +83,14 @@ db.exec(`
     order_item_id INTEGER NOT NULL REFERENCES order_items(id),
     quantity_delivered REAL NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS delivery_bultos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    delivery_id INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+    bulto_numero INTEGER NOT NULL,
+    peso_kg REAL,
+    composicion TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
   CREATE TABLE IF NOT EXISTS stock_movements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id INTEGER NOT NULL REFERENCES products(id),
