@@ -820,12 +820,9 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         </tr>
       </tfoot>
     </table>
-  </div>
-</div>
 
-<div class="page page-break">
-  <div class="watermark">USO INTERNO — DEPÓSITO</div>
-  <div class="content">
+    ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
+
     ${deliveries.length ? `
     <div class="delivery-section">
       <h3>Entregas realizadas</h3>
@@ -872,7 +869,14 @@ tbody tr:nth-child(even) td{background:#f8fafc}
       ` : `<p class="pending-ok">✓ Pedido completamente entregado — sin pendientes</p>`}
     </div>
 
-    ${bultos.length ? `
+    ${bultos.length ? '' : `<div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>`}
+  </div>
+</div>
+
+${bultos.length ? `
+<div class="page page-break">
+  <div class="watermark">USO INTERNO — DEPÓSITO</div>
+  <div class="content">
     <div class="bultos-section">
       <h3>Detalle de bultos</h3>
       <table>
@@ -894,12 +898,10 @@ tbody tr:nth-child(even) td{background:#f8fafc}
         <span>Peso total: <strong>${pesoTotal > 0 ? pesoTotal.toLocaleString('es-AR', { maximumFractionDigits: 2 }) + ' kg' : '—'}</strong></span>
       </div>
     </div>
-    ` : ''}
-
-    ${order.notes ? `<div class="notes-box"><strong>Observaciones</strong>${esc(order.notes)}</div>` : ''}
     <div class="footer">Generado el ${fmtDateTime(new Date().toISOString().replace('T',' ').substring(0,19))} — ${esc(company)}</div>
   </div>
 </div>
+` : ''}
 <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));</script>
 </body></html>`;
 
